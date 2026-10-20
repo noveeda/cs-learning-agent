@@ -14,28 +14,46 @@ import {
 } from "lucide-react";
 
 const upcoming = [
-  { label: "대시보드", icon: Home },
-  { label: "로드맵", icon: Map },
   { label: "문제 풀이", icon: Code2 },
   { label: "에이전트 기록", icon: History },
   { label: "복습 노트", icon: FileText },
 ];
 
-function Navigation({ onLearning }: { onLearning?: () => void }) {
+function Navigation({
+  page,
+  busy,
+  onNavigate,
+}: {
+  page: "roadmap" | "learn";
+  busy: boolean;
+  onNavigate: (page: "roadmap" | "learn") => void;
+}) {
   return (
     <nav className="navigation" aria-label="주 메뉴">
-      {upcoming.slice(0, 2).map(({ label, icon: Icon }) => (
-        <button key={label} disabled>
-          <Icon size={17} aria-hidden="true" />
-          <span>{label}</span>
-          <small>준비 중</small>
-        </button>
-      ))}
-      <button className="nav-current" aria-current="page" onClick={onLearning}>
+      <button disabled>
+        <Home size={17} aria-hidden="true" />
+        <span>대시보드</span>
+        <small>준비 중</small>
+      </button>
+      <button
+        className={page === "roadmap" ? "nav-current" : ""}
+        aria-current={page === "roadmap" ? "page" : undefined}
+        disabled={busy}
+        onClick={() => onNavigate("roadmap")}
+      >
+        <Map size={17} aria-hidden="true" />
+        <span>로드맵</span>
+      </button>
+      <button
+        className={page === "learn" ? "nav-current" : ""}
+        aria-current={page === "learn" ? "page" : undefined}
+        disabled={busy}
+        onClick={() => onNavigate("learn")}
+      >
         <BookOpen size={17} aria-hidden="true" />
         <span>학습하기</span>
       </button>
-      {upcoming.slice(2).map(({ label, icon: Icon }) => (
+      {upcoming.map(({ label, icon: Icon }) => (
         <button key={label} disabled>
           <Icon size={17} aria-hidden="true" />
           <span>{label}</span>
@@ -68,12 +86,16 @@ export function LearningShell({
   busy,
   onNew,
   onAsk,
+  page,
+  onNavigate,
 }: {
   children: ReactNode;
   headerExtra?: ReactNode;
   busy: boolean;
   onNew: () => void;
   onAsk: () => void;
+  page: "roadmap" | "learn";
+  onNavigate: (page: "roadmap" | "learn") => void;
 }) {
   const menu = useRef<HTMLDialogElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -81,7 +103,7 @@ export function LearningShell({
     <div className="app">
       <aside className="sidebar">
         <Brand />
-        <Navigation />
+        <Navigation page={page} busy={busy} onNavigate={onNavigate} />
         <div className="sidebar-footer">
           <span className="local-dot" /> 로컬 AI 학습 공간
         </div>
@@ -107,7 +129,14 @@ export function LearningShell({
               <X size={20} />
             </button>
           </div>
-          <Navigation onLearning={() => menu.current?.close()} />
+          <Navigation
+            page={page}
+            busy={busy}
+            onNavigate={(next) => {
+              menu.current?.close();
+              onNavigate(next);
+            }}
+          />
         </div>
       </dialog>
       <div className="workspace">
@@ -123,21 +152,29 @@ export function LearningShell({
             <Menu size={20} />
           </button>
           <div className="page-heading">
-            <h1>개념 학습</h1>
-            <p>개념을 그림으로 연결해요</p>
+            <h1>{page === "roadmap" ? "로드맵" : "개념 학습"}</h1>
+            <p>
+              {page === "roadmap"
+                ? "연결된 개념을 따라 학습해요"
+                : "개념을 그림으로 연결해요"}
+            </p>
           </div>
           <div className="header-actions">
             {headerExtra}
-            <button className="button secondary ask-button" onClick={onAsk}>
-              에이전트에게 질문하기
-            </button>
-            <button
-              className="button secondary"
-              disabled={busy}
-              onClick={onNew}
-            >
-              <Plus size={16} aria-hidden="true" />새 학습
-            </button>
+            {page === "learn" && (
+              <>
+                <button className="button secondary ask-button" onClick={onAsk}>
+                  에이전트에게 질문하기
+                </button>
+                <button
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={onNew}
+                >
+                  <Plus size={16} aria-hidden="true" />새 학습
+                </button>
+              </>
+            )}
           </div>
         </header>
         {children}
