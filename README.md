@@ -252,6 +252,19 @@ AI core는 `/tokenize`로 시스템 지시·도구 정의·문답·도식 정보
 git diff --check
 ```
 
+UI 회귀 테스트는 별도로 실행합니다. API 응답을 격리해 메뉴, 대화·도식 복구, 확대·다운로드,
+모바일 대화상자, 오류 후 재시도를 확인하며 GPU 모델은 필요하지 않습니다.
+
+```bash
+cd frontend
+npx playwright install chromium  # 최초 1회 브라우저 설치
+npm run test:ui
+```
+
+테스트는 전용 Vite 서버(127.0.0.1:5197)를 시작하고 종료합니다. 해당 포트를 비워 두세요.
+이미 설치한 Chromium을 사용하려면 `BROWSER_EXECUTABLE_PATH=/절대/경로/chrome npm run test:ui`로 실행합니다.
+기본 CI의 `Frontend` 검사는 기존 API 테스트와 빌드를 실행하며 브라우저 테스트는 별도 실행입니다.
+
 [CI 설정](.github/workflows/ci.yml)은 main 대상 PR과 main push에서
 `AI core`, `Backend`, `Frontend` 검사를 실행합니다. [GitHub Actions 결과](https://github.com/noveeda/cs-learning-agent/actions)를 확인할 수 있습니다.
 CI는 GPU 모델을 다운로드하거나 실행하지 않으며 답변의 CS 정확성까지 보장하지 않습니다.
@@ -270,7 +283,7 @@ CI는 GPU 모델을 다운로드하거나 실행하지 않으며 답변의 CS �
 - 대화 저장은 단일 백엔드 프로세스용 로컬 JSON 방식입니다. AI core는 프로세스당 한 요청을 처리합니다.
 - 도식은 구조화된 노드·간선을 SVG로 그립니다. 간단한 격자 배치이며 복잡한 간선 교차나 설명의 의미적 정확성을 보장하지 않습니다.
 - 브라우저는 SVG를 이미지로 표시합니다. 한글 글꼴은 필요한 글자만 SVG에 포함하며 [폰트 라이선스](ai-core/serving/assets/NotoSansKR-OFL.txt)를 동봉합니다.
-- 현재 UI는 추후 디자인으로 교체할 예정입니다. 통신 코드와 스트리밍·복구 동작은 유지 대상으로 검수합니다.
+- 현재 UI는 디자인 시안에 맞춰 공통 레이아웃과 개념 학습 화면을 적용한 단계입니다. 미구현 메뉴는 준비 중으로 표시합니다. 모바일에서는 메뉴를 접고 도식을 별도 대화상자로 표시하며, 통신 코드와 스트리밍·복구 동작은 유지 대상으로 검수합니다.
 - 모델 실행 환경의 의존성 잠금 파일과 자동 배포 구성은 아직 없습니다. 위 모델 실행 예시는 새 GPU 환경에서 재검증이 필요합니다.
 
 작업은 논의·결정 후 별도 브랜치에서 진행하고 테스트·PR·사용자 검수·명시적 승인을 거쳐 병합합니다.
