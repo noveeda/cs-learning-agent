@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from serving.api import app, BUSY
 from serving.curriculum import (DraftRequest, JobState, Unit, UnitPlan, Lesson,
-    OutlinePage, UnitContent, Findings, FinalReview, Issue, Objectives, ModelGateway, CapacityError, step)
+    OutlinePage, UnitContent, Findings, FinalReview, Issue, Objectives, ModelGateway, CapacityError, ReviewGuard, ReviewInterrupted, step)
 
 INPUT = {'topic': '페이징', 'goal': '취업 준비', 'level': '용어만 알아요'}
 PLAN = UnitPlan(title='주소 공간', scope='주소 공간과 변환', topics=['페이지', '주소 변환'])
@@ -146,9 +146,9 @@ class CurriculumTests(unittest.TestCase):
         client = Mock()
         client.chat.completions.create.return_value = SimpleNamespace(
             usage=SimpleNamespace(prompt_tokens=200, completion_tokens=20),
-            choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(content='{"issues":[]}'))])
+            choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(content='{"objectives":["목표"]}'))])
         gateway = ModelGateway(client, http, 'model', 1000)
-        result = gateway.ask(state, '검토', Findings, {'required': 'keep'}, [other])
+        result = gateway.ask(state, '생성', Objectives, {'required': 'keep'}, [other])
         payload = client.chat.completions.create.call_args.kwargs
         self.assertEqual(payload['max_tokens'], 544)
         self.assertEqual(payload['messages'], http.post.call_args.kwargs['json']['messages'])
@@ -158,10 +158,84 @@ class CurriculumTests(unittest.TestCase):
         self.assertNotIn('lessons', content['other_units'][0])
         self.assertEqual(other.model_dump(), before)
         self.assertEqual(state.compactions, 1)
-        self.assertEqual(result.issues, [])
+        self.assertEqual(result.objectives, ['목표'])
         client.chat.completions.create.return_value.choices[0].finish_reason = 'length'
         http.post.side_effect = None; http.post.return_value = Mock(json=lambda: {'count': 200})
-        with self.assertRaises(CapacityError): gateway.ask(state, '검토', Findings, {}, [])
+        with self.assertRaises(CapacityError): gateway.ask(state, '생성', Objectives, {}, [])
+
+
+    def test_review_guard_repetition_across_chunk_boundaries(self):
+        for text in (' ' * 256, '반복되는 긴 문장입니다. ' * 30,
+                     '{"issues":["같은 문제", "같은 문제"]}'):
+            guard = ReviewGuard()
+            with self.assertRaises(ReviewInterrupted):
+                for char in text:
+                    guard.feed(char)
+        guard = ReviewGuard()
+        valid = '{"issues":[{"unit_id":"u1","reason":"용어 수정"},{"unit_id":"u2","reason":"용어 수정"}]}'
+        guard.feed(valid)
+        self.assertEqual(guard.text, valid)
+
+    def review_gateway(self, chunks):
+        client, http = Mock(), Mock()
+        stream = Mock()
+        stream.__enter__ = Mock(return_value=iter(chunks))
+        stream.__exit__ = Mock(return_value=False)
+        client.chat.completions.create.return_value = stream
+        http.post.return_value = Mock(json=lambda: {'count': 100})
+        return ModelGateway(client, http, 'model', 32768), stream
+
+    def chunk(self, text='', finish=None, usage=None):
+        return SimpleNamespace(usage=usage, choices=[SimpleNamespace(
+            delta=SimpleNamespace(content=text), finish_reason=finish)])
+
+    def test_review_stream_usage_and_no_feedback_in_review_input(self):
+        chunks = [self.chunk('{"issues":'), self.chunk('[]}', 'stop'),
+                  self.chunk(usage=SimpleNamespace(prompt_tokens=100, completion_tokens=8))]
+        gateway, stream = self.review_gateway(chunks)
+        other = unit(); other.feedback = ['심화 설명 추가 요구']
+        state = JobState(request=DraftRequest(**INPUT))
+        result = gateway.ask(state, '검토', Findings, {}, [other])
+        self.assertEqual(result.issues, [])
+        self.assertEqual(state.usage['output_tokens'], 8)
+        self.assertEqual(state.usage['streamed_chars'], 13)
+        args = gateway.client.chat.completions.create.call_args.kwargs
+        self.assertTrue(args['stream'])
+        self.assertEqual(args['stream_options'], {'include_usage': True})
+        self.assertNotIn('feedback', json.loads(args['messages'][1]['content'])['other_units'][0])
+        self.assertEqual(other.feedback, ['심화 설명 추가 요구'])
+        stream.__exit__.assert_called_once()
+
+    def test_review_repetition_closes_stream_and_preserves_checkpoint(self):
+        gateway, stream = self.review_gateway([self.chunk('{"issues":["동일 문제",'), self.chunk('"동일 문제"]}')])
+        u = unit(); u.lessons = LESSONS; u.reviewed = True
+        state = JobState(request=DraftRequest(**INPUT), stage='final', units=[u])
+        result = step(state, gateway)
+        self.assertEqual(result.stage, 'final')
+        self.assertEqual(result.units, state.units)
+        self.assertEqual(result.retries, 1)
+        self.assertIn('반복', result.message)
+        self.assertGreater(result.usage['streamed_chars'], 0)
+        stream.__exit__.assert_called_once()
+
+    def test_review_stream_length_disconnect_and_deadline_do_not_complete(self):
+        for chunks, error in [([self.chunk('{"issues":', 'length')], CapacityError),
+                              ([self.chunk('{"issues":')], ValueError)]:
+            gateway, stream = self.review_gateway(chunks)
+            with self.assertRaises(error):
+                gateway.ask(JobState(request=DraftRequest(**INPUT)), '검토', Findings, {}, [])
+            stream.__exit__.assert_called_once()
+        gateway, stream = self.review_gateway([self.chunk('{"issues":[]}','stop')])
+        with patch('serving.curriculum.time.monotonic', side_effect=[0, 301, 301]):
+            with self.assertRaises(ReviewInterrupted):
+                gateway.ask(JobState(request=DraftRequest(**INPUT)), '검토', Findings, {}, [])
+        stream.__exit__.assert_called_once()
+
+    def test_long_nonrepeating_review_is_not_truncated(self):
+        report = json.dumps({'issues': [f'고유한 검토 항목 {i}' for i in range(500)]}, ensure_ascii=False)
+        gateway, stream = self.review_gateway([self.chunk(report, 'stop')])
+        result = gateway.ask(JobState(request=DraftRequest(**INPUT)), '검토', Findings, {}, [])
+        self.assertEqual(len(result.issues), 500)
 
     @patch('serving.api.OpenAI')
     @patch('serving.api.step')
