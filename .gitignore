@@ -61,3 +61,15 @@ htmlcov/
 
 # Keep source, Gradle Wrapper, document assets and PDFs trackable.
 /codex/
+# Frontend dependencies and build output
+/frontend/node_modules/
+/frontend/dist/
+/frontend/*.tsbuildinfo
+
+# Server-side conversation records
+/backend/data/
+/data/conversations/
+
+# Local diagnostic and model-response captures
+/0.5
+/ai-core/answer.txt
