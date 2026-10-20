@@ -1,0 +1,26 @@
+:root {
+  font-family: 'Noto Sans KR', sans-serif;
+  font-synthesis: none;
+  --color-background: #f6f6f4;
+  --color-surface: #fff;
+  --color-text: #242620;
+  --color-muted: #6c7068;
+  --color-border: #e3e5df;
+  --color-primary: #2e58e8;
+  --color-primary-hover: #2446bf;
+  --color-primary-soft: #e9eeff;
+  --color-success: #23735b;
+  --color-error: #a23230;
+  --radius-card: 16px;
+  --radius-control: 8px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --text-small: 12px;
+  --text-body: 14px;
+  color: var(--color-text);
+  background: var(--color-background);
+}

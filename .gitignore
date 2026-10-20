@@ -74,4 +74,8 @@ htmlcov/
 /0.5
 /ai-core/answer.txt
 
+# Browser test outputs
+/frontend/test-results/
+/frontend/playwright-report/
+
 /data/curricula/
