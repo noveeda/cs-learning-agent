@@ -60,6 +60,39 @@ AI의 평가만으로 이해를 확정하거나 단일 정답만으로 학습 �
 오래된 대화 요약·검색·장기 기억과 이미지 생성 모델 연동도 현재 미구현이며,
 핵심 학습 흐름과 별도로 필요성과 우선순위를 검토할 항목입니다.
 
+## 기술 스택
+
+현재 main의 의존성과 구현을 기준으로 정리했습니다. 버전 범위는 각 영역의 의존성 파일을 기준으로 하며,
+모델 서버는 앱과 분리된 실행 환경입니다.
+
+| 영역 | 프레임워크·라이브러리 / 기술 | 용도 |
+| --- | --- | --- |
+| 프런트엔드 | React 19, React DOM 19, TypeScript 5 (`^5.7.0`) | 학습 화면과 UI 상태 관리, 타입 검사 |
+| 프런트엔드 | react-markdown 10, lucide-react 0.468 계열 | 답변 Markdown 표시, UI 아이콘 |
+| 프런트엔드 개발·빌드 | Vite 6 (`^6.1.0`), Node.js 24, npm | 로컬 개발 서버, API 프록시, 웹 번들 빌드와 의존성 관리 |
+| 백엔드 | Java 21, Spring Boot 4.1.1, Spring Web MVC | REST API, 대화 저장·복구, AI core 응답 스트림 중계 |
+| 백엔드 | Jackson, Java HttpClient | 대화·이벤트 JSON 처리, AI core HTTP 요청 |
+| 백엔드 빌드 | Gradle Wrapper 9.8.1, Spring Dependency Management 플러그인 1.1.7 | 의존성 관리, 테스트와 실행 JAR 빌드 |
+| AI core | Python 3.12, FastAPI, Uvicorn | 에이전트 API와 스트리밍 응답 제공, ASGI 서버 실행 |
+| AI core | OpenAI Python SDK, HTTPX | vLLM의 OpenAI 호환 API 호출, 모델 정보·토큰 수 조회 |
+| AI core | Pydantic 2, fontTools(woff 지원) | 요청·도식 구조 검증, SVG에 포함할 한글 폰트 부분 집합 생성 |
+| 모델 추론 | vLLM 0.32.0, Qwen3.5-27B AWQ 4bit | 별도 GPU 환경에서 언어 모델 추론과 도구 호출 제공 |
+| 저장·시각화 | 로컬 JSON 파일, SVG, 브라우저 localStorage | 대화·도식 구조 저장, 도식 표시, 현재 대화 ID 유지 |
+| 테스트 | Python unittest·unittest.mock, FastAPI TestClient | AI core의 모델 호출·문맥·도식·API 테스트 |
+| 테스트 | JUnit Jupiter, Mockito, Spring Boot Test | 백엔드 API·저장소·스트리밍 테스트 |
+| 테스트 | Node.js 내장 테스트 러너 | 프런트엔드 통신 회귀 테스트 |
+| CI | GitHub Actions | main 대상 PR과 main push에서 영역별 테스트·빌드 실행 |
+
+백엔드에는 LangChain4j OpenAI Spring Boot 4 Starter와 Lombok도 의존성으로 선언되어 있습니다.
+LangChain4j는 현재 `/api/chat` 요청 경로에서 사용하지 않으며, 해당 경로의 모델 호출은 Python AI core가 담당합니다.
+대화 저장은 로컬 JSON 파일 방식이며, 현재 데이터베이스나 ORM은 사용하지 않습니다.
+
+의존성의 구체적인 버전과 실행 설정은 다음 파일에서 확인할 수 있습니다.
+
+- [프런트엔드 의존성·스크립트](frontend/package.json), [npm 잠금 파일](frontend/package-lock.json)
+- [백엔드 의존성·빌드](backend/build.gradle), [Gradle Wrapper](backend/gradle/wrapper/gradle-wrapper.properties)
+- [AI core 의존성](ai-core/requirements-web.txt), [CI 설정](.github/workflows/ci.yml)
+
 ## 빠른 실행
 
 ### 준비 환경
