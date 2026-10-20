@@ -1,46 +1,37 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { requestCurriculum } from '../src/curriculum.ts';
+import { createCurriculum, loadCurriculum, stepCurriculum } from '../src/curriculum.ts';
 const input = { topic: '페이징', goal: '취업 준비', level: '기초' };
-const draft = { title: '페이징', lessons: [
-  { title: '페이지', objectives: ['프레임과 구분한다'] },
-  { title: '주소 변환', objectives: ['변환을 설명한다'] },
-] };
-test('sends learning input and returns a structured draft', async t => {
+const job = { id: 'a'.repeat(32), version: 0, state: { request: input, stage: 'outline', units: [] } };
+test('creates a job, restores it and advances using a checkpoint version', async t => {
+  const seen = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {
-    assert.equal(url, '/api/curriculum/draft');
-    assert.deepEqual(JSON.parse(options.body), input);
-    return Response.json(draft);
+    seen.push([url, options.body && JSON.parse(options.body)]);
+    return Response.json(job);
   });
-  assert.deepEqual(await requestCurriculum(input), draft);
+  assert.deepEqual(await createCurriculum(input), job);
+  assert.deepEqual(await loadCurriculum(job.id), job);
+  assert.deepEqual(await stepCurriculum(job), job);
+  assert.deepEqual(seen, [['/api/curriculum/draft', input], [`/api/curriculum/draft/${job.id}`, undefined],
+    [`/api/curriculum/draft/${job.id}/step`, { version: 0 }]]);
 });
-test('failed generation can be retried without saving state', async t => {
+test('failed step can retry with the same version', async t => {
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => ++calls === 1
-    ? new Response('private error', { status: 503 }) : Response.json(draft));
-  await assert.rejects(requestCurriculum(input), /다른 요청/);
-  assert.deepEqual(await requestCurriculum(input), draft);
+    ? new Response('private error', { status: 503 }) : Response.json(job));
+  await assert.rejects(stepCurriculum(job), /다른 요청/);
+  assert.deepEqual(await stepCurriculum(job), job);
 });
-test('rejects malformed successful responses', async t => {
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ title: '빈 초안', lessons: [] }));
-  await assert.rejects(requestCurriculum(input), /형식/);
+test('rejects malformed checkpoint', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ ...job, state: { ...job.state, stage: 'unknown' } }));
+  await assert.rejects(loadCurriculum(job.id), /형식/);
 });
-
-test('network failures show a recoverable Korean message', async t => {
+test('network failures preserve a recoverable user message', async t => {
   t.mock.method(globalThis, 'fetch', async () => { throw new TypeError('Failed to fetch'); });
-  await assert.rejects(requestCurriculum(input), /서버에 연결하지 못했습니다/);
+  await assert.rejects(stepCurriculum(job), /이어서 생성/);
 });
 
-test('accepts one lesson and outputs beyond the old lesson and objective caps', async t => {
-  for (const count of [1, 7]) {
-    const generated = { title: '학습', lessons: Array.from({ length: count }, (_, i) => ({
-      title: `소단원 ${i}`, objectives: ['목표 A', '목표 B', '목표 C', '목표 D'],
-    })) };
-    t.mock.method(globalThis, 'fetch', async () => Response.json(generated));
-    assert.deepEqual(await requestCurriculum(input), generated);
-  }
-});
-test('still rejects lessons without learning objectives', async t => {
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ title: '학습', lessons: [{ title: '소단원', objectives: [] }] }));
-  await assert.rejects(requestCurriculum(input), /형식/);
+test('rejects malformed units instead of crashing the result screen', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ ...job, state: { ...job.state, units: [{ id: 'u1' }] } }));
+  await assert.rejects(loadCurriculum(job.id), /형식/);
 });

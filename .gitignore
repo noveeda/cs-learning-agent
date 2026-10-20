@@ -73,3 +73,5 @@ htmlcov/
 # Local diagnostic and model-response captures
 /0.5
 /ai-core/answer.txt
+
+/data/curricula/
