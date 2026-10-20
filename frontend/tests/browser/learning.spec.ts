@@ -36,9 +36,9 @@ test("준비 중 메뉴와 추천 질문, 모바일 메뉴의 닫기·초점 복
   await mockConversation(page);
   await page.goto("/");
   await expect(page.getByLabel("질문", { exact: true })).toBeEnabled();
-  await expect(page.locator(".sidebar button:disabled")).toHaveCount(6);
+  await expect(page.locator(".sidebar button:disabled")).toHaveCount(5);
   await expect(page.locator(".sidebar small")).toHaveText(
-    Array(6).fill("준비 중"),
+    Array(5).fill("준비 중"),
   );
   await page
     .getByRole("button", {
@@ -53,7 +53,7 @@ test("준비 중 메뉴와 추천 질문, 모바일 메뉴의 닫기·초점 복
   await page.getByRole("button", { name: "메뉴 열기" }).click();
   const menu = page.getByRole("dialog", { name: "주 메뉴", exact: true });
   await expect(menu).toBeVisible();
-  await expect(menu.locator("button:disabled")).toHaveCount(6);
+  await expect(menu.locator("button:disabled")).toHaveCount(5);
   await page.keyboard.press("Escape");
   await expect(menu).not.toBeVisible();
   await expect(page.getByRole("button", { name: "메뉴 열기" })).toBeFocused();
