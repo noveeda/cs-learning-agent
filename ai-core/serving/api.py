@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from openai import OpenAI
 from pydantic import BaseModel, Field, model_validator
 
-from serving.curriculum import DraftRequest, CurriculumDraft, generate_draft
+from serving.curriculum import JobState, ModelGateway, step
 from serving.agent import run_agent
 from serving.context import token_counter
 from serving.tools.diagram import Diagram
@@ -99,17 +99,21 @@ def artifact(artifact_id: str):
     })
 
 
-@app.post('/curriculum/draft', response_model=CurriculumDraft)
-def curriculum_draft(body: DraftRequest):
+@app.post('/curriculum/step', response_model=JobState)
+def curriculum_step(body: JobState):
     if not BUSY.acquire(blocking=False):
         raise HTTPException(503, '다른 요청을 처리 중입니다. 잠시 후 다시 시도해 주세요.')
     try:
         with OpenAI(base_url=os.getenv('VLLM_BASE_URL', 'http://127.0.0.1:8000/v1'),
-                    api_key=os.getenv('VLLM_API_KEY', 'not-needed'), timeout=120, max_retries=0) as client:
-            model = os.getenv('VLLM_MODEL') or client.models.list().data[0].id
-            return generate_draft(client, model, body)
+                    api_key=os.getenv('VLLM_API_KEY', 'not-needed'), timeout=300, max_retries=0) as client:
+            models = client.models.list().data
+            model = os.getenv('VLLM_MODEL') or models[0].id
+            limit = next(m for m in models if m.id == model).model_extra['max_model_len']
+            with httpx.Client(base_url=str(client.base_url).removesuffix('/').removesuffix('/v1'),
+                              headers={'Authorization': f'Bearer {client.api_key}'}, timeout=30) as http:
+                return step(body, ModelGateway(client, http, model, int(limit)))
     except Exception:
-        logging.exception('Curriculum generation failed')
-        raise HTTPException(502, '초안을 생성하지 못했습니다. 다시 시도해 주세요.') from None
+        logging.exception('Curriculum step failed')
+        raise HTTPException(502, '모델 서버에 연결하지 못했습니다. 저장된 작업을 이어서 재시도해 주세요.') from None
     finally:
         BUSY.release()
