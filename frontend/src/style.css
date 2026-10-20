@@ -4,3 +4,5 @@
 .diagram-stage.zoomed{align-items:flex-start}.diagram-stage.zoomed img{width:940px;min-width:940px;max-height:none}.panel-footer>button{padding:10px 13px;border:1px solid #dfe5ee;border-radius:8px;color:#4d617e}
 
 .streaming{max-width:680px;margin:0 auto 24px}
+
+.curriculum-container{overflow:auto;flex:1;min-height:0}.curriculum{max-width:760px;margin:32px auto;padding:0 24px 32px;line-height:1.8}.curriculum h1{font-size:26px}.curriculum>p{font-size:13px;color:#637083}.curriculum-field{margin-bottom:18px}.curriculum label{display:block;font-size:14px}.curriculum textarea{border:1px solid #dce1e8;border-radius:8px;padding:10px;margin-top:6px}.curriculum textarea:focus-visible{outline:3px solid #8daee3;outline-offset:2px}.curriculum button[type=submit]{background:#3e639d;color:#fff;border-radius:8px;padding:10px 18px}.curriculum article{overflow-wrap:anywhere}.curriculum article h3{font-size:16px}.header-right .curriculum-toggle{width:auto;font-size:12px;white-space:nowrap}@media(max-width:480px){.header-right{gap:8px}.header-right .local-label{display:none}.curriculum{padding:0 16px 24px}}

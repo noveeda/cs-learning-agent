@@ -4,8 +4,10 @@ import Markdown from 'react-markdown';
 import { ArrowUp, Plus, MessageSquare, ArrowUpRight, X, Download, PanelRightOpen, Check, LoaderCircle, Layers } from 'lucide-react';
 import { requestChat, loadConversation, newConversation, type Artifact, type Message, type AgentEvent } from './api';
 import './style.css';
+import { CurriculumDraft } from './CurriculumDraft';
 
 function App() {
+  const [curriculumOpen, setCurriculumOpen] = useState(false);
   const [conversationId, setConversationId] = useState(() => localStorage.getItem('cs-conversation') || newConversation());
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -81,8 +83,12 @@ function App() {
   const suggestions = ['가상 메모리와 페이징을 그림으로 설명해줘', 'BFS와 DFS는 어떻게 달라?', 'TCP 연결 과정을 도식으로 보여줘'];
   return <div className="app">
     <nav className="rail" aria-label="주 메뉴"><div className="brand-mark" aria-label="CS Studio"><Layers aria-hidden="true" size={23}/></div><button title="새 학습" aria-label="새 학습" disabled={busy} onClick={() => {setConversationId(newConversation());setContextNotice('');setMessages([]);setArtifact(null);setPanelOpen(false);setError('');setQuestion(''); input.current?.focus();}}><Plus aria-hidden="true"/></button><div className="rail-active" title="학습 대화"><MessageSquare aria-hidden="true" size={20}/></div><span className="rail-bottom">CS</span></nav>
-    <div className="workspace"><header><a className="wordmark" href="/">CS Studio<span>생각을 연결하는 학습</span></a><div className="header-right"><span className="local-label"><i/> 로컬 AI</span>{artifact && !panelOpen && <button aria-label="도식 열기" onClick={() => setPanelOpen(true)}><PanelRightOpen aria-hidden="true" size={20}/></button>}</div></header>
-    <main className={panelOpen && artifact ? 'with-panel' : ''}>
+    <div className="workspace"><header><a className="wordmark" href="/">CS Studio<span>생각을 연결하는 학습</span></a><div className="header-right">
+            <button className="curriculum-toggle" aria-pressed={curriculumOpen} onClick={() => setCurriculumOpen(!curriculumOpen)}>
+              {curriculumOpen ? "학습 대화로" : "커리큘럼 초안"}
+            </button><span className="local-label"><i/> 로컬 AI</span>{artifact && !panelOpen && <button aria-label="도식 열기" onClick={() => setPanelOpen(true)}><PanelRightOpen aria-hidden="true" size={20}/></button>}</div></header>
+    <div hidden={!curriculumOpen} className="curriculum-container"><CurriculumDraft /></div>
+    <main style={curriculumOpen ? { display: 'none' } : undefined} className={panelOpen && artifact ? 'with-panel' : ''}>
       <section className="conversation" aria-label="학습 대화"><div className="scroll-area">
         {messages.length === 0 ? <div className="welcome"><div className="eyebrow">YOUR SPACE TO UNDERSTAND</div><h1>어떤 개념을<br/>함께 풀어볼까요?</h1><p>질문에서 이해로.<br className="mobile-break"/> 복잡한 개념은 그림으로 연결해 보세요.</p><div className="suggestions">{suggestions.map(s => <button key={s} onClick={() => send(s)}>{s}<ArrowUpRight aria-hidden="true" size={16}/></button>)}</div></div> : <div className="messages">{messages.map((m, i) => <article className={`message ${m.role}`} key={i}>{m.role === 'assistant' && <div className="assistant-label"><Layers aria-hidden="true" size={16}/> CS Studio</div>}{m.failed && <p role="status">완료되지 않은 문답 · 다음 답변의 대화 기록에서 제외됩니다.</p>}<div className="message-content">{m.role === 'assistant' ? <Markdown>{m.content}</Markdown> : m.content}</div>{m.artifact && <button className="artifact-chip" onClick={() => {setArtifact(m.artifact!);setPanelOpen(true);}}><Check aria-hidden="true" size={14}/>{m.artifact.diagram.title}<ArrowUpRight aria-hidden="true" size={14}/></button>}</article>)}</div>}
         {busy && draft && <article className="message assistant streaming"><div className="assistant-label"><Layers aria-hidden="true" size={16}/> CS Studio</div><div className="message-content"><Markdown>{draft}</Markdown></div></article>}
