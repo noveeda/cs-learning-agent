@@ -254,14 +254,12 @@ test("저장 실패를 알리고 선택·학습 상태·이동을 적용하지 �
   await expect(page).toHaveURL(/#\/roadmap$/);
 });
 
-test("데스크톱 로드맵은 중앙에서 영역별 원형 노드로 뻗는 방사형 배치", async ({
-  page,
-}) => {
+test("데스크톱 로드맵은 큰 범주 원 안에 개념 노드를 배치", async ({ page }) => {
   await page.goto("/#/roadmap");
   const root = page.locator(".roadmap-root");
   await expect(root).toHaveText("내 로드맵기본 CS");
   await expect(page.locator(".roadmap-domain")).toHaveCount(3);
-  await expect(page.locator(".domain-edge")).toHaveCount(3);
+  await expect(page.locator(".domain-edge")).toHaveCount(0);
   await expect(page.locator(".roadmap-node")).toHaveCount(9);
   const center = await root.boundingBox();
   expect(center).not.toBeNull();
@@ -277,12 +275,23 @@ test("데스크톱 로드맵은 중앙에서 영역별 원형 노드로 뻗는 �
       };
     }),
   );
-  const cx = center!.x + center!.width / 2;
-  const cy = center!.y + center!.height / 2;
-  expect(positions.some((node) => node.x < cx && node.y < cy)).toBe(true);
-  expect(positions.some((node) => node.x > cx && node.y < cy)).toBe(true);
-  expect(positions.some((node) => node.x < cx && node.y > cy)).toBe(true);
-  expect(positions.some((node) => node.x > cx && node.y > cy)).toBe(true);
+  const containment = await page.locator(".roadmap-node").evaluateAll((nodes) =>
+    nodes.every((node) => {
+      const domain = [...document.querySelectorAll(".roadmap-domain")].find(
+        (area) =>
+          area.getAttribute("aria-label") ===
+          `${node.getAttribute("data-domain")} 영역`,
+      )!;
+      const child = node.getBoundingClientRect();
+      const area = domain.getBoundingClientRect();
+      const distance = Math.hypot(
+        child.x + child.width / 2 - area.x - area.width / 2,
+        child.y + child.height / 2 - area.y - area.height / 2,
+      );
+      return distance + child.width / 2 <= area.width / 2;
+    }),
+  );
+  expect(containment).toBe(true);
   for (const position of positions) {
     expect(position.width).toBe(position.height);
     expect(position.radius).toBe("50%");
@@ -290,7 +299,7 @@ test("데스크톱 로드맵은 중앙에서 영역별 원형 노드로 뻗는 �
   await page
     .getByRole("button", { name: "가상 메모리 · 미학습", exact: true })
     .click();
-  await expect(page.locator(".prerequisite-edge")).toHaveCount(1);
+  await expect(page.locator(".cross-domain-edge")).toHaveCount(0);
 });
 
 test("노드 호버는 관계 노드·연결선을 강조하고 클릭 선택을 바꾸지 않음", async ({
@@ -316,10 +325,7 @@ test("노드 호버는 관계 노드·연결선을 강조하고 클릭 선택을
   await expect(
     page.getByRole("button", { name: "트리와 그래프 · 미학습", exact: true }),
   ).toHaveAttribute("data-emphasis", "related");
-  await expect(page.locator('line[data-concept="stack-queue"]')).toHaveCSS(
-    "opacity",
-    "1",
-  );
+  await expect(page.locator(".cross-domain-edge")).toHaveCSS("opacity", "1");
   await expect(process).toHaveCSS("opacity", "0.3");
   await expect(process).toHaveAttribute("aria-pressed", "true");
   await expect(
@@ -327,7 +333,7 @@ test("노드 호버는 관계 노드·연결선을 강조하고 클릭 선택을
       .getByRole("region", { name: "선택한 개념" })
       .getByRole("heading", { level: 2 }),
   ).toHaveText("프로세스와 스레드");
-  await expect(page.locator(".prerequisite-edge")).toHaveCount(2);
+  await expect(page.locator(".cross-domain-edge")).toHaveCount(1);
   await page.getByRole("heading", { name: "로드맵", exact: true }).hover();
   await expect(stack).toHaveAttribute("data-active", "false");
   await expect(process).toHaveCSS("opacity", "1");
@@ -369,4 +375,61 @@ test("키보드 초점도 관계를 강조하고 움직임 줄이기 설정을 �
   expect(dimensions.width).toBe(dimensions.cssWidth);
   await page.keyboard.press("Tab");
   await expect(memory).toHaveAttribute("data-active", "false");
+});
+
+test("점선은 영역 간 연관만 표시하고 설명·양방향 강조를 제공함", async ({
+  page,
+}) => {
+  await page.goto("/#/roadmap");
+  await page.getByRole("group", { name: "전체 로드맵" }).hover();
+  await expect(page.locator(".cross-domain-edge")).toHaveCount(2);
+  const endpoints = await page
+    .locator(".cross-domain-edge")
+    .evaluateAll((lines) =>
+      lines.map((line) => [
+        line.getAttribute("data-source"),
+        line.getAttribute("data-target"),
+      ]),
+    );
+  expect(endpoints).toEqual([
+    ["scheduling", "stack-queue"],
+    ["process", "tcp-udp"],
+  ]);
+  await expect(page.locator(".prerequisite-edge")).toHaveCount(0);
+  const scheduling = page.getByRole("button", {
+    name: "CPU 스케줄링 · 미학습",
+    exact: true,
+  });
+  const queue = page.getByRole("button", {
+    name: "스택과 큐 · 미학습",
+    exact: true,
+  });
+  await scheduling.click();
+  await expect(queue).toHaveAttribute("data-emphasis", "related");
+  const detail = page.getByRole("region", { name: "선택한 개념" });
+  await expect(detail).toContainText("FCFS·라운드 로빈 스케줄링은 준비 큐");
+  await detail.getByRole("button", { name: "스택과 큐", exact: true }).click();
+  await expect(detail.getByRole("heading", { level: 2 })).toHaveText(
+    "스택과 큐",
+  );
+  await queue.hover();
+  await expect(scheduling).toHaveAttribute("data-emphasis", "related");
+  await expect(page.locator(".cross-domain-edge")).toHaveCount(1);
+  await page
+    .getByRole("button", { name: "가상 메모리 · 미학습", exact: true })
+    .click();
+  await expect(page.locator(".cross-domain-edge")).toHaveCount(0);
+  await expect(detail).toContainText("아직 연결한 다른 영역의 개념이 없어요.");
+  await expect(
+    detail.getByRole("button", { name: "프로세스와 스레드", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "프로세스와 스레드 · 미학습", exact: true })
+    .click();
+  await expect(detail).toContainText(
+    "프로세스는 운영체제의 소켓을 통해 TCP·UDP 통신",
+  );
+  await expect(
+    page.getByRole("button", { name: "TCP와 UDP · 미학습", exact: true }),
+  ).toHaveAttribute("data-emphasis", "related");
 });

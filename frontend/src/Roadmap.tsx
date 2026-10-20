@@ -2,6 +2,7 @@ import { useState, type CSSProperties } from "react";
 import { ArrowUpRight, BookOpen } from "lucide-react";
 import {
   concepts,
+  conceptRelations,
   statusLabels,
   type Concept,
   type LearningStatus,
@@ -9,9 +10,9 @@ import {
 } from "./roadmap";
 
 const domains = [
-  { name: "운영체제", x: 31, y: 70, color: "#315be8", surface: "#edf1ff" },
-  { name: "자료구조", x: 27, y: 32, color: "#087c79", surface: "#eaf6f4" },
-  { name: "네트워크", x: 75, y: 45, color: "#9a6328", surface: "#fbf3e8" },
+  { name: "운영체제", x: 31, y: 77, color: "#315be8", surface: "#edf1ff" },
+  { name: "자료구조", x: 25, y: 25, color: "#087c79", surface: "#eaf6f4" },
+  { name: "네트워크", x: 77, y: 29, color: "#9a6328", surface: "#fbf3e8" },
 ];
 
 export function Roadmap({
@@ -33,19 +34,34 @@ export function Roadmap({
   const selected =
     concepts.find((concept) => concept.id === state.selectedId) || concepts[0];
   const status = state.statuses[selected.id] || "not-started";
+  const previewIds =
+    activeId === "root"
+      ? concepts.map((concept) => concept.id)
+      : activeDomain
+        ? concepts
+            .filter((concept) => concept.domain === activeDomain.name)
+            .map((concept) => concept.id)
+        : [(activeConcept || selected).id];
+  const visibleRelations = conceptRelations.filter(
+    (relation) =>
+      previewIds.includes(relation.source) ||
+      previewIds.includes(relation.target),
+  );
   const related = new Set(
     concepts
       .filter(
         (concept) =>
           activeId === "root" ||
           concept.domain === activeDomain?.name ||
-          (activeConcept &&
-            (concept.domain === activeConcept.domain ||
-              activeConcept.prerequisites.includes(concept.id) ||
-              concept.prerequisites.includes(activeConcept.id))),
+          concept.domain === activeConcept?.domain,
       )
       .map((concept) => concept.id),
   );
+  if (activeId)
+    for (const relation of visibleRelations) {
+      related.add(relation.source);
+      related.add(relation.target);
+    }
   const emphasizedDomain = (name: string) =>
     activeId === "root" ||
     name === activeDomain?.name ||
@@ -64,14 +80,6 @@ export function Roadmap({
     },
     onBlur: () => setFocusedId(null),
   });
-  const previewIds =
-    activeId === "root"
-      ? concepts.map((concept) => concept.id)
-      : activeDomain
-        ? concepts
-            .filter((concept) => concept.domain === activeDomain.name)
-            .map((concept) => concept.id)
-        : [(activeConcept || selected).id];
 
   return (
     <main className="roadmap-layout">
@@ -101,58 +109,30 @@ export function Roadmap({
             preserveAspectRatio="none"
             aria-hidden="true"
           >
-            {domains.map((domain) => (
-              <line
-                key={domain.name}
-                x1="50"
-                y1="50"
-                x2={domain.x}
-                y2={domain.y}
-                stroke={domain.color}
-                className="domain-edge"
-                data-emphasis={emphasis(emphasizedDomain(domain.name))}
-              />
-            ))}
-            {concepts.map((concept) => {
-              const domain = domains.find(
-                (item) => item.name === concept.domain,
+            {visibleRelations.map((relation) => {
+              const source = concepts.find(
+                (concept) => concept.id === relation.source,
+              )!;
+              const target = concepts.find(
+                (concept) => concept.id === relation.target,
               )!;
               return (
-                <line
-                  key={concept.id}
-                  data-concept={concept.id}
-                  data-emphasis={emphasis(related.has(concept.id))}
-                  x1={domain.x}
-                  y1={domain.y}
-                  x2={concept.position.x}
-                  y2={concept.position.y}
-                  stroke={domain.color}
-                />
+                <path
+                  className="cross-domain-edge"
+                  key={`${source.id}-${target.id}`}
+                  data-source={source.id}
+                  data-target={target.id}
+                  data-emphasis={emphasis(
+                    related.has(source.id) && related.has(target.id),
+                  )}
+                  d={`M ${source.position.x} ${source.position.y} Q ${relation.bend.x} ${relation.bend.y} ${target.position.x} ${target.position.y}`}
+                >
+                  <title>
+                    {source.title} ↔ {target.title}：{relation.description}
+                  </title>
+                </path>
               );
             })}
-            {concepts.flatMap((concept) =>
-              concept.prerequisites
-                .filter(
-                  (id) =>
-                    previewIds.includes(concept.id) || previewIds.includes(id),
-                )
-                .map((id) => {
-                  const prerequisite = concepts.find((item) => item.id === id)!;
-                  return (
-                    <line
-                      className="prerequisite-edge"
-                      key={`${id}-${concept.id}`}
-                      data-emphasis={emphasis(
-                        related.has(id) && related.has(concept.id),
-                      )}
-                      x1={prerequisite.position.x}
-                      y1={prerequisite.position.y}
-                      x2={concept.position.x}
-                      y2={concept.position.y}
-                    />
-                  );
-                }),
-            )}
           </svg>
           <div
             className="roadmap-root"
@@ -195,6 +175,7 @@ export function Roadmap({
               <button
                 className={`roadmap-node ${currentStatus}`}
                 key={concept.id}
+                data-domain={concept.domain}
                 data-active={activeId === concept.id}
                 data-emphasis={emphasis(related.has(concept.id))}
                 {...interaction(concept.id)}
@@ -228,8 +209,8 @@ export function Roadmap({
           })}
         </div>
         <p className="roadmap-caption">
-          실선은 영역과 개념의 연결이에요. 선택한 개념의 선수 관계는 점선과
-          상세에서 확인하세요.
+          큰 원은 학습 영역이고, 안의 작은 원은 해당 영역의 개념이에요. 점선은
+          다른 영역의 개념 간 연관 관계예요.
         </p>
       </section>
       <section className="card concept-detail" aria-label="선택한 개념">
@@ -292,6 +273,45 @@ export function Roadmap({
           </ul>
         ) : (
           <p>이 개념을 학습한 뒤 다른 영역도 살펴보세요.</p>
+        )}
+        <h3>다른 영역의 연관 개념</h3>
+        {conceptRelations.some(
+          (relation) =>
+            relation.source === selected.id || relation.target === selected.id,
+        ) ? (
+          <ul className="concept-links">
+            {conceptRelations
+              .filter(
+                (relation) =>
+                  relation.source === selected.id ||
+                  relation.target === selected.id,
+              )
+              .map((relation) => {
+                const linkedId =
+                  relation.source === selected.id
+                    ? relation.target
+                    : relation.source;
+                const linked = concepts.find(
+                  (concept) => concept.id === linkedId,
+                )!;
+                return (
+                  <li key={linkedId}>
+                    <button
+                      className="button secondary"
+                      onClick={() => onSelect(linkedId)}
+                    >
+                      {linked.title}
+                      <ArrowUpRight size={14} aria-hidden="true" />
+                    </button>
+                    <p>
+                      {linked.domain} · {relation.description}
+                    </p>
+                  </li>
+                );
+              })}
+          </ul>
+        ) : (
+          <p>아직 연결한 다른 영역의 개념이 없어요.</p>
         )}
         <button
           className="button primary start-learning"

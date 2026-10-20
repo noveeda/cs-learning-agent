@@ -16,7 +16,7 @@ export const concepts: Concept[] = [
     domain: "운영체제",
     description: "프로그램의 실행 단위와 자원 공유 방식을 이해합니다.",
     prerequisites: [],
-    position: { x: 12, y: 64 },
+    position: { x: 22, y: 75 },
   },
   {
     id: "scheduling",
@@ -25,7 +25,7 @@ export const concepts: Concept[] = [
     description:
       "실행할 프로세스를 선택하는 기준과 스케줄링 알고리즘을 비교합니다.",
     prerequisites: ["process"],
-    position: { x: 18, y: 88 },
+    position: { x: 40, y: 75 },
   },
   {
     id: "memory",
@@ -34,7 +34,7 @@ export const concepts: Concept[] = [
     description:
       "주소 공간, 페이지와 프레임을 통해 메모리 관리 원리를 배웁니다.",
     prerequisites: ["process"],
-    position: { x: 45, y: 90 },
+    position: { x: 31, y: 90 },
   },
   {
     id: "array-list",
@@ -42,7 +42,7 @@ export const concepts: Concept[] = [
     domain: "자료구조",
     description: "데이터 배치 방식에 따른 접근·삽입·삭제 비용을 비교합니다.",
     prerequisites: [],
-    position: { x: 14, y: 13 },
+    position: { x: 16, y: 23 },
   },
   {
     id: "stack-queue",
@@ -50,7 +50,7 @@ export const concepts: Concept[] = [
     domain: "자료구조",
     description: "LIFO와 FIFO의 차이를 이해하고 적절한 활용 상황을 살펴봅니다.",
     prerequisites: ["array-list"],
-    position: { x: 10, y: 40 },
+    position: { x: 34, y: 23 },
   },
   {
     id: "tree-graph",
@@ -58,7 +58,7 @@ export const concepts: Concept[] = [
     domain: "자료구조",
     description: "노드와 간선으로 관계를 표현하고 기본 탐색 방법을 익힙니다.",
     prerequisites: ["stack-queue"],
-    position: { x: 31, y: 11 },
+    position: { x: 25, y: 38 },
   },
   {
     id: "network-layers",
@@ -66,7 +66,7 @@ export const concepts: Concept[] = [
     domain: "네트워크",
     description: "TCP/IP 계층별 역할과 데이터가 전달되는 과정을 이해합니다.",
     prerequisites: [],
-    position: { x: 70, y: 15 },
+    position: { x: 68, y: 27 },
   },
   {
     id: "tcp-udp",
@@ -74,7 +74,7 @@ export const concepts: Concept[] = [
     domain: "네트워크",
     description: "연결, 신뢰성, 전송 비용을 기준으로 두 프로토콜을 비교합니다.",
     prerequisites: ["network-layers"],
-    position: { x: 91, y: 35 },
+    position: { x: 86, y: 27 },
   },
   {
     id: "http",
@@ -82,7 +82,29 @@ export const concepts: Concept[] = [
     domain: "네트워크",
     description: "웹 통신의 요청·응답 구조와 메서드, 상태 코드를 배웁니다.",
     prerequisites: ["tcp-udp"],
-    position: { x: 88, y: 72 },
+    position: { x: 77, y: 42 },
+  },
+];
+
+// These associations connect applications of concepts across domains, not a required study order.
+export const conceptRelations: {
+  source: string;
+  target: string;
+  description: string;
+  bend: { x: number; y: number };
+}[] = [
+  {
+    source: "scheduling",
+    target: "stack-queue",
+    bend: { x: 39, y: 50 },
+    description:
+      "FCFS·라운드 로빈 스케줄링은 준비 큐에서 프로세스의 실행 순서를 관리합니다.",
+  },
+  {
+    source: "process",
+    target: "tcp-udp",
+    bend: { x: 80, y: -40 },
+    description: "프로세스는 운영체제의 소켓을 통해 TCP·UDP 통신을 수행합니다.",
   },
 ];
 
