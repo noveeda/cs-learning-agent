@@ -1,0 +1,63 @@
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iws
+*.iml
+*.ipr
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+.coverage.*
+htmlcov/
+
+# AI datasets, generated outputs and model weights
+/ai-core/data/raw/
+/ai-core/data/processed/
+/ai-core/outputs/
+/ai-core/**/*.bin
+/ai-core/**/*.safetensors
+/ai-core/**/*.pt
+/ai-core/**/*.pth
+
+# Gradle / Java generated files
+/backend/.gradle/
+/backend/build/
+/backend/out/
+/backend/bin/
+/backend/HELP.md
+
+# STS / Eclipse metadata
+/backend/.apt_generated/
+/backend/.classpath
+/backend/.factorypath
+/backend/.project
+/backend/.settings/
+/backend/.springBeans
+/backend/.sts4-cache/
+
+# NetBeans metadata and build output
+/backend/nbproject/private/
+/backend/nbbuild/
+/backend/dist/
+/backend/nbdist/
+/backend/.nb-gradle/
+
+# Keep source, Gradle Wrapper, document assets and PDFs trackable.
+/codex/
