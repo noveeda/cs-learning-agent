@@ -253,3 +253,42 @@ test("저장 실패를 알리고 선택·학습 상태·이동을 적용하지 �
   await page.getByRole("button", { name: "학습 시작", exact: true }).click();
   await expect(page).toHaveURL(/#\/roadmap$/);
 });
+
+test("데스크톱 로드맵은 중앙에서 영역별 원형 노드로 뻗는 방사형 배치", async ({
+  page,
+}) => {
+  await page.goto("/#/roadmap");
+  const root = page.locator(".roadmap-root");
+  await expect(root).toHaveText("내 로드맵기본 CS");
+  await expect(page.locator(".roadmap-domain")).toHaveCount(3);
+  await expect(page.locator(".domain-edge")).toHaveCount(3);
+  await expect(page.locator(".roadmap-node")).toHaveCount(9);
+  const center = await root.boundingBox();
+  expect(center).not.toBeNull();
+  const positions = await page.locator(".roadmap-node").evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect();
+      return {
+        x: box.x + box.width / 2,
+        y: box.y + box.height / 2,
+        width: box.width,
+        height: box.height,
+        radius: getComputedStyle(node).borderRadius,
+      };
+    }),
+  );
+  const cx = center!.x + center!.width / 2;
+  const cy = center!.y + center!.height / 2;
+  expect(positions.some((node) => node.x < cx && node.y < cy)).toBe(true);
+  expect(positions.some((node) => node.x > cx && node.y < cy)).toBe(true);
+  expect(positions.some((node) => node.x < cx && node.y > cy)).toBe(true);
+  expect(positions.some((node) => node.x > cx && node.y > cy)).toBe(true);
+  for (const position of positions) {
+    expect(position.width).toBe(position.height);
+    expect(position.radius).toBe("50%");
+  }
+  await page
+    .getByRole("button", { name: "가상 메모리 · 미학습", exact: true })
+    .click();
+  await expect(page.locator(".prerequisite-edge")).toHaveCount(1);
+});

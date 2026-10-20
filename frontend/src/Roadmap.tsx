@@ -1,3 +1,4 @@
+import { type CSSProperties } from "react";
 import { ArrowUpRight, BookOpen } from "lucide-react";
 import {
   concepts,
@@ -6,6 +7,12 @@ import {
   type LearningStatus,
   type RoadmapState,
 } from "./roadmap";
+
+const domains = [
+  { name: "운영체제", x: 31, y: 70, color: "#315be8", surface: "#edf1ff" },
+  { name: "자료구조", x: 27, y: 32, color: "#087c79", surface: "#eaf6f4" },
+  { name: "네트워크", x: 75, y: 45, color: "#9a6328", surface: "#fbf3e8" },
+];
 
 export function Roadmap({
   state,
@@ -39,11 +46,6 @@ export function Roadmap({
             </span>
           ))}
         </div>
-        <div className="roadmap-domain-labels" aria-hidden="true">
-          <span>운영체제</span>
-          <span>자료구조</span>
-          <span>네트워크</span>
-        </div>
         <div className="roadmap-canvas">
           <svg
             className="roadmap-edges"
@@ -51,48 +53,84 @@ export function Roadmap({
             preserveAspectRatio="none"
             aria-hidden="true"
           >
-            <defs>
-              <marker
-                id="roadmap-arrow"
-                markerWidth="5"
-                markerHeight="5"
-                refX="4"
-                refY="2.5"
-                orient="auto"
-              >
-                <path d="M0,0 L5,2.5 L0,5" fill="none" stroke="currentColor" />
-              </marker>
-            </defs>
-            {concepts.flatMap((concept) =>
-              concept.prerequisites.map((id) => {
-                const from = concepts.find((item) => item.id === id)!;
-                // Route the longer branch around the middle card so it cannot imply a different prerequisite.
-                const path =
-                  concept.id === "memory"
-                    ? `M ${from.position.x} ${from.position.y} H 1 V ${concept.position.y} H ${concept.position.x - 14.8}`
-                    : `M ${from.position.x} ${from.position.y} L ${concept.position.x} ${concept.position.y - 12}`;
-                return (
-                  <path
-                    key={`${id}-${concept.id}`}
-                    d={path}
-                    markerEnd="url(#roadmap-arrow)"
-                  />
-                );
-              }),
-            )}
+            {domains.map((domain) => (
+              <line
+                key={domain.name}
+                x1="50"
+                y1="50"
+                x2={domain.x}
+                y2={domain.y}
+                stroke={domain.color}
+                className="domain-edge"
+              />
+            ))}
+            {concepts.map((concept) => {
+              const domain = domains.find(
+                (item) => item.name === concept.domain,
+              )!;
+              return (
+                <line
+                  key={concept.id}
+                  x1={domain.x}
+                  y1={domain.y}
+                  x2={concept.position.x}
+                  y2={concept.position.y}
+                  stroke={domain.color}
+                />
+              );
+            })}
+            {selected.prerequisites.map((id) => {
+              const prerequisite = concepts.find((item) => item.id === id)!;
+              return (
+                <line
+                  className="prerequisite-edge"
+                  key={id}
+                  x1={prerequisite.position.x}
+                  y1={prerequisite.position.y}
+                  x2={selected.position.x}
+                  y2={selected.position.y}
+                />
+              );
+            })}
           </svg>
+          <div className="roadmap-root">
+            <strong>내 로드맵</strong>
+            <span>기본 CS</span>
+          </div>
+          {domains.map((domain) => (
+            <div
+              className="roadmap-domain"
+              key={domain.name}
+              style={{
+                left: `${domain.x}%`,
+                top: `${domain.y}%`,
+                color: domain.color,
+                background: domain.surface,
+                borderColor: domain.color,
+              }}
+            >
+              {domain.name}
+            </div>
+          ))}
           {concepts.map((concept) => {
             const currentStatus = state.statuses[concept.id] || "not-started";
+            const domain = domains.find(
+              (item) => item.name === concept.domain,
+            )!;
             return (
               <button
                 className={`roadmap-node ${currentStatus}`}
                 key={concept.id}
                 aria-pressed={selected.id === concept.id}
                 aria-label={`${concept.title} · ${statusLabels[currentStatus]}`}
-                style={{
-                  left: `${concept.position.x}%`,
-                  top: `${concept.position.y}%`,
-                }}
+                style={
+                  {
+                    left: `${concept.position.x}%`,
+                    top: `${concept.position.y}%`,
+                    "--domain-color": domain.color,
+                    "--domain-surface": domain.surface,
+                  } as CSSProperties
+                }
                 onClick={() => {
                   onSelect(concept.id);
                   if (window.matchMedia("(max-width: 580px)").matches)
@@ -113,8 +151,8 @@ export function Roadmap({
           })}
         </div>
         <p className="roadmap-caption">
-          연결은 먼저 살펴보면 좋은 개념을 뜻해요. 순서에 관계없이 시작할 수
-          있어요.
+          실선은 영역과 개념의 연결이에요. 선택한 개념의 선수 관계는 점선과
+          상세에서 확인하세요.
         </p>
       </section>
       <section className="card concept-detail" aria-label="선택한 개념">
