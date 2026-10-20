@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from serving.api import app, BUSY
-from serving.curriculum import DraftRequest, CurriculumDraft, generate_draft
+from serving.curriculum import DraftRequest, CurriculumDraft, generate_draft, MAX_OUTPUT_TOKENS
 
 INPUT = {'topic': '페이징', 'goal': '취업 준비', 'level': '용어만 알아요'}
 DRAFT = {'title': '페이징 학습', 'lessons': [
@@ -20,6 +20,17 @@ class CurriculumTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 DraftRequest(**{**INPUT, 'topic': value})
 
+    def test_counts_follow_model_output_not_fixed_ranges(self):
+        for count in (1, 7):
+            lessons = [{'title': f'소단원 {i}', 'objectives': [f'학습 목표 {j}' for j in range(4)]}
+                       for i in range(count)]
+            draft = CurriculumDraft.model_validate({'title': '학습', 'lessons': lessons})
+            self.assertEqual(len(draft.lessons), count)
+            self.assertEqual(len(draft.lessons[0].objectives), 4)
+        schema = CurriculumDraft.model_json_schema()
+        self.assertNotIn('maxItems', schema['properties']['lessons'])
+        self.assertNotIn('maxItems', schema['$defs']['Lesson']['properties']['objectives'])
+
     def test_bad_output_rejected(self):
         for lessons in [[], [DRAFT['lessons'][0]] * 2,
                         [{'title': 'A', 'objectives': []}, DRAFT['lessons'][1]]]:
@@ -33,6 +44,7 @@ class CurriculumTests(unittest.TestCase):
         self.assertEqual(generate_draft(client, 'model', DraftRequest(**INPUT)).title, DRAFT['title'])
         payload = client.chat.completions.create.call_args.kwargs
         self.assertEqual(json.loads(payload['messages'][1]['content']), INPUT)
+        self.assertEqual(payload['max_tokens'], MAX_OUTPUT_TOKENS)
         choice.finish_reason = 'length'
         with self.assertRaises(ValueError):
             generate_draft(client, 'model', DraftRequest(**INPUT))

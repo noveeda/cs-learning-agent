@@ -30,3 +30,17 @@ test('network failures show a recoverable Korean message', async t => {
   t.mock.method(globalThis, 'fetch', async () => { throw new TypeError('Failed to fetch'); });
   await assert.rejects(requestCurriculum(input), /서버에 연결하지 못했습니다/);
 });
+
+test('accepts one lesson and outputs beyond the old lesson and objective caps', async t => {
+  for (const count of [1, 7]) {
+    const generated = { title: '학습', lessons: Array.from({ length: count }, (_, i) => ({
+      title: `소단원 ${i}`, objectives: ['목표 A', '목표 B', '목표 C', '목표 D'],
+    })) };
+    t.mock.method(globalThis, 'fetch', async () => Response.json(generated));
+    assert.deepEqual(await requestCurriculum(input), generated);
+  }
+});
+test('still rejects lessons without learning objectives', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ title: '학습', lessons: [{ title: '소단원', objectives: [] }] }));
+  await assert.rejects(requestCurriculum(input), /형식/);
+});

@@ -18,9 +18,9 @@ export async function requestCurriculum(input: DraftInput): Promise<CurriculumDr
     }
     const draft = await response.json();
     const text = (value: unknown): value is string => typeof value === 'string' && !!value.trim() && value.length <= 300;
-    if (!text(draft?.title) || !Array.isArray(draft.lessons) || draft.lessons.length < 2 || draft.lessons.length > 6
+    if (!text(draft?.title) || !Array.isArray(draft.lessons) || draft.lessons.length < 1
       || !draft.lessons.every((lesson: CurriculumDraft['lessons'][number]) => text(lesson?.title)
-        && Array.isArray(lesson.objectives) && lesson.objectives.length >= 1 && lesson.objectives.length <= 3
+        && Array.isArray(lesson.objectives) && lesson.objectives.length >= 1
         && lesson.objectives.every(text))) {
       throw new Error('초안 형식이 올바르지 않습니다. 다시 시도해 주세요.');
     }
