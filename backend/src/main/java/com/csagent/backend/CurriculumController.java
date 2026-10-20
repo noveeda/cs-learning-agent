@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 public class CurriculumController {
     private final String coreUrl;
     private final HttpClient client = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(5)).build();
 
     public CurriculumController(@Value("${ai-core.base-url:http://127.0.0.1:8001}") String coreUrl) {

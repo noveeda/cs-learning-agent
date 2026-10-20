@@ -22,7 +22,9 @@ class CurriculumControllerTests {
         var upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         var status = new AtomicInteger(503);
         var received = new AtomicReference<String>();
+        var upgrade = new AtomicReference<String>();
         upstream.createContext("/curriculum/draft", exchange -> {
+            upgrade.set(exchange.getRequestHeaders().getFirst("Upgrade"));
             received.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] body = (status.get() == 200 ? "{\"title\":\"페이징\",\"lessons\":[]}" : "private details")
                     .getBytes(StandardCharsets.UTF_8);
@@ -40,6 +42,7 @@ class CurriculumControllerTests {
             var result = controller.draft(input);
             assertEquals(200, result.getStatusCode().value());
             assertEquals("no-store", result.getHeaders().getCacheControl());
+            assertNull(upgrade.get(), "Uvicorn does not support h2c upgrade");
             assertEquals("페이징", ConversationStore.JSON.readTree(received.get()).path("topic").asText());
             assertTrue(result.getBody().toString().contains("페이징"));
             status.set(500);
