@@ -9,3 +9,10 @@ langchain4j:
       api-key: not-needed
       model-name: Qwen3-32B-Instruct
       temperature: 0.7
+spring:
+  mvc:
+    async:
+      request-timeout: 550000
+
+ai-core:
+  base-url: http://127.0.0.1:8001

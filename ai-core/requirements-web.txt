@@ -1,0 +1,7 @@
+# Web/agent dependencies only; vLLM inference environment is managed separately.
+openai>=2,<4
+httpx>=0.27,<1
+pydantic>=2,<3
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+fonttools[woff]>=4.60,<5
