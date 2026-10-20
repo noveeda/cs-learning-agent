@@ -173,3 +173,42 @@ test("불러오기 실패 후 재시도하며 기존 대화를 덮어쓰지 않�
   await expect(page.locator(".messages article")).toHaveCount(2);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
+
+test("커리큘럼과 학습 화면을 전환해도 입력을 보존한다", async ({ page }) => {
+  await mockConversation(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "커리큘럼 초안", exact: true }).click();
+  await page.getByLabel("학습 주제", { exact: true }).fill("운영체제 전체");
+  await page.getByRole("button", { name: "학습 대화로", exact: true }).click();
+  await expect(page.getByLabel("질문", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "커리큘럼 초안", exact: true }).click();
+  await expect(page.getByLabel("학습 주제", { exact: true })).toHaveValue("운영체제 전체");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("button", { name: "학습 대화로", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("개념 대화와 로드맵을 유지하며 커리큘럼 입력을 보존한다", async ({ page }) => {
+  await mockConversation(page);
+  await page.goto("/#/roadmap");
+  await page.getByRole("button", { name: "학습 시작", exact: true }).click();
+  await expect(page).toHaveURL(/#\/learn\?concept=process$/);
+  const question = page.getByLabel("질문", { exact: true });
+  await expect(question).toBeEnabled();
+  await question.fill("프로세스의 주소 공간을 설명해줘");
+  await page.getByRole("button", { name: "커리큘럼 초안", exact: true }).click();
+  await page.getByLabel("학습 주제", { exact: true }).fill("운영체제 기초");
+  await page.getByRole("button", { name: "학습 대화로", exact: true }).click();
+  await expect(question).toHaveValue("프로세스의 주소 공간을 설명해줘");
+  await expect(page).toHaveURL(/#\/learn\?concept=process$/);
+  await page.locator(".sidebar").getByRole("button", { name: "로드맵", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "로드맵", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "커리큘럼 초안", exact: true }).click();
+  await expect(page.getByLabel("학습 주제", { exact: true })).toHaveValue("운영체제 기초");
+  await page.getByRole("button", { name: "로드맵으로", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "로드맵", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "커리큘럼 초안", exact: true }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "학습하기", exact: true }).click();
+  await expect(question).toBeVisible();
+  await expect(page.getByLabel("학습 주제", { exact: true })).toBeHidden();
+});

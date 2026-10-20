@@ -82,6 +82,7 @@ function Brand() {
 
 export function LearningShell({
   children,
+  headerExtra,
   busy,
   onNew,
   onAsk,
@@ -89,6 +90,7 @@ export function LearningShell({
   onNavigate,
 }: {
   children: ReactNode;
+  headerExtra?: ReactNode;
   busy: boolean;
   onNew: () => void;
   onAsk: () => void;
@@ -157,20 +159,23 @@ export function LearningShell({
                 : "개념을 그림으로 연결해요"}
             </p>
           </div>
-          {page === "learn" && (
-            <div className="header-actions">
-              <button className="button secondary ask-button" onClick={onAsk}>
-                에이전트에게 질문하기
-              </button>
-              <button
-                className="button secondary"
-                disabled={busy}
-                onClick={onNew}
-              >
-                <Plus size={16} aria-hidden="true" />새 학습
-              </button>
-            </div>
-          )}
+          <div className="header-actions">
+            {headerExtra}
+            {page === "learn" && (
+              <>
+                <button className="button secondary ask-button" onClick={onAsk}>
+                  에이전트에게 질문하기
+                </button>
+                <button
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={onNew}
+                >
+                  <Plus size={16} aria-hidden="true" />새 학습
+                </button>
+              </>
+            )}
+          </div>
         </header>
         {children}
       </div>

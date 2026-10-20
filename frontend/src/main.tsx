@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { newConversation } from "./api";
 import { ChatSession } from "./ChatSession";
+import { CurriculumDraft } from "./CurriculumDraft";
 import { LearningShell } from "./LearningShell";
 import { Roadmap } from "./Roadmap";
 import {
@@ -29,6 +30,7 @@ function readRoute() {
 }
 
 function App() {
+  const [curriculumOpen, setCurriculumOpen] = useState(false);
   const [roadmap, setRoadmap] = useState(loadRoadmap);
   const [route, setRoute] = useState(readRoute);
   const [notice, setNotice] = useState("");
@@ -49,6 +51,7 @@ function App() {
         setNotice("응답을 기다린 뒤 화면을 이동해 주세요.");
         return;
       }
+      setCurriculumOpen(false);
       const next = readRoute();
       routeRef.current = next;
       setRoute(next);
@@ -110,12 +113,25 @@ function App() {
     <LearningShell
       page={isRoadmap ? "roadmap" : "learn"}
       busy={busy}
+      headerExtra={
+        <button
+          className="button secondary"
+          onClick={() => setCurriculumOpen((open) => !open)}
+        >
+          {curriculumOpen ? (isRoadmap ? "로드맵으로" : "학습 대화로") : "커리큘럼 초안"}
+        </button>
+      }
       onNavigate={(page) => {
+        setCurriculumOpen(false);
         window.location.hash = `/${page}`;
       }}
-      onAsk={() => document.getElementById("question")?.focus()}
+      onAsk={() => {
+        setCurriculumOpen(false);
+        requestAnimationFrame(() => document.getElementById("question")?.focus());
+      }}
       onNew={() => {
         if (busyRef.current) return;
+        setCurriculumOpen(false);
         if (conceptId) {
           updateRoadmap({
             ...roadmap,
@@ -141,32 +157,37 @@ function App() {
           {notice}
         </div>
       )}
-      {isRoadmap ? (
-        <Roadmap
-          state={roadmap}
-          onSelect={selectConcept}
-          onStatusChange={updateStatus}
-          onStart={startConcept}
-        />
-      ) : (
-        <ChatSession
-          key={conceptConversation || freeId}
-          conversationId={conceptConversation || freeId}
-          concept={route.concept}
-          learningStatus={
-            conceptId
-              ? roadmap.statuses[conceptId] || "not-started"
-              : "not-started"
-          }
-          onStatusChange={(status) => {
-            if (conceptId) updateStatus(conceptId, status);
-          }}
-          onBusyChange={(value) => {
-            busyRef.current = value;
-            setBusy(value);
-          }}
-        />
-      )}
+      <div className="curriculum-container" hidden={!curriculumOpen}>
+        <CurriculumDraft />
+      </div>
+      <div hidden={curriculumOpen}>
+        {isRoadmap ? (
+          <Roadmap
+            state={roadmap}
+            onSelect={selectConcept}
+            onStatusChange={updateStatus}
+            onStart={startConcept}
+          />
+        ) : (
+          <ChatSession
+            key={conceptConversation || freeId}
+            conversationId={conceptConversation || freeId}
+            concept={route.concept}
+            learningStatus={
+              conceptId
+                ? roadmap.statuses[conceptId] || "not-started"
+                : "not-started"
+            }
+            onStatusChange={(status) => {
+              if (conceptId) updateStatus(conceptId, status);
+            }}
+            onBusyChange={(value) => {
+              busyRef.current = value;
+              setBusy(value);
+            }}
+          />
+        )}
+      </div>
     </LearningShell>
   );
 }
