@@ -292,3 +292,81 @@ test("데스크톱 로드맵은 중앙에서 영역별 원형 노드로 뻗는 �
     .click();
   await expect(page.locator(".prerequisite-edge")).toHaveCount(1);
 });
+
+test("노드 호버는 관계 노드·연결선을 강조하고 클릭 선택을 바꾸지 않음", async ({
+  page,
+}) => {
+  await page.goto("/#/roadmap");
+  const stack = page.getByRole("button", {
+    name: "스택과 큐 · 미학습",
+    exact: true,
+  });
+  const process = page.getByRole("button", {
+    name: "프로세스와 스레드 · 미학습",
+    exact: true,
+  });
+  await stack.hover();
+  await expect(stack).toHaveAttribute("data-active", "true");
+  await expect(
+    page.getByRole("button", {
+      name: "배열과 연결 리스트 · 미학습",
+      exact: true,
+    }),
+  ).toHaveAttribute("data-emphasis", "related");
+  await expect(
+    page.getByRole("button", { name: "트리와 그래프 · 미학습", exact: true }),
+  ).toHaveAttribute("data-emphasis", "related");
+  await expect(page.locator('line[data-concept="stack-queue"]')).toHaveCSS(
+    "opacity",
+    "1",
+  );
+  await expect(process).toHaveCSS("opacity", "0.3");
+  await expect(process).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page
+      .getByRole("region", { name: "선택한 개념" })
+      .getByRole("heading", { level: 2 }),
+  ).toHaveText("프로세스와 스레드");
+  await expect(page.locator(".prerequisite-edge")).toHaveCount(2);
+  await page.getByRole("heading", { name: "로드맵", exact: true }).hover();
+  await expect(stack).toHaveAttribute("data-active", "false");
+  await expect(process).toHaveCSS("opacity", "1");
+  await page.locator(".roadmap-domain").filter({ hasText: "네트워크" }).hover();
+  await expect(
+    page.getByRole("button", { name: "TCP와 UDP · 미학습", exact: true }),
+  ).toHaveAttribute("data-emphasis", "related");
+  await expect(stack).toHaveAttribute("data-emphasis", "muted");
+});
+
+test("키보드 초점도 관계를 강조하고 움직임 줄이기 설정을 따름", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/#/roadmap");
+  const scheduling = page.getByRole("button", {
+    name: "CPU 스케줄링 · 미학습",
+    exact: true,
+  });
+  const memory = page.getByRole("button", {
+    name: "가상 메모리 · 미학습",
+    exact: true,
+  });
+  await scheduling.focus();
+  await page.keyboard.press("Tab");
+  await expect(memory).toBeFocused();
+  await expect(memory).toHaveAttribute("data-active", "true");
+  await expect(
+    page.getByRole("button", {
+      name: "프로세스와 스레드 · 미학습",
+      exact: true,
+    }),
+  ).toHaveAttribute("data-emphasis", "related");
+  await expect(memory).toHaveCSS("transition-duration", "0s");
+  const dimensions = await memory.evaluate((node) => ({
+    width: node.getBoundingClientRect().width,
+    cssWidth: parseFloat(getComputedStyle(node).width),
+  }));
+  expect(dimensions.width).toBe(dimensions.cssWidth);
+  await page.keyboard.press("Tab");
+  await expect(memory).toHaveAttribute("data-active", "false");
+});

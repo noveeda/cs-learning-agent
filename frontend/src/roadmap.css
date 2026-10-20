@@ -65,3 +65,16 @@ select:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 
   .concept-detail { scroll-margin-top: var(--space-3); }
   .app-notice { width: calc(100% - 24px); margin-inline: var(--space-3); }
 }
+
+@media(min-width: 851px) {
+  .roadmap-root, .roadmap-domain, .roadmap-node { transition: opacity .16s ease, transform .16s ease, box-shadow .16s ease, background-color .16s ease; }
+  .roadmap-edges line { transition: opacity .16s ease, stroke-width .16s ease; }
+  .roadmap-canvas[data-interacting=true] [data-emphasis=muted] { opacity: .3; }
+  .roadmap-edges line[data-emphasis=related] { opacity: 1; stroke-width: 2.5px; }
+  .roadmap-node[data-emphasis=related] { background: var(--domain-surface); border-width: 2px; }
+  .roadmap-canvas [data-active=true] { transform: translate(-50%, -50%) scale(1.08); z-index: 1; }
+  .roadmap-root:focus-visible, .roadmap-domain:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 5px; }
+}
+@media(prefers-reduced-motion: reduce) and (min-width: 851px) {
+  .roadmap-canvas [data-active=true] { transform: translate(-50%, -50%); }
+}

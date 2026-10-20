@@ -1,4 +1,4 @@
-import { type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { ArrowUpRight, BookOpen } from "lucide-react";
 import {
   concepts,
@@ -25,9 +25,54 @@ export function Roadmap({
   onStatusChange: (id: string, status: LearningStatus) => void;
   onStart: (concept: Concept) => void;
 }) {
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const activeId = hoveredId ?? focusedId;
+  const activeConcept = concepts.find((concept) => concept.id === activeId);
+  const activeDomain = domains.find((domain) => domain.name === activeId);
   const selected =
     concepts.find((concept) => concept.id === state.selectedId) || concepts[0];
   const status = state.statuses[selected.id] || "not-started";
+  const related = new Set(
+    concepts
+      .filter(
+        (concept) =>
+          activeId === "root" ||
+          concept.domain === activeDomain?.name ||
+          (activeConcept &&
+            (concept.domain === activeConcept.domain ||
+              activeConcept.prerequisites.includes(concept.id) ||
+              concept.prerequisites.includes(activeConcept.id))),
+      )
+      .map((concept) => concept.id),
+  );
+  const emphasizedDomain = (name: string) =>
+    activeId === "root" ||
+    name === activeDomain?.name ||
+    concepts.some(
+      (concept) => concept.domain === name && related.has(concept.id),
+    );
+  const emphasis = (isRelated: boolean) =>
+    activeId ? (isRelated ? "related" : "muted") : undefined;
+  const interaction = (id: string) => ({
+    onPointerEnter: (event: React.PointerEvent<HTMLElement>) => {
+      if (event.pointerType !== "touch") setHoveredId(id);
+    },
+    onPointerLeave: () => setHoveredId(null),
+    onFocus: (event: React.FocusEvent<HTMLElement>) => {
+      if (event.currentTarget.matches(":focus-visible")) setFocusedId(id);
+    },
+    onBlur: () => setFocusedId(null),
+  });
+  const previewIds =
+    activeId === "root"
+      ? concepts.map((concept) => concept.id)
+      : activeDomain
+        ? concepts
+            .filter((concept) => concept.domain === activeDomain.name)
+            .map((concept) => concept.id)
+        : [(activeConcept || selected).id];
+
   return (
     <main className="roadmap-layout">
       <section className="card roadmap-map" aria-label="개념 연결 지도">
@@ -35,7 +80,10 @@ export function Roadmap({
           <div>
             <span className="badge">기본 CS 로드맵</span>
             <h2>어떤 개념을 살펴볼까요?</h2>
-            <p>개념을 선택하면 설명과 연결을 확인할 수 있어요.</p>
+            <p>
+              개념에 마우스를 올리거나 키보드 초점을 두면 연결이 강조돼요.
+              클릭하면 상세를 볼 수 있어요.
+            </p>
           </div>
           <BookOpen size={22} aria-hidden="true" />
         </div>
@@ -46,7 +94,7 @@ export function Roadmap({
             </span>
           ))}
         </div>
-        <div className="roadmap-canvas">
+        <div className="roadmap-canvas" data-interacting={Boolean(activeId)}>
           <svg
             className="roadmap-edges"
             viewBox="0 0 100 100"
@@ -62,6 +110,7 @@ export function Roadmap({
                 y2={domain.y}
                 stroke={domain.color}
                 className="domain-edge"
+                data-emphasis={emphasis(emphasizedDomain(domain.name))}
               />
             ))}
             {concepts.map((concept) => {
@@ -71,6 +120,8 @@ export function Roadmap({
               return (
                 <line
                   key={concept.id}
+                  data-concept={concept.id}
+                  data-emphasis={emphasis(related.has(concept.id))}
                   x1={domain.x}
                   y1={domain.y}
                   x2={concept.position.x}
@@ -79,28 +130,51 @@ export function Roadmap({
                 />
               );
             })}
-            {selected.prerequisites.map((id) => {
-              const prerequisite = concepts.find((item) => item.id === id)!;
-              return (
-                <line
-                  className="prerequisite-edge"
-                  key={id}
-                  x1={prerequisite.position.x}
-                  y1={prerequisite.position.y}
-                  x2={selected.position.x}
-                  y2={selected.position.y}
-                />
-              );
-            })}
+            {concepts.flatMap((concept) =>
+              concept.prerequisites
+                .filter(
+                  (id) =>
+                    previewIds.includes(concept.id) || previewIds.includes(id),
+                )
+                .map((id) => {
+                  const prerequisite = concepts.find((item) => item.id === id)!;
+                  return (
+                    <line
+                      className="prerequisite-edge"
+                      key={`${id}-${concept.id}`}
+                      data-emphasis={emphasis(
+                        related.has(id) && related.has(concept.id),
+                      )}
+                      x1={prerequisite.position.x}
+                      y1={prerequisite.position.y}
+                      x2={concept.position.x}
+                      y2={concept.position.y}
+                    />
+                  );
+                }),
+            )}
           </svg>
-          <div className="roadmap-root">
+          <div
+            className="roadmap-root"
+            role="group"
+            tabIndex={0}
+            aria-label="전체 로드맵"
+            data-active={activeId === "root"}
+            {...interaction("root")}
+          >
             <strong>내 로드맵</strong>
             <span>기본 CS</span>
           </div>
           {domains.map((domain) => (
             <div
               className="roadmap-domain"
+              role="group"
               key={domain.name}
+              tabIndex={0}
+              aria-label={`${domain.name} 영역`}
+              data-active={activeId === domain.name}
+              data-emphasis={emphasis(emphasizedDomain(domain.name))}
+              {...interaction(domain.name)}
               style={{
                 left: `${domain.x}%`,
                 top: `${domain.y}%`,
@@ -121,6 +195,9 @@ export function Roadmap({
               <button
                 className={`roadmap-node ${currentStatus}`}
                 key={concept.id}
+                data-active={activeId === concept.id}
+                data-emphasis={emphasis(related.has(concept.id))}
+                {...interaction(concept.id)}
                 aria-pressed={selected.id === concept.id}
                 aria-label={`${concept.title} · ${statusLabels[currentStatus]}`}
                 style={
