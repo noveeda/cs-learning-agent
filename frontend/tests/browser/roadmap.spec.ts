@@ -254,14 +254,12 @@ test("저장 실패를 알리고 선택·학습 상태·이동을 적용하지 �
   await expect(page).toHaveURL(/#\/roadmap$/);
 });
 
-test("데스크톱 로드맵은 중앙에서 영역별 원형 노드로 뻗는 방사형 배치", async ({
-  page,
-}) => {
+test("데스크톱 로드맵은 큰 범주 원 안에 개념 노드를 배치", async ({ page }) => {
   await page.goto("/#/roadmap");
   const root = page.locator(".roadmap-root");
   await expect(root).toHaveText("내 로드맵기본 CS");
   await expect(page.locator(".roadmap-domain")).toHaveCount(3);
-  await expect(page.locator(".domain-edge")).toHaveCount(3);
+  await expect(page.locator(".domain-edge")).toHaveCount(0);
   await expect(page.locator(".roadmap-node")).toHaveCount(9);
   const center = await root.boundingBox();
   expect(center).not.toBeNull();
@@ -277,12 +275,23 @@ test("데스크톱 로드맵은 중앙에서 영역별 원형 노드로 뻗는 �
       };
     }),
   );
-  const cx = center!.x + center!.width / 2;
-  const cy = center!.y + center!.height / 2;
-  expect(positions.some((node) => node.x < cx && node.y < cy)).toBe(true);
-  expect(positions.some((node) => node.x > cx && node.y < cy)).toBe(true);
-  expect(positions.some((node) => node.x < cx && node.y > cy)).toBe(true);
-  expect(positions.some((node) => node.x > cx && node.y > cy)).toBe(true);
+  const containment = await page.locator(".roadmap-node").evaluateAll((nodes) =>
+    nodes.every((node) => {
+      const domain = [...document.querySelectorAll(".roadmap-domain")].find(
+        (area) =>
+          area.getAttribute("aria-label") ===
+          `${node.getAttribute("data-domain")} 영역`,
+      )!;
+      const child = node.getBoundingClientRect();
+      const area = domain.getBoundingClientRect();
+      const distance = Math.hypot(
+        child.x + child.width / 2 - area.x - area.width / 2,
+        child.y + child.height / 2 - area.y - area.height / 2,
+      );
+      return distance + child.width / 2 <= area.width / 2;
+    }),
+  );
+  expect(containment).toBe(true);
   for (const position of positions) {
     expect(position.width).toBe(position.height);
     expect(position.radius).toBe("50%");
@@ -316,10 +325,7 @@ test("노드 호버는 관계 노드·연결선을 강조하고 클릭 선택을
   await expect(
     page.getByRole("button", { name: "트리와 그래프 · 미학습", exact: true }),
   ).toHaveAttribute("data-emphasis", "related");
-  await expect(page.locator('line[data-concept="stack-queue"]')).toHaveCSS(
-    "opacity",
-    "1",
-  );
+  await expect(page.locator(".cross-domain-edge")).toHaveCSS("opacity", "1");
   await expect(process).toHaveCSS("opacity", "0.3");
   await expect(process).toHaveAttribute("aria-pressed", "true");
   await expect(
