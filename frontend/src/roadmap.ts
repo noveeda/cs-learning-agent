@@ -86,6 +86,28 @@ export const concepts: Concept[] = [
   },
 ];
 
+// These associations connect applications of concepts across domains, not a required study order.
+export const conceptRelations: {
+  source: string;
+  target: string;
+  description: string;
+  bend: { x: number; y: number };
+}[] = [
+  {
+    source: "scheduling",
+    target: "stack-queue",
+    bend: { x: -8, y: 70 },
+    description:
+      "FCFS·라운드 로빈 스케줄링은 준비 큐에서 프로세스의 실행 순서를 관리합니다.",
+  },
+  {
+    source: "process",
+    target: "tcp-udp",
+    bend: { x: 42, y: 15 },
+    description: "프로세스는 운영체제의 소켓을 통해 TCP·UDP 통신을 수행합니다.",
+  },
+];
+
 export const statusLabels: Record<LearningStatus, string> = {
   "not-started": "미학습",
   "in-progress": "학습 중",

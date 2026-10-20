@@ -2,6 +2,7 @@ import { useState, type CSSProperties } from "react";
 import { ArrowUpRight, BookOpen } from "lucide-react";
 import {
   concepts,
+  conceptRelations,
   statusLabels,
   type Concept,
   type LearningStatus,
@@ -33,19 +34,34 @@ export function Roadmap({
   const selected =
     concepts.find((concept) => concept.id === state.selectedId) || concepts[0];
   const status = state.statuses[selected.id] || "not-started";
+  const previewIds =
+    activeId === "root"
+      ? concepts.map((concept) => concept.id)
+      : activeDomain
+        ? concepts
+            .filter((concept) => concept.domain === activeDomain.name)
+            .map((concept) => concept.id)
+        : [(activeConcept || selected).id];
+  const visibleRelations = conceptRelations.filter(
+    (relation) =>
+      previewIds.includes(relation.source) ||
+      previewIds.includes(relation.target),
+  );
   const related = new Set(
     concepts
       .filter(
         (concept) =>
           activeId === "root" ||
           concept.domain === activeDomain?.name ||
-          (activeConcept &&
-            (concept.domain === activeConcept.domain ||
-              activeConcept.prerequisites.includes(concept.id) ||
-              concept.prerequisites.includes(activeConcept.id))),
+          concept.domain === activeConcept?.domain,
       )
       .map((concept) => concept.id),
   );
+  if (activeId)
+    for (const relation of visibleRelations) {
+      related.add(relation.source);
+      related.add(relation.target);
+    }
   const emphasizedDomain = (name: string) =>
     activeId === "root" ||
     name === activeDomain?.name ||
@@ -64,14 +80,6 @@ export function Roadmap({
     },
     onBlur: () => setFocusedId(null),
   });
-  const previewIds =
-    activeId === "root"
-      ? concepts.map((concept) => concept.id)
-      : activeDomain
-        ? concepts
-            .filter((concept) => concept.domain === activeDomain.name)
-            .map((concept) => concept.id)
-        : [(activeConcept || selected).id];
 
   return (
     <main className="roadmap-layout">
@@ -130,29 +138,30 @@ export function Roadmap({
                 />
               );
             })}
-            {concepts.flatMap((concept) =>
-              concept.prerequisites
-                .filter(
-                  (id) =>
-                    previewIds.includes(concept.id) || previewIds.includes(id),
-                )
-                .map((id) => {
-                  const prerequisite = concepts.find((item) => item.id === id)!;
-                  return (
-                    <line
-                      className="prerequisite-edge"
-                      key={`${id}-${concept.id}`}
-                      data-emphasis={emphasis(
-                        related.has(id) && related.has(concept.id),
-                      )}
-                      x1={prerequisite.position.x}
-                      y1={prerequisite.position.y}
-                      x2={concept.position.x}
-                      y2={concept.position.y}
-                    />
-                  );
-                }),
-            )}
+            {visibleRelations.map((relation) => {
+              const source = concepts.find(
+                (concept) => concept.id === relation.source,
+              )!;
+              const target = concepts.find(
+                (concept) => concept.id === relation.target,
+              )!;
+              return (
+                <path
+                  className="cross-domain-edge"
+                  key={`${source.id}-${target.id}`}
+                  data-source={source.id}
+                  data-target={target.id}
+                  data-emphasis={emphasis(
+                    related.has(source.id) && related.has(target.id),
+                  )}
+                  d={`M ${source.position.x} ${source.position.y} Q ${relation.bend.x} ${relation.bend.y} ${target.position.x} ${target.position.y}`}
+                >
+                  <title>
+                    {source.title} ↔ {target.title}：{relation.description}
+                  </title>
+                </path>
+              );
+            })}
           </svg>
           <div
             className="roadmap-root"
@@ -228,8 +237,8 @@ export function Roadmap({
           })}
         </div>
         <p className="roadmap-caption">
-          실선은 영역과 개념의 연결이에요. 선택한 개념의 선수 관계는 점선과
-          상세에서 확인하세요.
+          실선은 영역과 개념의 연결, 점선은 다른 영역 간의 연관 관계예요. 관계가
+          정의된 개념에만 점선이 표시돼요.
         </p>
       </section>
       <section className="card concept-detail" aria-label="선택한 개념">
@@ -292,6 +301,45 @@ export function Roadmap({
           </ul>
         ) : (
           <p>이 개념을 학습한 뒤 다른 영역도 살펴보세요.</p>
+        )}
+        <h3>다른 영역의 연관 개념</h3>
+        {conceptRelations.some(
+          (relation) =>
+            relation.source === selected.id || relation.target === selected.id,
+        ) ? (
+          <ul className="concept-links">
+            {conceptRelations
+              .filter(
+                (relation) =>
+                  relation.source === selected.id ||
+                  relation.target === selected.id,
+              )
+              .map((relation) => {
+                const linkedId =
+                  relation.source === selected.id
+                    ? relation.target
+                    : relation.source;
+                const linked = concepts.find(
+                  (concept) => concept.id === linkedId,
+                )!;
+                return (
+                  <li key={linkedId}>
+                    <button
+                      className="button secondary"
+                      onClick={() => onSelect(linkedId)}
+                    >
+                      {linked.title}
+                      <ArrowUpRight size={14} aria-hidden="true" />
+                    </button>
+                    <p>
+                      {linked.domain} · {relation.description}
+                    </p>
+                  </li>
+                );
+              })}
+          </ul>
+        ) : (
+          <p>아직 연결한 다른 영역의 개념이 없어요.</p>
         )}
         <button
           className="button primary start-learning"

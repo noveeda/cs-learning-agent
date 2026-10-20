@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { concepts, loadRoadmap, saveRoadmap } from '../src/roadmap.ts';
+import { concepts, conceptRelations, loadRoadmap, saveRoadmap } from '../src/roadmap.ts';
 
 const emptyState = { selectedId: concepts[0].id, statuses: {}, conversationIds: {} };
 const stored = value => ({ getItem: () => JSON.stringify(value) });
@@ -70,5 +70,20 @@ test('all prerequisite links point to existing concepts and graph positions fit 
     assert.ok(concept.prerequisites.every(id => ids.has(id) && id !== concept.id));
     assert.ok(concept.position.x >= 0 && concept.position.x <= 100);
     assert.ok(concept.position.y >= 0 && concept.position.y <= 100);
+  }
+});
+
+
+test('cross-domain relations have distinct valid endpoints, a reason and no duplicate pair', () => {
+  const pairs = new Set();
+  for (const relation of conceptRelations) {
+    const source = concepts.find(concept => concept.id === relation.source);
+    const target = concepts.find(concept => concept.id === relation.target);
+    assert.ok(source && target);
+    assert.notEqual(source.domain, target.domain);
+    assert.ok(relation.description.trim());
+    const pair = [source.id, target.id].sort().join(':');
+    assert.ok(!pairs.has(pair));
+    pairs.add(pair);
   }
 });
