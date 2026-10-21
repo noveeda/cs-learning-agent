@@ -1,3 +1,4 @@
+// 파일 역할: 저장소 재생성과 단계 재시도에서 원본·버전이 보존되는지 검증
 package com.csagent.backend;
 
 import com.sun.net.httpserver.HttpServer;
@@ -15,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class CurriculumControllerTests {
     @TempDir Path directory;
     @Test
+    // 역할: 입력 경계와 저장소 객체 재생성 후 체크포인트 복구 검증
     void validatesInputAndRestoresAfterStoreRestart() throws Exception {
         var controller = new CurriculumController("http://127.0.0.1:1", new CurriculumStore(directory.toString()));
         for (String topic : new String[]{null, " ", "x".repeat(301)})
@@ -26,6 +28,7 @@ class CurriculumControllerTests {
         assertThrows(ResponseStatusException.class, () -> restarted.load("a".repeat(32)));
     }
     @Test
+    // 역할: 상류 실패 시 기존 상태 보존과 이미 저장한 버전의 중복 실행 차단 검증
     void preservesCheckpointOnFailureAndDoesNotReplaySavedSteps() throws Exception {
         var upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         var status = new AtomicInteger(503);
