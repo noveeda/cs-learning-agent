@@ -1,3 +1,4 @@
+// 파일 역할: 대화 한 세션의 복구·질문 입력·실시간 답변·도식 표시와 실패 후 재시도 담당
 import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import {
@@ -19,6 +20,7 @@ import { AgentNotes } from "./LearningShell";
 import { DiagramPanel } from "./DiagramPanel";
 import { statusLabels, type Concept, type LearningStatus } from "./roadmap";
 
+// 역할: 대화 ID에 해당하는 기록을 복구하고 질문·도식·학습 상태 UI 구성
 export function ChatSession({
   conversationId,
   concept,
@@ -49,6 +51,7 @@ export function ChatSession({
   const input = useRef<HTMLTextAreaElement>(null);
   const inFlight = useRef(false);
   useEffect(() => {
+    // 느린 이전 조회 응답이 새 세션 상태를 덮어쓰지 않도록 effect 정리 여부 확인
     let cancelled = false;
     setLoading(true);
     setError("");
@@ -73,9 +76,11 @@ export function ChatSession({
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, status, draft]);
 
+  // 역할: 중복 전송을 막고 진행 이벤트와 최종 답변 반영; 실패 시 질문과 부분 답변 보존
   async function send(text: string) {
     const value = text.trim();
     if (!value || inFlight.current || loading) return;
+    // React 상태 갱신 전에 연속 클릭이 들어올 수 있으므로 ref로 즉시 잠금
     inFlight.current = true;
     setMessages((old) => [...old, { role: "user", content: value }]);
     let partialAnswer = "";
@@ -85,6 +90,7 @@ export function ChatSession({
     onBusyChange(true);
     setError("");
     setStatus("질문을 살펴보고 있어요");
+    // 역할: 에이전트 이벤트를 답변 조각·도식·사용자 진행 안내로 변환
     function showProgress(event: AgentEvent) {
       if (event.type === "context")
         setContextNotice(
@@ -142,6 +148,7 @@ export function ChatSession({
             ]
           : []),
       ]);
+      // 실패한 질문을 복원해 사용자가 다시 입력하지 않고 재시도할 수 있도록 처리
       setQuestion(value);
     } finally {
       setDraft("");
