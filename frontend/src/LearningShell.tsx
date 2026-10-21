@@ -1,3 +1,4 @@
+// 파일 역할: 학습·로드맵 화면의 공통 내비게이션·헤더와 질문 보조 패널 구성
 import { useRef, type ReactNode } from "react";
 import {
   BookOpen,
@@ -19,6 +20,7 @@ const upcoming = [
   { label: "복습 노트", icon: FileText },
 ];
 
+// 역할: 구현된 화면 이동 메뉴와 준비 중 메뉴를 구분해 표시
 function Navigation({
   page,
   busy,
@@ -69,6 +71,7 @@ function Navigation({
   );
 }
 
+// 역할: 공통 브랜드 아이콘과 이름 표시
 function Brand() {
   return (
     <div className="brand">
@@ -80,6 +83,7 @@ function Brand() {
   );
 }
 
+// 역할: 공통 화면 틀과 모바일 메뉴 관리; 실제 학습 내용은 children으로 삽입
 export function LearningShell({
   children,
   headerExtra,
@@ -183,6 +187,7 @@ export function LearningShell({
   );
 }
 
+// 역할: 대화 여부에 맞춘 추천 질문과 보조 학습 내용을 표시
 export function AgentNotes({
   hasMessages,
   disabled,

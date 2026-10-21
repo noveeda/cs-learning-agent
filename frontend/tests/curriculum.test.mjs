@@ -1,3 +1,4 @@
+// 파일 역할: 생성 API 버전 재시도·잘못된 상태·네트워크 오류 안내를 검증
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createCurriculum, loadCurriculum, stepCurriculum } from '../src/curriculum.ts';

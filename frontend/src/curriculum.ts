@@ -1,3 +1,4 @@
+// 파일 역할: 커리큘럼 작업 생성·조회·단계 진행 API와 웹에서 필요한 응답 타입 정의
 export type DraftInput = { topic: string; goal: string; level: string };
 export type Lesson = { title: string; objectives: string[] };
 export type Unit = {
@@ -11,6 +12,7 @@ export type CurriculumJob = {
   };
 };
 
+// 역할: 요청 시간 제한과 오류 안내를 통일하고 응답 구조 검증 후 상태 반환
 async function request(path: string, body?: unknown): Promise<CurriculumJob> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 330000);
@@ -31,6 +33,7 @@ async function request(path: string, body?: unknown): Promise<CurriculumJob> {
     }
     const job = await response.json();
     const text = (value: unknown): value is string => typeof value === 'string' && !!value.trim();
+    // 서버 응답도 실행 시점에 검사해 잘못된 배열·필드가 화면 렌더링을 깨뜨리지 않도록 차단
     const validUnit = (unit: Unit) => text(unit?.id) && text(unit.plan?.title) && text(unit.plan?.scope)
       && Array.isArray(unit.plan.topics) && unit.plan.topics.length > 0 && unit.plan.topics.every(text)
       && Array.isArray(unit.lessons) && unit.lessons.length <= unit.plan.topics.length
@@ -48,6 +51,9 @@ async function request(path: string, body?: unknown): Promise<CurriculumJob> {
     throw error;
   } finally { clearTimeout(timer); }
 }
+// 역할: 학습 조건으로 새 생성 작업 생성
 export const createCurriculum = (input: DraftInput) => request('', input);
+// 역할: 저장된 최신 상태를 조회해 새로고침·실패 후 복원
 export const loadCurriculum = (id: string) => request(`/${id}`);
+// 역할: 상태 전체 대신 버전만 전송해 서버에 저장된 체크포인트를 기준으로 진행
 export const stepCurriculum = (job: CurriculumJob) => request(`/${job.id}/step`, { version: job.version });
