@@ -1,11 +1,14 @@
-# 파일 역할: 개요·단원 생성·검토·보완을 체크포인트 단위로 실행하며 문맥 한도와 반복 출력을 관리
-"""Checkpointed curriculum generation. A step performs at most one model call."""
+# 파일 역할: LangGraph로 생성 단계 하나를 실행하고 문맥·검토 반복·복구를 관리; 체크포인트 저장은 백엔드 담당
+"""LangGraph curriculum steps; Spring owns checkpoints, one model call per request."""
 import json
 import logging
 import os
 import time
-from typing import Annotated, Literal
+from dataclasses import dataclass
+from typing import Annotated, Literal, TypedDict
 
+from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
@@ -293,7 +296,8 @@ def step(original: JobState, gateway) -> JobState:
         return state
     state.steps += 1
     try:
-        advance(state, gateway)
+        # 현재 단계 노드만 실행; 다음 단계는 백엔드가 결과를 저장하고 새 요청을 보낼 때 진행
+        state = _GRAPH.invoke({"job": state}, context=_StepContext(gateway))["job"]
         state.retries = 0
     except CapacityError as exc:
         if state.stage == 'outline' and not state.outline_split:
@@ -325,111 +329,181 @@ def step(original: JobState, gateway) -> JobState:
     return state
 
 
-# 역할: 현재 단계에 맞는 모델 호출과 상태 전환 수행; 완성 조건은 모델 문장이 아닌 코드로 판정
-def advance(s, gateway):
-    others = lambda index: [u for i, u in enumerate(s.units) if i != index]
-    # 한 단계당 모델 호출 하나만 수행해 단계 사이 저장·일시 중단·재개 가능
-    if s.stage == 'outline':
-        page = gateway.ask(s,
-            '전체 학습 범위를 충족하도록 다음 단원 하나의 개요와 필요한 소단원 제목을 작성한다. '
-            '기존 단원과 중복하지 않는다. 이번 단원으로 전체 요구를 충족하면 done=true. '
-            '이미 기존 단원으로 충분하면 unit=null, done=true. 더 단원이 필요할 때만 done=false. '
-            '현재 수준에서 이미 아는 내용은 불필요하게 반복하지 않는다. '
-            + ('이전 개요가 한도를 초과했다. 큰 단원을 더 작은 단원으로 분할하고 이번에는 작은 단원 하나만 작성한다.' if s.outline_split else ''),
-            OutlinePage, {'planned': compact_units(s.units)}, [])
-        if page.unit is not None:
-            if page.unit.title.casefold() in {u.plan.title.casefold() for u in s.units}:
-                raise ValueError('중복 단원')
-            s.units.append(Unit(id=f'u{len(s.units) + 1}', plan=page.unit))
-            s.message = f'개요에 {page.unit.title} 단원을 추가했습니다.'
-        if page.done:
-            if not s.units:
-                raise ValueError('빈 개요 완료 응답')
-            s.stage, s.cursor, s.message = 'generate', 0, '개요를 완성했습니다. 단원별 학습 목표를 작성합니다.'
-        elif page.unit is None:
-            raise ValueError('진행되지 않는 개요 응답')
-    # 계획된 소단원 순서에 결과를 대응시켜 모델이 제목을 바꿔도 단원 식별 유지
-    elif s.stage == 'generate':
-        u = s.units[s.cursor]
-        if u.split:
-            index = len(u.lessons)
-            result = gateway.ask(s, '현재 소단원의 학습 목표를 작성한다. 다른 소단원은 생성하지 않는다.',
-                Objectives, {'unit': u.plan.title, 'scope': u.plan.scope, 'topic': u.plan.topics[index],
-                             'feedback': u.feedback}, others(s.cursor))
-            u.lessons.append(Lesson(title=u.plan.topics[index], objectives=result.objectives))
+# 역할: 현재 단원을 제외한 단원만 모델의 참고 문맥으로 선택
+def _other_units(s, index):
+    return [u for i, u in enumerate(s.units) if i != index]
+
+
+# 역할: 다음 단원 개요 하나를 생성하고 범위 충족 시 목표 생성 단계로 전환
+def _outline(s, gateway):
+    page = gateway.ask(s,
+        '전체 학습 범위를 충족하도록 다음 단원 하나의 개요와 필요한 소단원 제목을 작성한다. '
+        '기존 단원과 중복하지 않는다. 이번 단원으로 전체 요구를 충족하면 done=true. '
+        '이미 기존 단원으로 충분하면 unit=null, done=true. 더 단원이 필요할 때만 done=false. '
+        '현재 수준에서 이미 아는 내용은 불필요하게 반복하지 않는다. '
+        + ('이전 개요가 한도를 초과했다. 큰 단원을 더 작은 단원으로 분할하고 이번에는 작은 단원 하나만 작성한다.' if s.outline_split else ''),
+        OutlinePage, {'planned': compact_units(s.units)}, [])
+    if page.unit is not None:
+        if page.unit.title.casefold() in {u.plan.title.casefold() for u in s.units}:
+            raise ValueError('중복 단원')
+        s.units.append(Unit(id=f'u{len(s.units) + 1}', plan=page.unit))
+        s.message = f'개요에 {page.unit.title} 단원을 추가했습니다.'
+    if page.done:
+        if not s.units:
+            raise ValueError('빈 개요 완료 응답')
+        s.stage, s.cursor, s.message = 'generate', 0, '개요를 완성했습니다. 단원별 학습 목표를 작성합니다.'
+    elif page.unit is None:
+        raise ValueError('진행되지 않는 개요 응답')
+
+
+# 역할: 계획 순서에 맞춰 단원 전체 또는 다음 소단원의 목표 생성; 남은 보완·생성 작업을 우선 선택
+def _generate(s, gateway):
+    u = s.units[s.cursor]
+    if u.split:
+        index = len(u.lessons)
+        result = gateway.ask(s, '현재 소단원의 학습 목표를 작성한다. 다른 소단원은 생성하지 않는다.',
+            Objectives, {'unit': u.plan.title, 'scope': u.plan.scope, 'topic': u.plan.topics[index],
+                         'feedback': u.feedback}, _other_units(s, s.cursor))
+        u.lessons.append(Lesson(title=u.plan.topics[index], objectives=result.objectives))
+    else:
+        result = gateway.ask(s, '현재 단원의 모든 소단원에 학습 목표를 작성한다. plan.topics와 같은 순서와 개수로 lessons를 반환한다.',
+            UnitContent, {'plan': u.plan.model_dump(), 'feedback': u.feedback}, _other_units(s, s.cursor))
+        if len(result.lessons) != len(u.plan.topics):
+            raise ValueError('계획된 소단원 누락')
+        u.lessons = [Lesson(title=title, objectives=item.objectives)
+                     for title, item in zip(u.plan.topics, result.lessons)]
+    s.message = f'{u.plan.title}: 소단원 {len(u.lessons)}/{len(u.plan.topics)} 생성 완료'
+    if len(u.lessons) == len(u.plan.topics):
+        u.feedback = []
+        pending_repair = next((i for i, x in enumerate(s.units) if x.reviewed and x.feedback), None)
+        pending_generation = next((i for i, x in enumerate(s.units) if len(x.lessons) < len(x.plan.topics)), None)
+        if pending_repair is not None:
+            s.stage, s.cursor = 'repair', pending_repair
+        elif pending_generation is not None:
+            s.cursor = pending_generation
         else:
-            result = gateway.ask(s, '현재 단원의 모든 소단원에 학습 목표를 작성한다. plan.topics와 같은 순서와 개수로 lessons를 반환한다.',
-                UnitContent, {'plan': u.plan.model_dump(), 'feedback': u.feedback}, others(s.cursor))
-            if len(result.lessons) != len(u.plan.topics):
-                raise ValueError('계획된 소단원 누락')
-            u.lessons = [Lesson(title=title, objectives=item.objectives)
-                         for title, item in zip(u.plan.topics, result.lessons)]
-        s.message = f'{u.plan.title}: 소단원 {len(u.lessons)}/{len(u.plan.topics)} 생성 완료'
-        if len(u.lessons) == len(u.plan.topics):
-            u.feedback = []
-            pending_repair = next((i for i, x in enumerate(s.units) if x.reviewed and x.feedback), None)
-            pending_generation = next((i for i, x in enumerate(s.units) if len(x.lessons) < len(x.plan.topics)), None)
-            if pending_repair is not None:
-                s.stage, s.cursor = 'repair', pending_repair
-            elif pending_generation is not None:
-                s.cursor = pending_generation
-            else:
-                s.stage = 'review'
-                s.cursor = next(i for i, x in enumerate(s.units) if not x.reviewed)
-    elif s.stage == 'review':
-        u = s.units[s.cursor]
-        current = {'plan': u.plan.model_dump(), 'lessons': [l.model_dump() for l in u.lessons]}
-        if u.review_split:
-            lesson = u.lessons[u.review_cursor]
-            current = {'unit': u.plan.title, 'scope': u.plan.scope, 'lesson': lesson.model_dump()}
-        report = gateway.ask(s,
-            REVIEW_CRITERIA + '현재 단원(또는 소단원)의 목표가 요구와 수준에 맞는지 검토한다. '
-            '다른 단원의 세부 정보가 요약된 경우 확인하지 못한 내용을 단정하지 않는다. '
-            '명백한 사실 오류나 필수 개념 누락만 issues에 적는다. 문체 선호나 선택적 심화 제안은 제외한다. '
-            '목표의 설명한다/설명할 수 있다 표현은 동일하게 인정한다. 이미 알거나 요청 범위 밖인 개념을 추가 요구하지 않는다.',
-            Findings, current, others(s.cursor))
-        u.feedback.extend(report.issues)
-        u.review_cursor += 1
-        if not u.review_split or u.review_cursor == len(u.lessons):
-            u.reviewed = True
-            pending = next((i for i, x in enumerate(s.units) if not x.reviewed), None)
-            if pending is None:
-                s.stage = 'final'
-            else:
-                s.cursor = pending
-        s.message = f'{u.plan.title} 검토 결과를 기록했습니다.'
-    # 문제 없음뿐 아니라 모든 단원의 목표 생성과 검토 완료 여부까지 확인한 뒤 종료
-    elif s.stage == 'final':
-        report = gateway.ask(s,
-            REVIEW_CRITERIA + '전체 커리큘럼의 범위 충족, 단원 순서, 단원 간 누락과 중복을 최종 검토한다. '
-            '학습 범위를 불필요하게 확장하지 않는다. 문제가 있으면 해당 unit_id와 구체적 수정 이유를 반환한다. '
-            '요구 달성을 막는 명백한 사실 오류·필수 누락만 지적하며 문체 변경이나 선택적 심화 추가는 요구하지 않는다. '
-            '누락 개념은 관련 단원에 추가하도록 요청한다. 문제가 없으면 issues=[]을 반환한다.',
-            FinalReview, {'outline': compact_units(s.units)}, s.units)
-        by_id = {u.id: u for u in s.units}
-        if any(issue.unit_id not in by_id for issue in report.issues):
-            raise ValueError('존재하지 않는 단원 참조')
-        for issue in report.issues:
-            by_id[issue.unit_id].feedback.append(issue.reason)
-        pending = next((i for i, u in enumerate(s.units) if u.feedback), None)
+            s.stage = 'review'
+            s.cursor = next(i for i, x in enumerate(s.units) if not x.reviewed)
+
+
+# 역할: 현재 단원 또는 소단원을 검토하고 피드백 누적; 모든 단원 검토 후 전체 검토로 전환
+def _review(s, gateway):
+    u = s.units[s.cursor]
+    current = {'plan': u.plan.model_dump(), 'lessons': [l.model_dump() for l in u.lessons]}
+    if u.review_split:
+        lesson = u.lessons[u.review_cursor]
+        current = {'unit': u.plan.title, 'scope': u.plan.scope, 'lesson': lesson.model_dump()}
+    report = gateway.ask(s,
+        REVIEW_CRITERIA + '현재 단원(또는 소단원)의 목표가 요구와 수준에 맞는지 검토한다. '
+        '다른 단원의 세부 정보가 요약된 경우 확인하지 못한 내용을 단정하지 않는다. '
+        '명백한 사실 오류나 필수 개념 누락만 issues에 적는다. 문체 선호나 선택적 심화 제안은 제외한다. '
+        '목표의 설명한다/설명할 수 있다 표현은 동일하게 인정한다. 이미 알거나 요청 범위 밖인 개념을 추가 요구하지 않는다.',
+        Findings, current, _other_units(s, s.cursor))
+    u.feedback.extend(report.issues)
+    u.review_cursor += 1
+    if not u.review_split or u.review_cursor == len(u.lessons):
+        u.reviewed = True
+        pending = next((i for i, x in enumerate(s.units) if not x.reviewed), None)
         if pending is None:
-            if not all(u.reviewed and len(u.lessons) == len(u.plan.topics) for u in s.units):
-                raise ValueError('미완료 단원 존재')
-            s.stage, s.message = 'complete', '생성과 전체 검토를 마쳤습니다. AI 초안의 내용은 직접 확인해 주세요.'
-        elif s.repairs >= MAX_REPAIRS:
-            s.stage, s.message = 'blocked', '검토 문제가 반복되어 중단했습니다. 단원별 피드백과 생성 결과를 확인해 주세요.'
+            s.stage = 'final'
         else:
-            s.repairs += 1
-            s.stage, s.cursor = 'repair', pending
-            s.message = '전체 검토에서 발견한 문제를 보완합니다.'
-    elif s.stage == 'repair':
-        u = s.units[s.cursor]
-        plan = gateway.ask(s, '피드백을 해결하도록 현재 단원 개요를 수정한다. 학습 범위와 다른 단원의 역할을 보존한다.',
-            UnitPlan, {'plan': u.plan.model_dump(), 'feedback': u.feedback}, others(s.cursor))
-        if any(other.plan.title.casefold() == plan.title.casefold() for other in others(s.cursor)):
-            raise ValueError('보완 후 단원 중복')
-        u.plan, u.lessons = plan, []
-        u.reviewed, u.review_cursor = False, 0
-        # Carry feedback into regeneration, then clear only after it has been consumed.
-        s.stage = 'generate'
-        s.message = f'{plan.title} 단원을 보완 생성합니다.'
+            s.cursor = pending
+    s.message = f'{u.plan.title} 검토 결과를 기록했습니다.'
+
+
+# 역할: 전체 범위를 검토하고 완료 조건 확인; 미해결 피드백이 있으면 보완 또는 한도 중단
+def _final_review(s, gateway):
+    report = gateway.ask(s,
+        REVIEW_CRITERIA + '전체 커리큘럼의 범위 충족, 단원 순서, 단원 간 누락과 중복을 최종 검토한다. '
+        '학습 범위를 불필요하게 확장하지 않는다. 문제가 있으면 해당 unit_id와 구체적 수정 이유를 반환한다. '
+        '요구 달성을 막는 명백한 사실 오류·필수 누락만 지적하며 문체 변경이나 선택적 심화 추가는 요구하지 않는다. '
+        '누락 개념은 관련 단원에 추가하도록 요청한다. 문제가 없으면 issues=[]을 반환한다.',
+        FinalReview, {'outline': compact_units(s.units)}, s.units)
+    by_id = {u.id: u for u in s.units}
+    if any(issue.unit_id not in by_id for issue in report.issues):
+        raise ValueError('존재하지 않는 단원 참조')
+    for issue in report.issues:
+        by_id[issue.unit_id].feedback.append(issue.reason)
+    pending = next((i for i, u in enumerate(s.units) if u.feedback), None)
+    if pending is None:
+        if not all(u.reviewed and len(u.lessons) == len(u.plan.topics) for u in s.units):
+            raise ValueError('미완료 단원 존재')
+        s.stage, s.message = 'complete', '생성과 전체 검토를 마쳤습니다. AI 초안의 내용은 직접 확인해 주세요.'
+    elif s.repairs >= MAX_REPAIRS:
+        s.stage, s.message = 'blocked', '검토 문제가 반복되어 중단했습니다. 단원별 피드백과 생성 결과를 확인해 주세요.'
+    else:
+        s.repairs += 1
+        s.stage, s.cursor = 'repair', pending
+        s.message = '전체 검토에서 발견한 문제를 보완합니다.'
+
+
+# 역할: 피드백으로 대상 단원 개요를 수정하고 목표를 재생성하도록 해당 단원 진행 상태 초기화
+def _repair(s, gateway):
+    u = s.units[s.cursor]
+    plan = gateway.ask(s, '피드백을 해결하도록 현재 단원 개요를 수정한다. 학습 범위와 다른 단원의 역할을 보존한다.',
+        UnitPlan, {'plan': u.plan.model_dump(), 'feedback': u.feedback}, _other_units(s, s.cursor))
+    if any(other.plan.title.casefold() == plan.title.casefold() for other in _other_units(s, s.cursor)):
+        raise ValueError('보완 후 단원 중복')
+    u.plan, u.lessons = plan, []
+    u.reviewed, u.review_cursor = False, 0
+    # Carry feedback into regeneration, then clear only after it has been consumed.
+    s.stage = 'generate'
+    s.message = f'{plan.title} 단원을 보완 생성합니다.'
+
+
+# 역할: 그래프 노드 사이에 전달할 생성 작업 보관; 저장 계약은 기존 JobState 유지
+class _GraphState(TypedDict):
+    # Only the existing JSON-compatible job is returned to the API. Clients and
+    # graph runtime state never become part of the Spring checkpoint schema.
+    job: JobState
+
+
+# 역할: 요청별 모델 게이트웨이 전달; JSON 체크포인트에 클라이언트를 저장하지 않도록 상태와 분리
+@dataclass(frozen=True)
+class _StepContext:
+    gateway: ModelGateway
+
+
+# 역할: 기존 단계 함수를 LangGraph 노드 호출 형태로 감싸 요청별 실행 문맥 연결
+def _stage_node(handler):
+    # 역할: 현재 요청의 게이트웨이로 단계 하나를 실행하고 변경된 작업 상태 반환
+    def execute(state: _GraphState, runtime: Runtime[_StepContext]):
+        job = state['job']
+        handler(job, runtime.context.gateway)
+        return {'job': job}
+    return execute
+
+
+# 역할: 저장된 작업 단계에 맞는 그래프 진입 경로 선택
+def _select_stage(state: _GraphState):
+    return state['job'].stage
+
+
+# 역할: 단계별 노드와 진입 분기 구성; 각 노드는 END로 종료해 요청당 한 단계 실행 경계 유지
+def _build_graph():
+    graph = StateGraph(_GraphState, context_schema=_StepContext)
+    handlers = {
+        'outline': _outline,
+        'generate': _generate,
+        'review': _review,
+        'final_review': _final_review,
+        'repair': _repair,
+    }
+    # 그래프 내부에서 다음 업무 단계로 연쇄 실행하지 않아 중단·재개와 버전 저장 경계 유지
+    for name, handler in handlers.items():
+        graph.add_node(name, _stage_node(handler))
+        # A new request, not an internal graph loop, starts the next business
+        # step. Spring saves the returned state and advances its version first.
+        graph.add_edge(name, END)
+    graph.add_conditional_edges(START, _select_stage, {
+        'outline': 'outline', 'generate': 'generate', 'review': 'review',
+        'final': 'final_review', 'repair': 'repair',
+        'complete': END, 'blocked': END,
+    })
+    # Spring JSON remains authoritative; no checkpointer, store, node cache, or
+    # automatic node retry policy is configured in this first adoption.
+    # 그래프 구조만 공유; 게이트웨이와 작업 상태는 요청마다 전달해 요청 간 상태 혼합 방지
+    return graph.compile()
+
+
+_GRAPH = _build_graph()

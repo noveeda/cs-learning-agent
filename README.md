@@ -120,6 +120,21 @@ AI core의 `CURRICULUM_MAX_STEPS`(기본 100단계), `CURRICULUM_MAX_REPAIRS`(�
 일시적인 실패는 같은 작업에서 재시도할 수 있지만, `확인 필요` 작업은 부분 결과를 확인하고 범위를 조정해 새 작업을 시작해야 합니다.
 각 호출은 기존 채팅과 AI core 프로세스의 실행 잠금을 공유합니다.
 
+**LangGraph 1차 도입:** Python AI core의 단계 선택은 LangGraph `StateGraph`로 실행합니다.
+저장된 `stage`에 따라 `outline`, `generate`, `review`, `final_review`, `repair` 중 하나의 노드를 실행하고,
+다음 단계까지 자동 반복하지 않고 요청을 종료합니다. 저장 JSON의 전체 검토 단계 값은 기존 `final`을 유지합니다.
+한 번의 `/step` 요청은 모델 호출을 최대 한 번만 수행하며, 다음 요청 전에 Spring이 결과를 저장하고 버전을 증가시킵니다.
+
+외부 API·요청/응답 필드·JSON 저장 형식·모델 SDK·프롬프트·토큰 예산·재시도 한도는 유지합니다.
+완료·확인 필요 상태와 작업 한도 도달 시에는 모델을 다시 호출하지 않습니다.
+실패한 단계의 부분 변경은 마지막 유효 상태로 되돌리고, 호출량·오류 안내와 기존 재시도 횟수는 기록합니다.
+
+LangGraph 전용 체크포인터·DB·노드 캐시·자동 재시도는 사용하지 않습니다.
+Spring의 JSON 체크포인트가 기준이며 기존 파일을 변환할 필요가 없습니다.
+재개는 마지막으로 저장된 단계부터 진행합니다. 모델 응답 후 Spring 저장 전에 프로세스가 종료되면
+해당 단계가 다시 실행될 수 있으며, 생성 중이던 토큰을 그대로 이어받는 기능은 아닙니다.
+LangGraph 영속 저장소 도입은 별도 후속 작업입니다. 문제 발생 시 이전 코드와 의존성으로 되돌려 기존 JSON을 계속 읽을 수 있습니다.
+
 | API | 역할 |
 | --- | --- |
 | `POST /api/curriculum/draft` | `{topic, goal, level}`로 생성 작업 생성 |
@@ -162,6 +177,7 @@ AI core의 `CURRICULUM_MAX_STEPS`(기본 100단계), `CURRICULUM_MAX_REPAIRS`(�
 | 백엔드 | Jackson, Java HttpClient | 대화·이벤트 JSON 처리, AI core HTTP 요청 |
 | 백엔드 빌드 | Gradle Wrapper 9.8.1, Spring Dependency Management 플러그인 1.1.7 | 의존성 관리, 테스트와 실행 JAR 빌드 |
 | AI core | Python 3.12, FastAPI, Uvicorn | 에이전트 API와 스트리밍 응답 제공, ASGI 서버 실행 |
+| 커리큘럼 실행 | LangGraph 1.2.16 | 요청당 한 단계 실행, 기존 Spring JSON 체크포인트 유지 |
 | AI core | OpenAI Python SDK, HTTPX | vLLM의 OpenAI 호환 API 호출, 모델 정보·토큰 수 조회 |
 | AI core | Pydantic 2, fontTools(woff 지원) | 요청·도식 구조 검증, SVG에 포함할 한글 폰트 부분 집합 생성 |
 | 모델 추론 | vLLM 0.32.0, Qwen3.5-27B AWQ 4bit | 별도 GPU 환경에서 언어 모델 추론과 도구 호출 제공 |

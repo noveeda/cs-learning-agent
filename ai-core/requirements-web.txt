@@ -5,3 +5,5 @@ pydantic>=2,<3
 fastapi>=0.115,<1
 uvicorn>=0.30,<1
 fonttools[woff]>=4.60,<5
+# Curriculum orchestration only; model calls and Spring JSON storage are retained.
+langgraph==1.2.16
