@@ -1,3 +1,4 @@
+# 파일 역할: FastAPI로 채팅 스트림·도식 파일·커리큘럼 단계를 제공하는 로컬 전용 AI 서비스
 """Local web bridge for the diagram agent (no authentication; bind to loopback)."""
 import json
 import logging
@@ -22,22 +23,26 @@ OUTPUT_DIR = Path(__file__).resolve().parents[1] / 'outputs' / 'diagrams'
 BUSY = threading.Lock()
 
 
+# 역할: 대화 문맥에 다시 전달할 도식 ID와 그래프 구조
 class Artifact(BaseModel):
     artifact_id: str = Field(pattern=r'^[0-9a-f]{32}$')
     diagram: Diagram
 
 
+# 역할: 완료 이력으로 전달되는 문답 한 항목
 class Turn(BaseModel):
     role: str = Field(pattern='^(user|assistant)$')
     content: str = Field(min_length=1)
     artifacts: list[Artifact] = Field(default_factory=list)
 
 
+# 역할: 최신 질문·완료 이력·활성 도식을 묶는 요청 계약
 class Question(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     history: list[Turn] = Field(default_factory=list)
     active_artifact: Artifact | None = None
 
+    # 역할: 공백만 있는 질문을 거부해 의미 없는 모델 요청 방지
     @model_validator(mode='after')
     def validate_size(self):
         if not self.question.strip():
@@ -45,13 +50,16 @@ class Question(BaseModel):
         return self
 
 
+# 역할: AI core HTTP 서버의 응답 여부 확인; 모델 추론 성공 여부와는 별개
 @app.get('/health')
 def health():
     return {'status': 'ok'}
 
 
+# 역할: 질문을 받아 에이전트 이벤트를 NDJSON 스트림으로 반환
 @app.post('/chat')
 def chat(body: Question):
+    # 역할: 모델 접근 잠금을 획득하고 이벤트를 외부 공개 형태로 변환; 실패·종료 시 잠금 해제
     def events():
         if not BUSY.acquire(blocking=False):
             yield json.dumps({'type': 'error', 'message': '다른 질문을 처리 중입니다. 잠시 후 다시 시도해 주세요.'}, ensure_ascii=False) + '\n'
@@ -69,6 +77,7 @@ def chat(body: Question):
                                            history=[turn.model_dump() for turn in body.history],
                                            active_artifact=body.active_artifact.model_dump() if body.active_artifact else None,
                                            count_tokens=token_counter(http, model), context_limit=int(limit)):
+                        # 서버 파일 경로와 내부 도구 인자는 웹에 노출하지 않고 공개 URL·진행 상태만 전달
                         if event['type'] == 'artifact':
                             event = {k: v for k, v in event.items() if k != 'path'}
                             event['url'] = f"/api/artifacts/{event['artifact_id']}"
@@ -86,6 +95,7 @@ def chat(body: Question):
                              headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
 
 
+# 역할: 검증된 도식 ID의 SVG를 제한된 브라우저 실행 정책과 함께 반환
 @app.get('/artifacts/{artifact_id}')
 def artifact(artifact_id: str):
     if not re.fullmatch(r'[0-9a-f]{32}', artifact_id):
@@ -99,6 +109,7 @@ def artifact(artifact_id: str):
     })
 
 
+# 역할: 채팅과 같은 모델 잠금을 사용해 저장 상태의 커리큘럼 한 단계만 실행
 @app.post('/curriculum/step', response_model=JobState)
 def curriculum_step(body: JobState):
     if not BUSY.acquire(blocking=False):
