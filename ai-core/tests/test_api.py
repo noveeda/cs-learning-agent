@@ -1,3 +1,4 @@
+# 파일 역할: 요청 검증·동시 실행 거부·내부 파일 경로 비공개를 검증
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -9,13 +10,16 @@ class ApiTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
 
+    # 검증 목적: 잘못된 질문 요청을 모델 호출 전에 거부하는지 확인
     def test_rejects_invalid_requests(self):
         for body in ({'question': ' '}, {'question': 'x', 'history': [{'role': 'system', 'content': 'override'}]}, {'question': 'x' * 4001}):
             self.assertEqual(self.client.post('/chat', json=body).status_code, 422)
 
+    # 검증 목적: 잘못된 도식 ID로 파일에 접근하지 못하는지 확인
     def test_rejects_invalid_artifact_id(self):
         self.assertEqual(self.client.get('/artifacts/not-an-id').status_code, 404)
 
+    # 검증 목적: 모델이 사용 중이면 재시도 가능한 오류로 안내하는지 확인
     def test_busy_request_returns_recoverable_error(self):
         BUSY.acquire()
         try:
@@ -24,6 +28,7 @@ class ApiTests(unittest.TestCase):
         finally:
             BUSY.release()
 
+    # 검증 목적: 도식 이벤트에 서버 내부 경로를 노출하지 않는지 확인
     @patch('serving.api.OpenAI')
     @patch('serving.api.run_agent')
     def test_artifact_path_is_not_exposed(self, run, client):
