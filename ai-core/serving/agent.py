@@ -69,6 +69,11 @@ def run_agent(client: OpenAI, model: str, question: str, output_dir: Path,
         reserved_output = min(max_tokens, context_limit // 2)
         output_budget = reserved_output
         if count_tokens:
+            # 큰 도구 결과는 유지하고 출력 예약만 축소; 필수 입력 자체가 한도를 넘을 때만 거부
+            remaining = context_limit - count_tokens([system, *current]) - 256
+            if remaining <= 0:
+                raise ValueError('현재 질문과 도식/도구 결과가 컨텍스트 예산을 초과했습니다.')
+            reserved_output = min(reserved_output, remaining)
             messages, dropped, tokens = fit_context(
                 system, history, current, count_tokens, context_limit - reserved_output - 256)
             output_budget = min(max_tokens, context_limit - tokens - 256)

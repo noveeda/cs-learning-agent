@@ -233,3 +233,23 @@ class AgentTests(unittest.TestCase):
                     first, chunk('설명 후 정답'), chunk(finish='stop')])
                 events = list(run_agent(client, 'test', 'test', Path('/tmp/unused')))
                 self.assertEqual(events[-2], {'type': 'answer', 'text': '설명 후 정답'})
+
+    # 검증 목적: 필수 입력이 문맥 절반보다 커도 보존하고 추론 예약만 줄여 불필요한 실패 방지
+    def test_large_current_exchange_reduces_output_reservation(self):
+        client = Mock()
+        client.chat.completions.create.return_value = response(
+            ChatCompletionMessage(role='assistant', content='설명 후 정답'))
+        events = list(run_agent(client, 'test', '큰 도구 교환', Path('/tmp/unused'),
+                                count_tokens=lambda messages: 5000, context_limit=8192))
+        params = client.chat.completions.create.call_args.kwargs
+        self.assertEqual(params['max_tokens'], 8192 - 5000 - 256)
+        self.assertEqual(params['messages'][-1]['content'], '큰 도구 교환')
+        self.assertEqual(events[-1], {'type': 'done'})
+
+    # 검증 목적: 현재 입력만으로 문맥을 모두 쓰면 모델 요청 전에 명시적으로 거부
+    def test_no_output_space_rejects_before_model_request(self):
+        client = Mock()
+        with self.assertRaisesRegex(ValueError, '예산'):
+            list(run_agent(client, 'test', 'test', Path('/tmp/unused'),
+                           count_tokens=lambda messages: 8192 - 256, context_limit=8192))
+        client.chat.completions.create.assert_not_called()
