@@ -1,3 +1,4 @@
+/* 파일 역할: 색상·간격·글꼴·모서리 등 공통 시각 기준을 CSS 변수로 정의 */
 :root {
   font-family: 'Noto Sans KR', sans-serif;
   font-synthesis: none;
