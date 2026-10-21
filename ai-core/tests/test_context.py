@@ -1,5 +1,6 @@
 # 파일 역할: 실제 내용 길이 기반 예산과 최근 문답 쌍·도식 구조 보존을 검증
 import unittest
+from unittest.mock import Mock
 from serving.context import fit_context, history_messages, token_counter
 
 
@@ -40,3 +41,16 @@ class ContextTests(unittest.TestCase):
         self.assertIn('"id": "page"', history_messages(turns)[1]['content'])
         with self.assertRaises(ValueError):
             history_messages(turns[:1])
+
+    # 검증 목적: 생성과 동일한 추론 템플릿·도구 스키마로 토큰을 계산해 문맥 초과 방지
+    def test_tokenization_uses_thinking_template_and_tools(self):
+        http = Mock()
+        http.post.return_value.json.return_value = {'count': 123}
+        messages = [{'role': 'user', 'content': '질문'}]
+        self.assertEqual(token_counter(http, 'model')(messages), 123)
+        body = http.post.call_args.kwargs['json']
+        self.assertEqual(body['chat_template_kwargs'], {'enable_thinking': True})
+        self.assertEqual(body['messages'], messages)
+        self.assertTrue(body['tools'])
+        self.assertTrue(body['add_generation_prompt'])
+        http.post.return_value.raise_for_status.assert_called_once()
