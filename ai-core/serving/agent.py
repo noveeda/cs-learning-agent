@@ -1,3 +1,4 @@
+# 파일 역할: Qwen의 답변과 도구 호출을 중계하고 SVG 생성 결과를 다시 모델에 전달하는 제한된 에이전트 루프
 """Small bounded tool loop for the local Qwen server."""
 import json
 from pathlib import Path
@@ -15,6 +16,7 @@ SYSTEM = '''당신은 CS 학습 조교입니다. 한국어로 정확하게 답�
 완료 후 도식의 관계를 간결하게 설명하세요.'''
 
 
+# 역할: 질문·이력·활성 도식을 받아 텍스트·도구 상태·결과 이벤트를 순차 생성; 도구 횟수 제한으로 무한 실행 방지
 def run_agent(client: OpenAI, model: str, question: str, output_dir: Path,
               max_tool_rounds: int = 3, history: list[dict] | None = None,
               active_artifact: dict | None = None, count_tokens=None,
@@ -57,6 +59,7 @@ def run_agent(client: OpenAI, model: str, question: str, output_dir: Path,
                         yield {'type': 'text_start'}
                     content += delta.content
                     yield {'type': 'text_delta', 'text': delta.content}
+                # 도구 인자도 여러 조각으로 도착하므로 호출 index별로 결합한 뒤 완성된 JSON만 실행
                 for fragment in delta.tool_calls or []:
                     call = calls_by_index.setdefault(fragment.index, {
                         'id': '', 'type': 'function',
@@ -86,6 +89,7 @@ def run_agent(client: OpenAI, model: str, question: str, output_dir: Path,
             raise RuntimeError('불완전한 도구 호출을 받았습니다.')
         if turn == max_tool_rounds:
             raise RuntimeError('도구 호출 제한을 초과했습니다.')
+        # 모델의 도구 요청과 실행 결과를 같은 문맥에 보관해 후속 답변이 실제 결과를 참고하도록 구성
         current.append({'role': 'assistant', 'content': content or None, 'tool_calls': calls})
         for call in calls:
             name = call['function']['name']
