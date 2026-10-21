@@ -1,3 +1,4 @@
+// 파일 역할: 모의 AI 서버로 즉시 스트림 전달과 실패 문답의 재사용 제외를 검증
 package com.csagent.backend;
 
 import com.sun.net.httpserver.HttpServer;
@@ -21,6 +22,7 @@ class AgentControllerTests {
     @TempDir Path directory;
 
     @Test
+    // 역할: 상류 응답 종료 전에 브라우저로 이벤트가 전달되는지 검증
     void flushesServletBufferBeforeUpstreamCompletes() throws Exception {
         var firstFlush = new CountDownLatch(1);
         var flushedBeforeCompletion = new AtomicBoolean();
@@ -73,6 +75,7 @@ class AgentControllerTests {
     }
 
     @Test
+    // 역할: 실패한 부분 답변은 기록하되 다음 모델 문맥에서는 제외되는지 검증
     void interruptedReplyIsStoredButNotReused() throws Exception {
         var upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         var received = new AtomicReference<String>();
