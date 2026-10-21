@@ -1,3 +1,4 @@
+# 파일 역할: LangGraph로 생성 단계 하나를 실행하고 문맥·검토 반복·복구를 관리; 체크포인트 저장은 백엔드 담당
 """LangGraph curriculum steps; Spring owns checkpoints, one model call per request."""
 import json
 import logging
@@ -17,26 +18,31 @@ MAX_STEPS = int(os.getenv('CURRICULUM_MAX_STEPS', '100'))
 MAX_REPAIRS = int(os.getenv('CURRICULUM_MAX_REPAIRS', '3'))
 
 
+# 역할: 정의하지 않은 필드 거부로 모델 응답 계약 고정
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
+# 역할: 학습 주제·목적·수준 입력 계약
 class DraftRequest(StrictModel):
     topic: Text
     goal: Text
     level: Text
 
 
+# 역할: 소단원 제목과 확인 가능한 학습 목표
 class Lesson(StrictModel):
     title: Text
     objectives: list[Text] = Field(min_length=1)
 
 
+# 역할: 단원의 범위와 생성할 소단원 목록
 class UnitPlan(StrictModel):
     title: Text
     scope: Text
     topics: list[Text] = Field(min_length=1)
 
+    # 역할: 동일 소단원 제목을 대소문자 구분 없이 거부해 중복 생성 방지
     @model_validator(mode='after')
     def unique_topics(self):
         if len({t.casefold() for t in self.topics}) != len(self.topics):
@@ -44,32 +50,39 @@ class UnitPlan(StrictModel):
         return self
 
 
+# 역할: 이번에 생성한 개요와 개요 단계 종료 신호
 class OutlinePage(StrictModel):
     unit: UnitPlan | None
     done: bool
 
 
+# 역할: 개별 소단원의 목표 생성 응답
 class Objectives(StrictModel):
     objectives: list[Text] = Field(min_length=1)
 
 
+# 역할: 계획 순서에 대응하는 단원 전체 목표 응답
 class UnitContent(StrictModel):
     lessons: list[Objectives] = Field(min_length=1)
 
 
+# 역할: 단원 검토에서 발견한 수정 이유 목록
 class Findings(StrictModel):
     issues: list[Text]
 
 
+# 역할: 전체 검토의 수정 대상 단원 ID와 이유
 class Issue(StrictModel):
     unit_id: str
     reason: Text
 
 
+# 역할: 단원별 보완 대상을 담는 전체 검토 응답
 class FinalReview(StrictModel):
     issues: list[Issue]
 
 
+# 역할: 단원 계획·생성 결과·분할 진행·검토 피드백 보관
 class Unit(StrictModel):
     id: str
     plan: UnitPlan
@@ -81,6 +94,7 @@ class Unit(StrictModel):
     feedback: list[Text] = Field(default_factory=list)
 
 
+# 역할: 요청 원문과 단계·완료 결과·재시도 정보를 직렬화하는 생성 체크포인트
 class JobState(StrictModel):
     request: DraftRequest
     stage: Literal['outline', 'generate', 'review', 'final', 'repair', 'complete', 'blocked'] = 'outline'
@@ -95,10 +109,12 @@ class JobState(StrictModel):
     usage: dict[str, int] = Field(default_factory=dict)
 
 
+# 역할: 입출력 공간 부족을 일반 실패와 구분해 작업 분할 판단에 사용
 class CapacityError(ValueError):
     pass
 
 
+# 역할: 반복 출력 또는 검토 시간 초과에 따른 재시도 가능한 중단
 class ReviewInterrupted(ValueError):
     pass
 
@@ -114,14 +130,17 @@ REVIEW_CRITERIA = (
 )
 
 
+# 역할: 스트리밍 출력의 정확히 같은 반복을 감지; 의미상 유사 문장은 판단하지 않음
 class ReviewGuard:
     """Detect exact repetition, without imposing a curriculum length limit."""
+    # 역할: 누적 출력·JSON 해석 위치·이미 받은 문제 목록 초기화
     def __init__(self):
         self.text = ''
         self.cursor = None
         self.seen = set()
         self.decoder = json.JSONDecoder()
 
+    # 역할: 문자 패턴과 완성된 문제 항목의 반복 감지; 검토 분량 자체에는 상한을 두지 않음
     def feed(self, delta):
         # Inspect each character so detection does not depend on network chunk boundaries.
         for char in delta:
@@ -164,26 +183,32 @@ SYSTEM = (
 )
 
 
+# 역할: 지난 단원을 ID·범위·제목 중심 입력 뷰로 축약; 저장된 목표 원문은 변경하지 않음
 def compact_units(units):
     """Lossy view only: original objectives and plans remain in the checkpoint."""
     return [{'id': u.id, 'title': u.plan.title, 'scope': u.plan.scope,
              'topics': u.plan.topics, 'reviewed': u.reviewed} for u in units]
 
 
+# 역할: 토큰 계산과 모델 호출·출력 검증을 묶는 경계
 class ModelGateway:
+    # 역할: 모델 호출·토큰 계산 클라이언트와 서버 컨텍스트 한도 연결
     def __init__(self, client, http, model, context_limit):
         self.client, self.http, self.model, self.limit = client, http, model, context_limit
 
+    # 역할: 실제 입력 토큰 계산 후 필요 시 이력 뷰 압축; 스키마와 종료 사유를 검증한 결과만 반환
     def ask(self, state, instruction, schema, current, others):
         schema_json = schema.model_json_schema()
         # Include the schema explicitly in both tokenization and generation messages.
         system = SYSTEM + '\n작업: ' + instruction + '\n출력 schema: ' + json.dumps(schema_json, ensure_ascii=False)
 
+        # 역할: 생성과 토큰 계산이 동일한 시스템 지시·요구·현재 단원·이력을 사용하도록 메시지 구성
         def messages(history):
             return [{'role': 'system', 'content': system}, {'role': 'user', 'content': json.dumps({
                 'requirements': state.request.model_dump(), 'current': current, 'other_units': history,
             }, ensure_ascii=False)}]
 
+        # 역할: 같은 모델·채팅 템플릿으로 입력 토큰 수 실측
         def count(msgs):
             r = self.http.post('/tokenize', json={
                 'model': self.model, 'messages': msgs, 'add_generation_prompt': True,
@@ -234,6 +259,7 @@ class ModelGateway:
         return schema.model_validate_json(content)
 
 
+    # 역할: 검토 조각을 읽으며 반복과 경과 시간 확인; 오류가 나도 스트림을 닫고 관측 정보 보존
     def review_stream(self, state, kwargs):
         guard = ReviewGuard()
         start = time.monotonic()
@@ -260,6 +286,7 @@ class ModelGateway:
                          state.stage, state.usage.get('streamed_chars', 0), state.usage['elapsed_ms'], finish)
 
 
+# 역할: 원본을 복사해 한 단계 실행; 실패 시 완료 결과를 복구하고 재시도 또는 분할 상태 반환
 def step(original: JobState, gateway) -> JobState:
     state = original.model_copy(deep=True)
     if state.stage in ('complete', 'blocked'):
@@ -269,6 +296,7 @@ def step(original: JobState, gateway) -> JobState:
         return state
     state.steps += 1
     try:
+        # 현재 단계 노드만 실행; 다음 단계는 백엔드가 결과를 저장하고 새 요청을 보낼 때 진행
         state = _GRAPH.invoke({"job": state}, context=_StepContext(gateway))["job"]
         state.retries = 0
     except CapacityError as exc:
@@ -301,10 +329,12 @@ def step(original: JobState, gateway) -> JobState:
     return state
 
 
+# 역할: 현재 단원을 제외한 단원만 모델의 참고 문맥으로 선택
 def _other_units(s, index):
     return [u for i, u in enumerate(s.units) if i != index]
 
 
+# 역할: 다음 단원 개요 하나를 생성하고 범위 충족 시 목표 생성 단계로 전환
 def _outline(s, gateway):
     page = gateway.ask(s,
         '전체 학습 범위를 충족하도록 다음 단원 하나의 개요와 필요한 소단원 제목을 작성한다. '
@@ -326,6 +356,7 @@ def _outline(s, gateway):
         raise ValueError('진행되지 않는 개요 응답')
 
 
+# 역할: 계획 순서에 맞춰 단원 전체 또는 다음 소단원의 목표 생성; 남은 보완·생성 작업을 우선 선택
 def _generate(s, gateway):
     u = s.units[s.cursor]
     if u.split:
@@ -355,6 +386,7 @@ def _generate(s, gateway):
             s.cursor = next(i for i, x in enumerate(s.units) if not x.reviewed)
 
 
+# 역할: 현재 단원 또는 소단원을 검토하고 피드백 누적; 모든 단원 검토 후 전체 검토로 전환
 def _review(s, gateway):
     u = s.units[s.cursor]
     current = {'plan': u.plan.model_dump(), 'lessons': [l.model_dump() for l in u.lessons]}
@@ -379,6 +411,7 @@ def _review(s, gateway):
     s.message = f'{u.plan.title} 검토 결과를 기록했습니다.'
 
 
+# 역할: 전체 범위를 검토하고 완료 조건 확인; 미해결 피드백이 있으면 보완 또는 한도 중단
 def _final_review(s, gateway):
     report = gateway.ask(s,
         REVIEW_CRITERIA + '전체 커리큘럼의 범위 충족, 단원 순서, 단원 간 누락과 중복을 최종 검토한다. '
@@ -404,6 +437,7 @@ def _final_review(s, gateway):
         s.message = '전체 검토에서 발견한 문제를 보완합니다.'
 
 
+# 역할: 피드백으로 대상 단원 개요를 수정하고 목표를 재생성하도록 해당 단원 진행 상태 초기화
 def _repair(s, gateway):
     u = s.units[s.cursor]
     plan = gateway.ask(s, '피드백을 해결하도록 현재 단원 개요를 수정한다. 학습 범위와 다른 단원의 역할을 보존한다.',
@@ -417,18 +451,22 @@ def _repair(s, gateway):
     s.message = f'{plan.title} 단원을 보완 생성합니다.'
 
 
+# 역할: 그래프 노드 사이에 전달할 생성 작업 보관; 저장 계약은 기존 JobState 유지
 class _GraphState(TypedDict):
     # Only the existing JSON-compatible job is returned to the API. Clients and
     # graph runtime state never become part of the Spring checkpoint schema.
     job: JobState
 
 
+# 역할: 요청별 모델 게이트웨이 전달; JSON 체크포인트에 클라이언트를 저장하지 않도록 상태와 분리
 @dataclass(frozen=True)
 class _StepContext:
     gateway: ModelGateway
 
 
+# 역할: 기존 단계 함수를 LangGraph 노드 호출 형태로 감싸 요청별 실행 문맥 연결
 def _stage_node(handler):
+    # 역할: 현재 요청의 게이트웨이로 단계 하나를 실행하고 변경된 작업 상태 반환
     def execute(state: _GraphState, runtime: Runtime[_StepContext]):
         job = state['job']
         handler(job, runtime.context.gateway)
@@ -436,10 +474,12 @@ def _stage_node(handler):
     return execute
 
 
+# 역할: 저장된 작업 단계에 맞는 그래프 진입 경로 선택
 def _select_stage(state: _GraphState):
     return state['job'].stage
 
 
+# 역할: 단계별 노드와 진입 분기 구성; 각 노드는 END로 종료해 요청당 한 단계 실행 경계 유지
 def _build_graph():
     graph = StateGraph(_GraphState, context_schema=_StepContext)
     handlers = {
@@ -449,6 +489,7 @@ def _build_graph():
         'final_review': _final_review,
         'repair': _repair,
     }
+    # 그래프 내부에서 다음 업무 단계로 연쇄 실행하지 않아 중단·재개와 버전 저장 경계 유지
     for name, handler in handlers.items():
         graph.add_node(name, _stage_node(handler))
         # A new request, not an internal graph loop, starts the next business
@@ -461,6 +502,7 @@ def _build_graph():
     })
     # Spring JSON remains authoritative; no checkpointer, store, node cache, or
     # automatic node retry policy is configured in this first adoption.
+    # 그래프 구조만 공유; 게이트웨이와 작업 상태는 요청마다 전달해 요청 간 상태 혼합 방지
     return graph.compile()
 
 
