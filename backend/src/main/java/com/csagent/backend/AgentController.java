@@ -1,3 +1,4 @@
+// 파일 역할: 브라우저 채팅 요청을 AI core로 중계하며 문답과 도식 기록을 서버에 저장
 package com.csagent.backend;
 
 import java.io.IOException;
@@ -29,6 +30,7 @@ public class AgentController {
     private final String coreUrl;
     private final ConversationStore store;
 
+    // 역할: AI core 주소와 대화 저장소 주입
     public AgentController(@Value("${ai-core.base-url:http://127.0.0.1:8001}") String coreUrl,
                            ConversationStore store) {
         this.coreUrl = coreUrl;
@@ -38,11 +40,13 @@ public class AgentController {
     public record ChatRequest(String conversation_id, String question, String artifact_id) {}
 
     @GetMapping("/conversations/{id}")
+    // 역할: 대화 ID로 저장된 문답 조회
     public ObjectNode conversation(@PathVariable String id) throws IOException {
         return store.load(id);
     }
 
     @PostMapping(value = "/chat", produces = "application/x-ndjson")
+    // 역할: 완료 이력을 모델에 전달하고 이벤트를 즉시 중계; 성공·실패 결과를 저장
     public ResponseEntity<StreamingResponseBody> chat(@RequestBody ChatRequest body, HttpServletResponse servletResponse) {
         if (body.question() == null || body.question().isBlank() || body.question().length() > 4000) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid question");
@@ -53,6 +57,7 @@ public class AgentController {
             var conversation = store.load(body.conversation_id());
             var messages = (ArrayNode) conversation.path("messages");
             var payload = ConversationStore.JSON.createObjectNode().put("question", body.question());
+            // 서버에 저장된 complete 문답만 사용해 실패·미완료 출력을 다음 질문의 사실로 재사용하지 않음
             var history = payload.putArray("history");
             for (var message : messages) {
                 if (message.path("status").asText().equals("complete")) {
@@ -78,6 +83,7 @@ public class AgentController {
             var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
             var assistant = messages.addObject().put("role", "assistant").put("content", "").put("status", "failed");
             var artifacts = assistant.putArray("artifacts");
+            // 스트림에 제어를 넘긴 뒤에는 스트림의 finally가 저장·잠금 해제를 책임짐
             StreamingResponseBody stream = output -> {
                 boolean completed = false;
                 boolean answered = false;
@@ -106,6 +112,7 @@ public class AgentController {
                             }
                         }
                         output.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+                        // 이벤트마다 버퍼를 비워 답변 전체가 끝나기 전에 브라우저에 전달
                         output.flush();
                         servletResponse.flushBuffer();
                     }
@@ -136,6 +143,7 @@ public class AgentController {
     }
 
     @GetMapping("/artifacts/{id}")
+    // 역할: 도식 ID를 검증하고 SVG 응답과 브라우저 보안 헤더 중계
     public ResponseEntity<byte[]> artifact(@PathVariable String id) {
         if (!id.matches("[0-9a-f]{32}")) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         try {
