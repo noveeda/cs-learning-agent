@@ -1,3 +1,4 @@
+// 파일 역할: 개념 관계의 무결성과 손상된 브라우저 저장값 복구를 검증
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { concepts, conceptRelations, loadRoadmap, saveRoadmap } from '../src/roadmap.ts';
