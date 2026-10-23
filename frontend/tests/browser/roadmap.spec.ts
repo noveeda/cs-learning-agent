@@ -1,3 +1,4 @@
+// 파일 역할: 브라우저에서 개념 선택·학습 상태 복구·관계 강조·키보드 및 모바일 동작을 검증
 import { test, expect, type Page } from "@playwright/test";
 
 const roadmapKey = "cs-roadmap-v1";
@@ -11,6 +12,7 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
+// 역할: 학습 화면에서 로드맵 메뉴를 열어 사용자 진입 경로 재현
 async function openRoadmap(page: Page) {
   await page
     .locator(".sidebar")
@@ -19,6 +21,7 @@ async function openRoadmap(page: Page) {
   await expect(page).toHaveURL(/#\/roadmap$/);
 }
 
+// 역할: 현재 개념의 학습 진입 버튼을 눌러 연결된 대화 화면으로 이동
 async function startLearning(page: Page) {
   await page.getByRole("button", { name: /^학습 (시작|이어가기)$/ }).click();
   await expect(page.getByLabel("질문", { exact: true })).toBeEnabled();

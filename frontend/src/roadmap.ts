@@ -1,3 +1,4 @@
+// 파일 역할: 기본 CS 개념·선수 관계·영역 간 연관 관계와 브라우저 학습 상태 저장 규칙
 export type LearningStatus = "not-started" | "in-progress" | "completed";
 
 export type Concept = {
@@ -122,10 +123,12 @@ export type RoadmapState = {
 
 const storageKey = "cs-roadmap-v1";
 
+// 역할: 외부 저장값이 배열이나 null이 아닌 객체인지 확인하는 타입 가드
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// 역할: 알려진 개념·유효한 상태·대화 ID만 복구; 손상된 저장값은 기본값으로 대체
 export function loadRoadmap(storage?: Pick<Storage, "getItem">): RoadmapState {
   const state: RoadmapState = {
     selectedId: concepts[0].id,
@@ -163,6 +166,7 @@ export function loadRoadmap(storage?: Pick<Storage, "getItem">): RoadmapState {
   return state;
 }
 
+// 역할: 형식 버전과 상태를 함께 저장; 실패 예외는 호출 화면에서 안내하도록 전달
 export function saveRoadmap(
   state: RoadmapState,
   storage: Pick<Storage, "setItem"> = localStorage,

@@ -1,3 +1,4 @@
+// 파일 역할: 개념을 영역별 원으로 배치하고 연관 관계 강조·상세 선택·학습 진입 제공
 import { useState, type CSSProperties } from "react";
 import { ArrowUpRight, BookOpen } from "lucide-react";
 import {
@@ -15,6 +16,7 @@ const domains = [
   { name: "네트워크", x: 77, y: 29, color: "#9a6328", surface: "#fbf3e8" },
 ];
 
+// 역할: 선택 상태와 일시적인 호버·초점을 분리해 지도와 상세 패널 렌더링
 export function Roadmap({
   state,
   onSelect,
@@ -28,6 +30,7 @@ export function Roadmap({
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  // 호버가 있으면 우선 사용하되 클릭으로 저장한 상세 선택과는 독립적으로 강조
   const activeId = hoveredId ?? focusedId;
   const activeConcept = concepts.find((concept) => concept.id === activeId);
   const activeDomain = domains.find((domain) => domain.name === activeId);
@@ -42,6 +45,7 @@ export function Roadmap({
             .filter((concept) => concept.domain === activeDomain.name)
             .map((concept) => concept.id)
         : [(activeConcept || selected).id];
+  // 선택·탐색 개념에 명시적으로 연결된 관계만 표시; 같은 영역이라는 이유로 선을 임의 생성하지 않음
   const visibleRelations = conceptRelations.filter(
     (relation) =>
       previewIds.includes(relation.source) ||
@@ -62,14 +66,17 @@ export function Roadmap({
       related.add(relation.source);
       related.add(relation.target);
     }
+  // 역할: 현재 탐색 개념이나 연관 개념이 속한 영역의 강조 여부 계산
   const emphasizedDomain = (name: string) =>
     activeId === "root" ||
     name === activeDomain?.name ||
     concepts.some(
       (concept) => concept.domain === name && related.has(concept.id),
     );
+  // 역할: 탐색 중일 때만 관련·비관련 요소를 구분하는 표시 값 반환
   const emphasis = (isRelated: boolean) =>
     activeId ? (isRelated ? "related" : "muted") : undefined;
+  // 역할: 마우스와 키보드 탐색을 같은 강조 상태에 연결; 터치에 호버가 남는 현상 방지
   const interaction = (id: string) => ({
     onPointerEnter: (event: React.PointerEvent<HTMLElement>) => {
       if (event.pointerType !== "touch") setHoveredId(id);

@@ -1,3 +1,4 @@
+/* 파일 역할: 영역 원·개념 노드·관계선의 위치와 탐색 강조 및 모바일 상세 패널 배치 */
 .primary { background: var(--color-primary); color: #fff; }
 .primary:hover { background: var(--color-primary-hover); }
 .app-notice { flex-shrink: 0; width: calc(100% - 48px); max-width: none; margin: 0 var(--space-5) var(--space-3); }
