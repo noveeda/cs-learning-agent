@@ -273,7 +273,9 @@ cs-learning-agent/
 │   └── requirements-web.txt   # 앱 의존성(vLLM 별도)
 ├── docs/                      # 목표·설계 방향, 커리큘럼 초안 기능 설명
 ├── .github/                   # CI, PR 템플릿, 보호 설정 안내
-├── AGENTS.md                  # 협업·개발·검수·병합 규칙
+├── .claude/                   # Claude Code 공유 권한 설정, /verify-all 검증 스킬
+├── AGENTS.md                  # 협업·개발·검수·병합 규칙(단일 원본)
+├── CLAUDE.md                  # Claude Code용 진입점: AGENTS.md import와 전용 보충 규칙
 └── README.md
 ```
 
@@ -350,5 +352,6 @@ CI는 GPU 모델을 다운로드하거나 실행하지 않으며 답변의 CS �
 자세한 규칙은 다음 문서를 따릅니다.
 
 - [개발·커밋·검수·병합 규칙](AGENTS.md)
+- [Claude Code 작업 설정](CLAUDE.md) — `AGENTS.md`를 불러오고 서명·검증·PR 사용 방법을 보충합니다.
 - [PR 템플릿 선택 및 작성 방법](.github/pr-templates.md)
 - [main 보호 설정 안내](.github/branch-protection.md) — 안내 파일의 존재가 원격 보호 적용을 뜻하지는 않습니다.
