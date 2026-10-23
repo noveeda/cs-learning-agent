@@ -1,3 +1,4 @@
+// 파일 역할: 학습 조건 입력과 체크포인트 기반 커리큘럼 생성·중단·재개 화면
 import { useEffect, useRef, useState } from 'react';
 import { createCurriculum, loadCurriculum, stepCurriculum, type CurriculumJob, type DraftInput } from './curriculum';
 
@@ -5,6 +6,7 @@ const KEY = 'cs-curriculum-job';
 const stages = { outline: '개요 구성', generate: '단원 생성', review: '단원 검토', final: '전체 검토',
   repair: '부분 보완', complete: '초안 완성', blocked: '확인 필요' };
 
+// 역할: 작업 ID를 복원하고 작성 중 결과와 검토 완료 결과를 구분해 표시
 export function CurriculumDraft() {
   const [input, setInput] = useState<DraftInput>({ topic: '', goal: '', level: '' });
   const [job, setJob] = useState<CurriculumJob | null>(null);
@@ -26,6 +28,7 @@ export function CurriculumDraft() {
     return () => { cancelled = true; stop.current = true; };
   }, []);
 
+  // 역할: 서버의 최신 상태를 다시 읽어 단계별 생성; 중단 요청은 현재 단계 저장 뒤 반영
   async function generate(event?: React.FormEvent) {
     event?.preventDefault();
     if (inFlight.current || loading) return;
@@ -37,9 +40,11 @@ export function CurriculumDraft() {
       let current = id ? await loadCurriculum(id) : await createCurriculum(input);
       localStorage.setItem(KEY, current.id);
       setJob(current); setInput(current.state.request);
+      // 현재 호출의 저장을 끝낸 뒤 stop을 확인해 반쯤 완료된 단계를 브라우저가 취소하지 않도록 처리
       while (!stop.current && !['complete', 'blocked'].includes(current.state.stage)) {
         current = await stepCurriculum(current);
         setJob(current);
+        // 자동 반복으로 실패를 누적하지 않고 마지막 결과를 보여준 뒤 사용자 재시도 대기
         if (current.state.retries) {
           setError(current.state.message || '생성에 실패했습니다. 이어서 생성해 주세요.');
           break;
