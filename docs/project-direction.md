@@ -243,4 +243,5 @@ React :5173        개념 지도 로드맵 학습 + [막혔어요] 패널(진단
 
 - `README.md`: 이 문서의 목표·대상·흐름 요약과 현재 구현 상태.
 - `AGENTS.md`: 협업·커밋·검수·병합 규칙과 주석 규칙.
+- `docs/curriculum-draft.md`: 1차 학습 흐름에서 제외했지만 유지하는 AI 커리큘럼 초안 생성 기능의 설명.
 - 로컬 `codex/planning-documents/`(기획서 v1.3 등)와 `codex/planning-documents-archive-2026-10-20/`(PLAN-001 v1.2): Git 밖의 이전 기획 자료다. 목표·범위는 이 문서가 우선한다.
