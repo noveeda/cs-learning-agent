@@ -4,6 +4,9 @@ import json
 
 from serving.tools.diagram import TOOL
 
+# 추론 여부를 생성 요청과 토큰 계산에 공통 적용해 템플릿 토큰 오차 방지
+CHAT_TEMPLATE_KWARGS = {'enable_thinking': True}
+
 
 # 역할: 문답에 생성 도식 데이터를 붙이고 user/assistant 쌍 순서를 검증
 def history_messages(history):
@@ -50,7 +53,7 @@ def token_counter(http, model):
         response = http.post('/tokenize', json={
             'model': model, 'messages': messages, 'tools': [TOOL],
             'add_generation_prompt': True,
-            'chat_template_kwargs': {'enable_thinking': False},
+            'chat_template_kwargs': CHAT_TEMPLATE_KWARGS,
         })
         response.raise_for_status()
         return response.json()['count']

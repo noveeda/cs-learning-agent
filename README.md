@@ -252,7 +252,8 @@ python3.12 -m venv "$HOME/.venvs/cs-vllm"
   --gpu-memory-utilization 0.9 \
   --disable-custom-all-reduce \
   --enable-auto-tool-choice \
-  --tool-call-parser qwen3_xml
+  --tool-call-parser qwen3_xml \
+  --reasoning-parser qwen3
 ```
 
 첫 실행은 모델 다운로드와 초기화에 시간이 걸립니다. 기본 모델 캐시는 `~/.cache/huggingface/hub/`입니다.
@@ -260,6 +261,25 @@ python3.12 -m venv "$HOME/.venvs/cs-vllm"
 `--disable-custom-all-reduce`는 기존 GPU 간 P2P 미지원 환경을 고려한 옵션입니다.
 기존 구성에서는 CUDA graph를 사용하기 위해 `--enforce-eager`를 넣지 않습니다.
 새 환경에서의 모델 설치·기동은 GPU 드라이버와 CUDA 조합을 별도로 확인해야 합니다.
+
+### 채팅·도식의 추론 설정
+
+채팅·도식 에이전트는 [Qwen3.5 공식 일반 추론 권장값](https://huggingface.co/Qwen/Qwen3.5-27B#best-practices)을 사용합니다.
+`enable_thinking=true`, `temperature=1.0`, `top_p=0.95`, `top_k=20`, `min_p=0`,
+`presence_penalty=1.5`, `repetition_penalty=1.0`입니다. 학습자에게는 짧은 설명·계산 근거를 먼저,
+결론·정답을 마지막에 제시하도록 지시하며, 내부 추론은 화면·저장용 답변·후속 도구 문맥에 전달하지 않습니다.
+최종 답변은 기존 `text_start`·`text_delta`·`answer` 이벤트로 스트리밍하고 도구 호출 방식도 유지합니다.
+
+위 실행 예시의 `--reasoning-parser qwen3`와 `--tool-call-parser qwen3_xml`을 함께 지정해야 합니다.
+기존 서버가 추론 파서 없이 실행 중이면 모델 목록 조회가 성공해도 이 설정으로 재시작해야 합니다.
+추론 필드나 종료 표식이 없어 최종 답변을 구분할 수 없으면 내용을 노출하거나 도구를 실행하는 대신 실패로 처리합니다.
+추론하는 동안에는 최종 답변의 첫 글자 표시가 늦어질 수 있습니다.
+
+출력 상한은 내부 추론을 포함해 32,000토큰입니다. 웹 API는 실제 입력 토큰을 계산해 문맥 한도에서
+256토큰의 안전 여유를 제외한 남은 공간까지만 출력에 배정합니다. 긴 대화에서는 출력 공간을 최대 문맥의 절반까지
+우선 확보하고 오래된 완료 문답 쌍을 제외합니다. 현재 질문·도구 교환이 더 크면 입력을 자르는 대신 출력 예약을 줄입니다.
+토큰 계산기를 전달하지 않는 CLI는 기본 32K 문맥에서 16,384토큰의 보수적인 출력 상한을 사용합니다.
+이는 운영상 한도이며 설명 분량 목표가 아닙니다. 커리큘럼의 JSON 스키마 생성 경로와 단순 호출 예제 `ask.py`는 별도 설정을 유지합니다.
 
 ### 3. 앱 실행
 
