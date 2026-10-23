@@ -1,3 +1,4 @@
+// 파일 역할: React 진입점; 해시 경로·로드맵 상태·개념별 대화 ID·커리큘럼 화면 연결
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { newConversation } from "./api";
@@ -16,6 +17,7 @@ import {
 import "./style.css";
 import "./roadmap.css";
 
+// 역할: URL 해시에서 화면과 알려진 개념만 해석; 잘못된 경로는 학습 화면으로 처리
 function readRoute() {
   const hash = window.location.hash || "#/learn";
   const [path, query] = hash.slice(1).split("?");
@@ -29,6 +31,7 @@ function readRoute() {
   };
 }
 
+// 역할: 화면 간 상태를 조율하고 선택 개념의 대화와 학습 표시를 연결
 function App() {
   const [curriculumOpen, setCurriculumOpen] = useState(false);
   const [roadmap, setRoadmap] = useState(loadRoadmap);
@@ -46,6 +49,7 @@ function App() {
   });
   useEffect(() => {
     const onRoute = () => {
+      // 응답 중 해시가 바뀌어 세션이 해제되는 것을 막기 위해 마지막 경로로 복원
       if (busyRef.current) {
         window.history.replaceState(null, "", routeRef.current.hash);
         setNotice("응답을 기다린 뒤 화면을 이동해 주세요.");
@@ -61,6 +65,7 @@ function App() {
     return () => window.removeEventListener("hashchange", onRoute);
   }, []);
 
+  // 역할: 브라우저 저장 성공 뒤에만 화면 상태 갱신; 저장 실패를 성공처럼 표시하지 않음
   function updateRoadmap(next: RoadmapState) {
     try {
       saveRoadmap(next);
@@ -74,15 +79,18 @@ function App() {
       return false;
     }
   }
+  // 역할: 상세 패널에 표시할 개념을 선택하고 브라우저에 보관
   function selectConcept(id: string) {
     updateRoadmap({ ...roadmap, selectedId: id });
   }
+  // 역할: 사용자가 지정한 학습 상태 저장; AI의 이해도 판정과는 별개
   function updateStatus(id: string, status: LearningStatus) {
     updateRoadmap({
       ...roadmap,
       statuses: { ...roadmap.statuses, [id]: status },
     });
   }
+  // 역할: 개념별 대화 ID를 재사용하거나 생성하고 저장 성공 시 학습 화면으로 이동
   function startConcept(concept: Concept) {
     const id =
       roadmap.conversationIds[concept.id] ||
