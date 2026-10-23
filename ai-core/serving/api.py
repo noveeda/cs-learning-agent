@@ -1,4 +1,4 @@
-# 파일 역할: FastAPI로 채팅 스트림·도식 파일·커리큘럼 단계를 제공하는 로컬 전용 AI 서비스
+# 파일 역할: FastAPI로 채팅 스트림·도식 파일·커리큘럼 단계·개념 지도를 제공하는 로컬 전용 AI 서비스
 """Local web bridge for the diagram agent (no authentication; bind to loopback)."""
 import json
 import logging
@@ -11,8 +11,9 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from openai import OpenAI
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from serving.concept_map import load_concept_map
 from serving.curriculum import JobState, ModelGateway, step
 from serving.agent import run_agent
 from serving.context import token_counter
@@ -54,6 +55,17 @@ class Question(BaseModel):
 @app.get('/health')
 def health():
     return {'status': 'ok'}
+
+
+# 역할: 그래프 규칙 검증을 통과한 자료구조 개념 지도 반환; 진단 엔진과 로드맵 화면이 같은 지도를 쓰게 함
+@app.get('/concept-map')
+def concept_map():
+    try:
+        return load_concept_map().model_dump()
+    except (OSError, ValidationError):
+        # 손상되거나 규칙을 어긴 지도는 진단 기준이 될 수 없으므로 일부라도 응답하지 않고, 경로·오류 내용은 로그에만 남김
+        logging.exception('Concept map failed to load')
+        raise HTTPException(500, '개념 지도를 불러오지 못했습니다.') from None
 
 
 # 역할: 질문을 받아 에이전트 이벤트를 NDJSON 스트림으로 반환
