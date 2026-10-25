@@ -1,4 +1,4 @@
-// 파일 역할: 대화 한 세션의 복구·질문 입력·실시간 답변·도식 표시와 실패 후 재시도 담당
+// 파일 역할: 대화 한 세션의 복구·질문 입력·실시간 답변·도식 표시와 실패 후 재시도, 막힘 진입 버튼 담당
 import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import {
@@ -18,21 +18,29 @@ import {
 } from "./api";
 import { AgentNotes } from "./LearningShell";
 import { DiagramPanel } from "./DiagramPanel";
+import { StuckButton } from "./StuckPanel";
 import { statusLabels, type Concept, type LearningStatus } from "./roadmap";
 
 // 역할: 대화 ID에 해당하는 기록을 복구하고 질문·도식·학습 상태 UI 구성
+// - 막힘 패널은 App이 대화 옆에 띄우므로 여기서는 진입 버튼만 두고 대화 상태는 건드리지 않음
 export function ChatSession({
   conversationId,
   concept,
   learningStatus,
+  stuckInProgress,
   onStatusChange,
   onBusyChange,
+  onStuck,
+  onPaste,
 }: {
   conversationId: string;
   concept?: Concept;
   learningStatus: LearningStatus;
+  stuckInProgress: boolean;
   onStatusChange: (status: LearningStatus) => void;
   onBusyChange: (busy: boolean) => void;
+  onStuck: () => void;
+  onPaste: () => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -210,6 +218,18 @@ export function ChatSession({
               도식 열기
             </button>
           )}
+        </div>
+        <div className="stuck-entry">
+          {concept && (
+            <StuckButton
+              concept={concept}
+              inProgress={stuckInProgress}
+              onStuck={onStuck}
+            />
+          )}
+          <button className="button secondary" onClick={onPaste}>
+            막힌 문장 붙여넣기
+          </button>
         </div>
         <div className="scroll-area">
           {messages.length === 0 ? (
