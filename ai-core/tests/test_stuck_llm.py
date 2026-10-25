@@ -144,9 +144,13 @@ class FailureTests(unittest.TestCase):
                 gateway(client).identify('스택', MAP)
             self.assertEqual(len(client.requests), ROLE_SETTINGS['identify'].attempts)
 
-    # 검증 목적: 잘린 출력·빈 출력·형식이 틀린 JSON·지도 밖 ID·항목 수가 다른 채점은 모두 LLMUnavailable인지 확인
+    # 검증 목적: 잘린 출력·빈 출력·응답 구조 누락(choices 비었거나 없음, message 없음)·형식이 틀린 JSON·지도 밖 ID·항목 수가 다른 채점은 모두 LLMUnavailable인지 확인
     def test_invalid_outputs_become_unavailable(self):
         cases = [
+            ('identify', lambda user, kw: SimpleNamespace(choices=[])),
+            ('identify', lambda user, kw: SimpleNamespace(choices=None)),
+            ('identify', lambda user, kw: SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop', message=None)])),
+            ('identify', lambda user, kw: reply(None)),
             ('identify', lambda user, kw: reply('{"concept": "stack"}', finish='length')),
             ('identify', lambda user, kw: ''),
             ('identify', lambda user, kw: '{"concept": '),

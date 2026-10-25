@@ -119,8 +119,9 @@ class StuckModelGateway:
                         if choice.finish_reason != 'stop' or not (choice.message.content or '').strip():
                             raise ValueError(f'응답이 완료되지 않았습니다: {choice.finish_reason}')
                         return parse(choice.message.content.strip())
-                    except (OpenAIError, ValueError, KeyError, TypeError, AttributeError) as exc:
-                        # JSON 해석 실패(ValueError 하위)와 JSON 모양이 schema와 다른 경우(KeyError 등)도 잘못된 출력으로 보고 재시도
+                    except (OpenAIError, ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
+                        # JSON 해석 실패(ValueError 하위), JSON 모양이 schema와 다른 경우(KeyError 등),
+                        # 응답 구조 누락(choices 비어 있음 → IndexError, choices·message 없음 → TypeError·AttributeError)도 잘못된 출력으로 보고 재시도
                         logging.warning('Stuck %s attempt %s/%s failed: %s', role, attempt, settings.attempts, exc)
                 raise LLMUnavailable('모델 응답을 받지 못했습니다. 잠시 후 다시 시도해 주세요.')
         finally:
