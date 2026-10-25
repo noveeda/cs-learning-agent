@@ -237,7 +237,8 @@ def _answer_for(s, ctx):
 def _identify(s, ctx):
     _expect(ctx, 'start', 'continue')
     concept = ctx.gateway.identify(s.entry.excerpt, ctx.concept_map)
-    if concept not in {c.id for c in ctx.concept_map.concepts}:
+    # 지도에 있어도 문항 은행이 없는 개념(MVP 지원 밖)은 진단·확인을 할 수 없으므로 범위 밖으로 안내
+    if concept not in {i.concept for i in ctx.items}:
         s.stage, s.view = 'out_of_scope', {'kind': 'out_of_scope', 'return_to': s.entry.return_to}
         _log(s, ctx, 'out_of_scope', identified=concept)
         return
