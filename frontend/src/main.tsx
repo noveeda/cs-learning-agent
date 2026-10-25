@@ -1,4 +1,4 @@
-// 파일 역할: React 진입점; 개념 지도 로딩·해시 경로·로드맵 상태·개념별 대화 ID·커리큘럼 화면 연결
+// 파일 역할: React 진입점; 개념 지도 로딩·해시 경로·로드맵 상태·개념별 대화 ID·막힘 패널·커리큘럼 화면 연결
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { loadConceptMap, newConversation } from "./api";
@@ -6,6 +6,8 @@ import { ChatSession } from "./ChatSession";
 import { CurriculumDraft } from "./CurriculumDraft";
 import { LearningShell } from "./LearningShell";
 import { ConceptMapStatus, Roadmap } from "./Roadmap";
+import { StuckPanel, type StuckRequest } from "./StuckPanel";
+import { entryKey, loadStuckStore, saveStuckStore, type Entry } from "./stuck";
 import {
   loadRoadmap,
   saveRoadmap,
@@ -47,6 +49,19 @@ function App() {
   // 값이 바뀔 때마다 지도를 다시 요청; 다시 시도 버튼이 1씩 올림
   const [mapRequest, setMapRequest] = useState(0);
   const [route, setRoute] = useState(readRoute);
+  // 진행 중 막힘 세션 목록(개념·진입별 세션 ID); 버튼을 "이어서 풀기"로 바꾸는 데 사용
+  const [stuckSessions, setStuckSessions] = useState(
+    () => loadStuckStore().sessions,
+  );
+  // 새로고침·재접속 전에 열려 있던 패널은 같은 세션으로 다시 열어 같은 단계에서 재개(M4)
+  const [stuck, setStuck] = useState<StuckRequest | null>(() => {
+    const { active, sessions } = loadStuckStore();
+    return active
+      ? { mode: "resume", key: active, id: sessions[active] }
+      : null;
+  });
+  // 패널을 열 때마다 올려 key로 사용; 다른 개념의 막힘을 열면 이전 패널 상태를 남기지 않고 새로 만듦
+  const [stuckOpening, setStuckOpening] = useState(0);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -142,6 +157,43 @@ function App() {
       ? conceptMap.concepts.find((item) => item.id === route.conceptId)
       : undefined;
   const conceptId = concept?.id;
+  // 역할: 막힘 패널을 엶; 같은 개념·진입의 진행 중 세션이 있으면 새로 만들지 않고 이어서 엶
+  function openStuck(key: string, start: StuckRequest) {
+    const store = loadStuckStore();
+    const id = store.sessions[key];
+    if (id) {
+      try {
+        saveStuckStore({ ...store, active: key });
+      } catch {
+        // 열림 표시를 못 남기면 새로고침 후 패널이 자동으로 열리지 않을 뿐 진행은 가능
+      }
+      setStuck({ mode: "resume", key, id });
+    } else setStuck(start);
+    setStuckOpening((count) => count + 1);
+  }
+  // 역할: 개념의 [막혔어요]; 복귀 위치는 버튼을 누른 화면의 해시 경로
+  function stuckOnConcept(id: string) {
+    const entry: Entry = {
+      kind: "roadmap",
+      concept: id,
+      return_to: window.location.hash || "#/learn",
+    };
+    openStuck(entryKey(entry), { mode: "start", entry });
+  }
+  // 역할: 패널만 닫음; 세션은 진행 중 목록에 남아 다시 열면 이어서 함
+  function closeStuck() {
+    try {
+      saveStuckStore({ ...loadStuckStore(), active: null });
+    } catch {
+      // 저장 실패 시 새로고침하면 패널이 다시 열릴 수 있지만 학습 진행에는 영향 없음
+    }
+    setStuck(null);
+  }
+  // 역할: 복귀 요약의 "원래 학습으로 돌아가기"; 대화는 패널 뒤에 그대로 있어 내용·스크롤이 유지됨
+  function returnFromStuck(to: string) {
+    closeStuck();
+    if ((window.location.hash || "#/learn") !== to) window.location.hash = to;
+  }
   const conceptConversation = conceptId
     ? roadmap.conversationIds[conceptId]
     : undefined;
@@ -224,6 +276,8 @@ function App() {
               onSelect={selectConcept}
               onStatusChange={updateStatus}
               onStart={startConcept}
+              stuckSessions={stuckSessions}
+              onStuck={(item) => stuckOnConcept(item.id)}
             />
           ) : (
             mapStatus
@@ -233,6 +287,16 @@ function App() {
             key={conceptConversation || freeId}
             conversationId={conceptConversation || freeId}
             concept={concept}
+            stuckInProgress={Boolean(
+              conceptId && stuckSessions[`roadmap:${conceptId}`],
+            )}
+            onStuck={() => {
+              if (conceptId) stuckOnConcept(conceptId);
+            }}
+            onPaste={() => {
+              const to = window.location.hash || "#/learn";
+              openStuck(`excerpt:${to}`, { mode: "paste", returnTo: to });
+            }}
             learningStatus={
               conceptId
                 ? roadmap.statuses[conceptId] || "not-started"
@@ -248,6 +312,16 @@ function App() {
           />
         )}
       </div>
+      {stuck && (
+        <StuckPanel
+          key={stuckOpening}
+          request={stuck}
+          concepts={conceptMap.status === "ready" ? conceptMap.concepts : []}
+          onClose={closeStuck}
+          onReturn={returnFromStuck}
+          onSessionsChange={() => setStuckSessions(loadStuckStore().sessions)}
+        />
+      )}
     </LearningShell>
   );
 }

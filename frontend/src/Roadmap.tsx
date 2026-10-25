@@ -8,6 +8,7 @@ import {
   type LearningStatus,
   type RoadmapState,
 } from "./roadmap";
+import { StuckButton } from "./StuckPanel";
 
 // 데스크톱 지도 격자(px): 노드 100px·간격 8px로 7개가 한 줄이면 1440px 화면의 지도 카드에 가로 스크롤 없이 들어감
 const column = 108;
@@ -52,12 +53,17 @@ export function Roadmap({
   onSelect,
   onStatusChange,
   onStart,
+  stuckSessions,
+  onStuck,
 }: {
   concepts: Concept[];
   state: RoadmapState;
   onSelect: (id: string) => void;
   onStatusChange: (id: string, status: LearningStatus) => void;
   onStart: (concept: Concept) => void;
+  // 진행 중 막힘 세션(키 roadmap:<개념 ID>); 버튼 문구를 "이어서 풀기"로 바꾸는 데 사용
+  stuckSessions: Record<string, string>;
+  onStuck: (concept: Concept) => void;
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -263,7 +269,7 @@ export function Roadmap({
           개념의 선은 화살표(선수 → 후속)로 강조돼요.
         </p>
       </section>
-      {/* 상세 영역: 2차 작업에서 MVP 개념의 [막혔어요] 버튼과 막힘 패널을 concept-actions 옆에 붙임 */}
+      {/* 상세 영역: 학습 시작과 [막혔어요](MVP 개념만)를 concept-actions에 모음; 막힘 패널은 App이 화면 옆에 띄움 */}
       <section className="card concept-detail" aria-label="선택한 개념">
         <span className="badge">
           {selected.domain} · {positions[selected.id].layer + 1}단계
@@ -337,6 +343,11 @@ export function Roadmap({
             {state.conversationIds[selected.id] ? "학습 이어가기" : "학습 시작"}
             <ArrowUpRight size={16} aria-hidden="true" />
           </button>
+          <StuckButton
+            concept={selected}
+            inProgress={Boolean(stuckSessions[`roadmap:${selected.id}`])}
+            onStuck={() => onStuck(selected)}
+          />
         </div>
         <p className="storage-note">
           선택한 개념과 학습 상태는 이 브라우저에 저장돼요. 완료 여부는 직접
