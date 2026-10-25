@@ -17,7 +17,8 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 from serving.concept_map import load_concept_map
 from serving.curriculum import JobState, ModelGateway, step
 from serving.item_bank import load_item_bank
-from serving.stuck import LLMUnavailable, StepInput, StuckState, UnavailableGateway, step as stuck_step
+from serving.stuck import LLMUnavailable, StepInput, StuckState, step as stuck_step
+from serving.stuck_llm import StuckModelGateway
 from serving.agent import run_agent
 from serving.context import token_counter
 from serving.tools.diagram import Diagram
@@ -78,13 +79,13 @@ class StuckRequest(BaseModel):
 
 
 # 역할: 막힘 세션을 한 단계 진행한 새 상태 반환; 저장·버전 관리는 호출한 Spring이 담당
-# - LLM 역할이 필요한 단계는 아직 연결 전이라 503으로 끝나며 상태는 바뀌지 않음(PR6에서 연결)
+# - LLM이 필요한 단계는 채팅·커리큘럼과 같은 모델 잠금(BUSY)을 그 호출 동안만 잡음; 바쁘거나 모델이 실패하면 503, 상태는 바뀌지 않음
 # - 현재 단계와 맞지 않는 입력(오래된 화면의 답 등)은 409로 거부해 상태가 꼬이지 않게 함
 @app.post('/stuck/step', response_model=StuckState)
 def stuck_session_step(body: StuckRequest):
     concept_map, items = load_concept_map(), load_item_bank()
     try:
-        return stuck_step(body.state, body.input, UnavailableGateway(), concept_map, items, time.time())
+        return stuck_step(body.state, body.input, StuckModelGateway(concept_map, BUSY), concept_map, items, time.time())
     except LLMUnavailable as exc:
         raise HTTPException(503, str(exc)) from None
     except ValueError as exc:

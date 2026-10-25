@@ -1,6 +1,7 @@
 # 파일 역할: 막힘 흐름의 진단 가지치기·상한·보충 순서·혼합형 확인·복귀와, 잘못된 입력·LLM 실패 시 상태 보존을 검증
 import json
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -296,7 +297,8 @@ class RepositoryDataTests(unittest.TestCase):
         self.assertEqual([p.concept for p in session.state.probes], ['adt', 'linked-list'])
         self.assertEqual([f.concept for f in session.state.fixes], ['adt', 'stack'])
 
-    # 검증 목적: API가 새 세션을 만들고, LLM이 필요한 단계는 503, 오래된 답은 409로 돌려주는지 확인
+    # 검증 목적: API가 새 세션을 만들고, 모델 서버에 연결하지 못하면 LLM이 필요한 단계는 503, 오래된 답은 409로 돌려주는지 확인
+    # - 운영 모델(8000)을 부르지 않도록 아무것도 듣지 않는 내 시험 포트(21019)를 모델 주소로 씀
     def test_api_contract(self):
         client = TestClient(app)
         start = client.post('/stuck/step', json={'input': {'type': 'start', 'entry': {
@@ -308,7 +310,8 @@ class RepositoryDataTests(unittest.TestCase):
         stale = client.post('/stuck/step', json={'state': state, 'input': {'type': 'answer', 'item': 'array-d1', 'answer': 'A'}})
         self.assertEqual(stale.status_code, 409)
         opted = client.post('/stuck/step', json={'state': state, 'input': {'type': 'opt_out'}}).json()
-        self.assertEqual(client.post('/stuck/step', json={'state': opted, 'input': {'type': 'continue'}}).status_code, 503)
+        with patch.dict('os.environ', {'VLLM_BASE_URL': 'http://127.0.0.1:21019/v1'}):
+            self.assertEqual(client.post('/stuck/step', json={'state': opted, 'input': {'type': 'continue'}}).status_code, 503)
 
 
 if __name__ == '__main__':
