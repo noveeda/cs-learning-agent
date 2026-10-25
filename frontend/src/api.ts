@@ -1,4 +1,5 @@
-// 파일 역할: 대화 복구·질문 전송과 NDJSON 스트림 해석; 화면 컴포넌트와 통신 처리 분리
+// 파일 역할: 개념 지도 조회·대화 복구·질문 전송과 NDJSON 스트림 해석; 화면 컴포넌트와 통신 처리 분리
+import type { Concept } from './roadmap';
 export type ChatMessage = { role: 'user' | 'assistant'; content: string };
 export type Artifact = { artifact_id: string; url: string; diagram: { title: string } };
 export type Message = ChatMessage & { artifact?: Artifact; failed?: boolean };
@@ -11,6 +12,34 @@ export type AgentEvent =
   | { type: 'answer' | 'text_delta'; text: string }
   | { type: 'context'; input_tokens: number; dropped_messages: number; context_limit: number }
   | { type: 'error'; message: string };
+
+// 응답에서 화면이 쓰는 필드만 꺼내기 위한 최소 형태; 그래프 규칙 검증은 AI core가 담당
+type ConceptMapResponse = {
+  title: string;
+  concepts: Omit<Concept, 'domain'>[];
+};
+
+// 역할: /api/concept-map을 받아 로드맵용 개념 목록으로 변환; 실패 시 화면에 보여 줄 한국어 안내를 담아 예외
+export async function loadConceptMap(): Promise<Concept[]> {
+  let response: Response;
+  try {
+    response = await fetch('/api/concept-map', { cache: 'no-store' });
+  } catch {
+    throw new Error('서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.');
+  }
+  // 프록시 오류처럼 JSON이 아닌 응답도 올 수 있어 해석 실패는 null로 두고 아래에서 기본 안내 사용
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(typeof body?.message === 'string'
+      ? body.message
+      : '개념 지도를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+  }
+  if (!Array.isArray(body?.concepts)) throw new Error('개념 지도 형식이 올바르지 않습니다.');
+  const map = body as ConceptMapResponse;
+  return map.concepts.map(({ id, title, description, objectives, prerequisites }) => ({
+    id, title, description, objectives, prerequisites, domain: map.title,
+  }));
+}
 
 // 역할: 브라우저에 새로운 대화 ID 저장; 서버 기록은 실제 질문 전송 때 생성
 export function newConversation() {
