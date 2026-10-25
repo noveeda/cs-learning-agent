@@ -1,0 +1,471 @@
+// 파일 역할: 모의 막힘 세션 API로 [막혔어요]·붙여넣기 진입, 진단→결과→보충→확인→서술→요약→복귀, 새로고침 재개, 503 재시도·409 복구를 브라우저에서 검증
+import { readFileSync } from "node:fs";
+import { test, expect, type Page, type Route } from "@playwright/test";
+
+const conceptMap = JSON.parse(
+  readFileSync(
+    new URL("../../../ai-core/content/dsa/concept-map.json", import.meta.url),
+    "utf8",
+  ),
+);
+const stuckKey = "cs-stuck-sessions-v1";
+const sessionId = "0123456789abcdef0123456789abcdef";
+const options = {
+  A: "값을 넣은 순서대로 꺼낸다",
+  B: "연산 규칙으로 정의하고 구현은 숨긴다",
+  C: "항상 배열로만 구현한다",
+  D: "원소를 정렬해 보관한다",
+};
+const linkedList = { id: "linked-list", title: "연결 리스트" };
+const stack = { id: "stack", title: "스택" };
+// 엔진(stuck.py)이 만드는 view와 같은 모양의 단계별 화면
+const views = {
+  q1: {
+    kind: "question",
+    purpose: "diagnosis",
+    concept: { id: "adt", title: "추상 자료형과 구현" },
+    item: {
+      id: "adt-d1",
+      format: "multiple_choice",
+      question: "추상 자료형에 대한 설명으로 알맞은 것은?",
+      options,
+    },
+  },
+  q2: {
+    kind: "question",
+    purpose: "diagnosis",
+    concept: linkedList,
+    item: {
+      id: "linked-list-d1",
+      format: "short_exact",
+      question: "노드가 다음 노드를 가리키려고 저장하는 값은?",
+    },
+  },
+  diagnosis: {
+    kind: "diagnosis_result",
+    target: stack,
+    gaps: [linkedList],
+    evidence: [
+      {
+        concept: "adt",
+        item: "adt-d1",
+        result: "known",
+        question: "추상 자료형에 대한 설명으로 알맞은 것은?",
+        answer: "B",
+        options,
+      },
+      {
+        concept: "linked-list",
+        item: "linked-list-d1",
+        result: "gap",
+        question: "노드가 다음 노드를 가리키려고 저장하는 값은?",
+        answer: "인덱스",
+      },
+    ],
+    opted_out: false,
+  },
+  remediation: {
+    kind: "remediation",
+    concept: linkedList,
+    attempt: 1,
+    text: "## 연결 리스트\n\n**노드**는 값과 다음 노드의 참조를 함께 가져요.",
+    is_target: false,
+    item: {
+      id: "linked-list-c1",
+      format: "multiple_choice",
+      question: "맨 앞에 노드를 넣을 때 바꿔야 하는 참조는?",
+      options: {
+        A: "새 노드의 next",
+        B: "마지막 노드",
+        C: "배열 크기",
+        D: "없음",
+      },
+    },
+  },
+  explanation: {
+    kind: "question",
+    purpose: "explanation",
+    concept: linkedList,
+    item: {
+      id: "linked-list-e1",
+      format: "explanation",
+      question: "연결 리스트에서 맨 앞 삽입이 빠른 이유를 설명해 보세요.",
+    },
+  },
+  result: {
+    kind: "result",
+    concept: linkedList,
+    passed: true,
+    rubric_met: [true, true],
+  },
+  summary: {
+    kind: "summary",
+    text: "연결 리스트의 **참조**를 채웠으니 스택 구현으로 돌아가요.",
+    return_to: "#/learn?concept=stack",
+    results: [
+      { concept: linkedList, outcome: "passed", attempts: 1 },
+      { concept: stack, outcome: "passed", attempts: 1 },
+    ],
+  },
+};
+
+type Reply =
+  { stage: string; view: object } | { status: number; message: string };
+
+// 역할: Spring 막힘 세션 API를 흉내 냄; 버전이 맞을 때만 다음 화면으로 넘기고 오류 응답은 상태를 바꾸지 않음
+async function mockStuck(page: Page, start: Reply, steps: Reply[]) {
+  const calls: { method: string; body?: any }[] = [];
+  let session: {
+    id: string;
+    version: number;
+    stage: string;
+    view: object;
+    entry: object;
+  } | null = null;
+  // 역할: 오류 응답 또는 새 세션 상태를 돌려줌
+  const fulfill = (
+    route: Route,
+    reply: Reply,
+    apply: (next: { stage: string; view: object }) => void,
+  ) => {
+    if ("status" in reply)
+      return route.fulfill({
+        status: reply.status,
+        json: { message: reply.message },
+      });
+    apply(reply);
+    return route.fulfill({ json: session });
+  };
+  await page.route("**/api/stuck/sessions**", async (route) => {
+    const request = route.request();
+    const body = request.postDataJSON();
+    calls.push({ method: request.method(), body });
+    if (request.method() === "GET") return route.fulfill({ json: session });
+    if (!request.url().endsWith("/step"))
+      return fulfill(route, start, (next) => {
+        session = { id: sessionId, version: 1, ...next, entry: body.entry };
+      });
+    if (body.version !== session!.version)
+      return route.fulfill({
+        status: 409,
+        json: { message: "세션 상태가 변경됐습니다." },
+      });
+    return fulfill(route, steps.shift()!, (next) => {
+      session = { ...session!, ...next, version: session!.version + 1 };
+    });
+  });
+  return calls;
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/concept-map", (route) =>
+    route.fulfill({ json: conceptMap }),
+  );
+  await page.route("**/api/conversations/*", (route) =>
+    route.fulfill({ json: { messages: [] } }),
+  );
+});
+
+// 역할: 로드맵에서 스택을 골라 학습 화면으로 들어감(개념별 대화 저장 후 이동)
+async function openStackLesson(page: Page) {
+  await page.goto("/#/roadmap");
+  await page
+    .getByRole("button", { name: "스택 · 미학습", exact: true })
+    .click();
+  await page.getByRole("button", { name: "학습 시작", exact: true }).click();
+  await expect(page).toHaveURL(/#\/learn\?concept=stack$/);
+}
+
+const panel = (page: Page) =>
+  page.getByRole("complementary", { name: "막힘 풀기" });
+
+test("E1 [막혔어요]: 진단→결과→보충→확인→서술→요약→원래 학습으로 복귀", async ({
+  page,
+}) => {
+  const calls = await mockStuck(page, { stage: "diagnose", view: views.q1 }, [
+    { stage: "diagnose", view: views.q2 },
+    { stage: "remediate", view: views.diagnosis },
+    { stage: "check", view: views.remediation },
+    { stage: "explain", view: views.explanation },
+    { stage: "return", view: views.result },
+    { stage: "complete", view: views.summary },
+  ]);
+  await openStackLesson(page);
+  const question = page.getByLabel("질문", { exact: true });
+  await question.fill("내가 쓰던 질문");
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  const sheet = panel(page);
+  await sheet.getByRole("radio", { name: /B\. 연산 규칙/ }).check();
+  await sheet.getByRole("button", { name: "답 제출" }).click();
+  await sheet
+    .getByLabel("노드가 다음 노드를 가리키려고 저장하는 값은?")
+    .fill("인덱스");
+  await sheet.getByRole("button", { name: "답 제출" }).click();
+  // 진단 결과: 빈틈 목록과 어떤 문항에 어떤 답을 해서 판단했는지
+  await expect(sheet.locator(".stuck-gaps")).toHaveText("연결 리스트");
+  const evidence = sheet.locator(".stuck-evidence > li");
+  await expect(evidence.nth(0)).toContainText("추상 자료형과 구현");
+  await expect(evidence.nth(0)).toContainText("맞힘");
+  await expect(evidence.nth(0)).toContainText(
+    "B. 연산 규칙으로 정의하고 구현은 숨긴다 ← 내 답",
+  );
+  await expect(evidence.nth(1)).toContainText("빈틈");
+  await expect(evidence.nth(1)).toContainText("내 답: 인덱스");
+  // 넓은 화면에서는 대화가 패널에 가리지 않고 옆에 남아 있음
+  const chat = await page
+    .getByRole("region", { name: "학습 대화" })
+    .boundingBox();
+  const side = await sheet.boundingBox();
+  expect(chat!.x + chat!.width).toBeLessThanOrEqual(side!.x);
+  await sheet.getByRole("button", { name: "보충 시작" }).click();
+  await expect(
+    sheet.getByRole("heading", { name: "연결 리스트", level: 2 }),
+  ).toBeVisible();
+  await expect(sheet.locator("strong", { hasText: "노드" })).toBeVisible();
+  await sheet.getByRole("radio", { name: /A\. 새 노드의 next/ }).check();
+  await sheet.getByRole("button", { name: "답 제출" }).click();
+  await sheet
+    .getByLabel("연결 리스트에서 맨 앞 삽입이 빠른 이유를 설명해 보세요.")
+    .fill("참조 하나만 바꾸면 되기 때문입니다.");
+  await sheet.getByRole("button", { name: "설명 제출" }).click();
+  await expect(sheet).toContainText("이해 확인을 통과했어요.");
+  await expect(sheet).toContainText("서술 기준 2/2개");
+  await sheet.getByRole("button", { name: "다음", exact: true }).click();
+  await expect(sheet.locator(".stuck-results")).toContainText("이해 확인 통과");
+  await expect(
+    page.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key)!).sessions,
+      stuckKey,
+    ),
+  ).resolves.toEqual({});
+  await sheet.getByRole("button", { name: "원래 학습으로 돌아가기" }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page).toHaveURL(/#\/learn\?concept=stack$/);
+  await expect(question).toHaveValue("내가 쓰던 질문");
+  expect(calls.map((call) => call.body)).toEqual([
+    {
+      entry: {
+        kind: "roadmap",
+        concept: "stack",
+        return_to: "#/learn?concept=stack",
+      },
+    },
+    { version: 1, input: { type: "answer", item: "adt-d1", answer: "B" } },
+    {
+      version: 2,
+      input: { type: "answer", item: "linked-list-d1", answer: "인덱스" },
+    },
+    { version: 3, input: { type: "continue" } },
+    {
+      version: 4,
+      input: { type: "answer", item: "linked-list-c1", answer: "A" },
+    },
+    {
+      version: 5,
+      input: {
+        type: "answer",
+        item: "linked-list-e1",
+        answer: "참조 하나만 바꾸면 되기 때문입니다.",
+      },
+    },
+    { version: 6, input: { type: "continue" } },
+  ]);
+});
+
+test("이미 알아요·바로 설명은 문항 없이 해당 입력만 보냄", async ({ page }) => {
+  const calls = await mockStuck(page, { stage: "diagnose", view: views.q1 }, [
+    { stage: "diagnose", view: views.q2 },
+    {
+      stage: "remediate",
+      view: { ...views.diagnosis, gaps: [], evidence: [], opted_out: true },
+    },
+  ]);
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  await panel(page).getByRole("button", { name: "이미 알아요" }).click();
+  await panel(page).getByRole("button", { name: "바로 설명" }).click();
+  await expect(panel(page)).toContainText(
+    "진단을 멈추고 바로 설명으로 넘어가요.",
+  );
+  expect(calls.slice(1).map((call) => call.body.input)).toEqual([
+    { type: "skip_known", item: "adt-d1" },
+    { type: "opt_out" },
+  ]);
+});
+
+test("E2 붙여넣기: 지원 범위 밖 안내 후 원래 학습으로 돌아감", async ({
+  page,
+}) => {
+  const calls = await mockStuck(
+    page,
+    {
+      stage: "out_of_scope",
+      view: { kind: "out_of_scope", return_to: "#/learn?concept=stack" },
+    },
+    [],
+  );
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막힌 문장 붙여넣기" }).click();
+  const box = panel(page).getByRole("textbox");
+  await expect(box).toHaveAttribute("maxlength", "2000");
+  await box.fill("다익스트라에서 우선순위 큐를 쓰는 이유가 뭐죠?");
+  await expect(panel(page)).toContainText("26/2000자");
+  await panel(page).getByRole("button", { name: "이 문장으로 시작" }).click();
+  await expect(panel(page)).toContainText("지원하는 개념");
+  expect(calls[0].body).toEqual({
+    entry: {
+      kind: "excerpt",
+      excerpt: "다익스트라에서 우선순위 큐를 쓰는 이유가 뭐죠?",
+      return_to: "#/learn?concept=stack",
+    },
+  });
+  await panel(page)
+    .getByRole("button", { name: "원래 학습으로 돌아가기" })
+    .click();
+  await expect(panel(page)).toHaveCount(0);
+  expect(
+    await page.evaluate((key) => localStorage.getItem(key), stuckKey),
+  ).toContain('"sessions":{}');
+});
+
+test("새로고침하면 열려 있던 막힘 세션을 같은 단계에서 재개하고, 닫아도 이어서 풀 수 있음", async ({
+  page,
+}) => {
+  const calls = await mockStuck(page, { stage: "diagnose", view: views.q1 }, [
+    { stage: "diagnose", view: views.q2 },
+  ]);
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  await panel(page).getByRole("radio", { name: /B\./ }).check();
+  await panel(page).getByRole("button", { name: "답 제출" }).click();
+  await expect(panel(page)).toContainText("노드가 다음 노드를");
+  await page.reload();
+  await expect(panel(page)).toContainText("노드가 다음 노드를");
+  expect(calls.at(-1)).toEqual({ method: "GET", body: null });
+  await panel(page).getByRole("button", { name: "막힘 패널 닫기" }).click();
+  await expect(panel(page)).toHaveCount(0);
+  await page.reload();
+  await expect(panel(page)).toHaveCount(0);
+  await page.getByRole("button", { name: "막힘 이어서 풀기" }).click();
+  await expect(panel(page)).toContainText("노드가 다음 노드를");
+  // 이어서 열 때는 새 세션을 만들지 않고 저장된 세션을 불러옴
+  expect(
+    calls.filter((call) => call.method === "POST" && call.body.entry),
+  ).toHaveLength(1);
+});
+
+test("503은 화면을 유지하고 같은 버전으로 다시 시도하며, 요청 중 중복 클릭을 막음", async ({
+  page,
+}) => {
+  const calls = await mockStuck(
+    page,
+    { stage: "remediate", view: views.diagnosis },
+    [
+      {
+        status: 503,
+        message:
+          "지금은 이 단계를 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+      },
+      { stage: "check", view: views.remediation },
+    ],
+  );
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  await panel(page).getByRole("button", { name: "보충 시작" }).click();
+  const alert = panel(page).getByRole("alert");
+  await expect(alert).toContainText("잠시 후 다시 시도해 주세요.");
+  await expect(panel(page).locator(".stuck-gaps")).toHaveText("연결 리스트");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/stuck/sessions/*/step", async (route) => {
+    await held;
+    await route.fallback();
+  });
+  await alert.getByRole("button", { name: "다시 시도" }).click();
+  await expect(panel(page).getByRole("status")).toContainText("수십 초");
+  await expect(
+    panel(page).getByRole("button", { name: "보충 시작" }),
+  ).toBeDisabled();
+  release();
+  await expect(panel(page).locator(".stuck-text")).toContainText("노드는 값과");
+  expect(calls.slice(1).map((call) => call.body)).toEqual([
+    { version: 1, input: { type: "continue" } },
+    { version: 1, input: { type: "continue" } },
+  ]);
+});
+
+test("409를 받으면 저장된 최신 단계를 다시 불러와 보여 줌", async ({
+  page,
+}) => {
+  await mockStuck(page, { stage: "diagnose", view: views.q1 }, []);
+  await page.route("**/api/stuck/sessions/*/step", (route) =>
+    route.fulfill({
+      status: 409,
+      json: { message: "같은 세션의 이전 요청을 처리 중입니다." },
+    }),
+  );
+  await page.route(`**/api/stuck/sessions/${sessionId}`, (route) =>
+    route.fulfill({
+      json: {
+        id: sessionId,
+        version: 2,
+        stage: "diagnose",
+        view: views.q2,
+        entry: {
+          kind: "roadmap",
+          concept: "stack",
+          return_to: "#/learn?concept=stack",
+        },
+      },
+    }),
+  );
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  await panel(page).getByRole("radio", { name: /B\./ }).check();
+  await panel(page).getByRole("button", { name: "답 제출" }).click();
+  await expect(panel(page)).toContainText("최신 화면을 불러왔어요");
+  await expect(panel(page)).toContainText("노드가 다음 노드를");
+});
+
+test("로드맵 상세: MVP 개념은 [막혔어요], 나머지는 지원 안내", async ({
+  page,
+}) => {
+  await mockStuck(page, { stage: "diagnose", view: views.q1 }, []);
+  await page.goto("/#/roadmap");
+  const detail = page.getByRole("region", { name: "선택한 개념" });
+  await page
+    .getByRole("button", { name: "너비 우선 탐색 · 미학습", exact: true })
+    .click();
+  await expect(detail.getByRole("button", { name: "막혔어요" })).toHaveCount(0);
+  await expect(detail).toContainText("아직 [막혔어요]를 지원하지 않는 개념");
+  await page.getByRole("button", { name: "큐 · 미학습", exact: true }).click();
+  await detail.getByRole("button", { name: "막혔어요", exact: true }).click();
+  await expect(panel(page)).toContainText("추상 자료형에 대한 설명");
+  expect(
+    await page.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key)!),
+      stuckKey,
+    ),
+  ).toEqual({
+    version: 1,
+    sessions: { "roadmap:queue": sessionId },
+    active: "roadmap:queue",
+  });
+});
+
+test("390px 모바일에서는 전체 화면 시트로 열리고 가로 스크롤이 없음", async ({
+  page,
+}) => {
+  await mockStuck(page, { stage: "remediate", view: views.diagnosis }, []);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  const box = await panel(page).boundingBox();
+  expect(box).toEqual({ x: 0, y: 0, width: 390, height: 844 });
+  await expect(panel(page).locator(".stuck-evidence > li")).toHaveCount(2);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
