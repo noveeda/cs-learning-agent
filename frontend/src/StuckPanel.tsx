@@ -168,6 +168,12 @@ export function StuckPanel({
 }) {
   const [session, setSession] = useState<StuckSession | null>(null);
   const [excerpt, setExcerpt] = useState("");
+  // 붙여넣기 입력창을 보여 줄 복귀 위치; 붙여넣기로 열었거나 붙여넣기 세션을 처음부터 다시 할 때 설정
+  const [pasteTo, setPasteTo] = useState(
+    request.mode === "paste" ? request.returnTo : null,
+  );
+  // "처음부터 다시" 확인 단계; 한 번 더 눌러야 진행을 버려 실수로 지우는 일을 막음
+  const [confirmRestart, setConfirmRestart] = useState(false);
   const [pending, setPending] = useState("");
   const [error, setError] = useState<{
     message: string;
@@ -264,6 +270,31 @@ export function StuckPanel({
     );
   }
 
+  // 역할: "처음부터 다시"(확인 후); 브라우저의 진행 중 목록에서만 빼고 서버 세션 파일은 그대로 둠
+  // - 개념 진입은 같은 entry로 바로 새 세션을 시작
+  // - 붙여넣기는 다른 문장으로 바꿀 수 있게 이전 문장을 채운 입력창으로 돌아감
+  function restart() {
+    if (!session || inFlight.current) return;
+    const entry = session.entry;
+    setConfirmRestart(false);
+    try {
+      finishStuckSession(entryKey(entry));
+    } catch {
+      // 목록에서 빼지 못해도 새 세션을 받으면 같은 키를 새 ID로 덮어씀
+    }
+    onSessionsChange();
+    setSession(null);
+    setNotice("");
+    setError(null);
+    if (entry.kind === "excerpt") {
+      setExcerpt(entry.excerpt);
+      setPasteTo(entry.return_to);
+    } else
+      run("진단 문항을 준비하고 있어요.", async () => ({
+        session: await createSession(entry),
+      }));
+  }
+
   useEffect(() => {
     heading.current?.focus();
     // StrictMode의 effect 이중 실행에서 세션이 두 개 만들어지지 않도록 한 번만 시작
@@ -297,13 +328,13 @@ export function StuckPanel({
   // 역할: view.kind별 본문; 정답 키는 받지 않으므로 정답을 표시하지 않고 학습자 답과 판정만 보여 줌
   function body() {
     if (!session || !view) {
-      if (request.mode !== "paste") return null;
+      if (pasteTo === null) return null;
       return (
         <form
           className="stuck-form"
           onSubmit={(event) => {
             event.preventDefault();
-            startExcerpt(request.returnTo);
+            startExcerpt(pasteTo);
           }}
         >
           <label className="stuck-question" htmlFor="stuck-excerpt">
@@ -669,10 +700,48 @@ export function StuckPanel({
           </div>
         )}
         {session && !isFinished(session.stage) && (
-          <p className="stuck-footnote">
-            진행 상황은 단계마다 저장돼요. 패널을 닫거나 새로고침해도 같은
-            단계에서 이어서 할 수 있어요.
-          </p>
+          <div className="stuck-restart">
+            <p className="stuck-footnote">
+              진행 상황은 단계마다 저장돼요. 패널을 닫거나 새로고침해도 같은
+              단계에서 이어서 할 수 있어요.
+            </p>
+            {confirmRestart ? (
+              <div
+                className="stuck-confirm"
+                role="group"
+                aria-label="처음부터 다시 시작할까요?"
+              >
+                <p>
+                  지금까지의 진단·보충 진행을 버리고 처음부터 다시 시작할까요?
+                  버린 진행은 이어서 할 수 없어요.
+                </p>
+                <div className="stuck-actions">
+                  <button
+                    className="button primary"
+                    disabled={busy}
+                    onClick={restart}
+                  >
+                    다시 시작
+                  </button>
+                  <button
+                    className="button secondary"
+                    onClick={() => setConfirmRestart(false)}
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => setConfirmRestart(true)}
+              >
+                <RotateCcw size={14} aria-hidden="true" />
+                처음부터 다시
+              </button>
+            )}
+          </div>
         )}
       </div>
     </aside>

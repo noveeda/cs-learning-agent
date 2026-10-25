@@ -10,6 +10,8 @@ const conceptMap = JSON.parse(
 );
 const stuckKey = "cs-stuck-sessions-v1";
 const sessionId = "0123456789abcdef0123456789abcdef";
+// "처음부터 다시"로 새로 만든 세션은 다른 ID를 받음
+const restartedId = "fedcba9876543210fedcba9876543210";
 const options = {
   A: "값을 넣은 순서대로 꺼낸다",
   B: "연산 규칙으로 정의하고 구현은 숨긴다",
@@ -143,7 +145,13 @@ async function mockStuck(page: Page, start: Reply, steps: Reply[]) {
     if (request.method() === "GET") return route.fulfill({ json: session });
     if (!request.url().endsWith("/step"))
       return fulfill(route, start, (next) => {
-        session = { id: sessionId, version: 1, ...next, entry: body.entry };
+        const created = calls.filter((call) => call.body?.entry).length;
+        session = {
+          id: created > 1 ? restartedId : sessionId,
+          version: 1,
+          ...next,
+          entry: body.entry,
+        };
       });
     if (body.version !== session!.version)
       return route.fulfill({
@@ -277,7 +285,21 @@ test("이미 알아요·바로 설명은 문항 없이 해당 입력만 보냄",
     { stage: "diagnose", view: views.q2 },
     {
       stage: "remediate",
-      view: { ...views.diagnosis, gaps: [], evidence: [], opted_out: true },
+      view: {
+        ...views.diagnosis,
+        gaps: [],
+        // 진단 문항이 없는 선수 개념은 판단하지 않고 no_items로 기록됨
+        evidence: [
+          {
+            concept: "reference",
+            item: null,
+            result: "no_items",
+            question: null,
+            answer: null,
+          },
+        ],
+        opted_out: true,
+      },
     },
   ]);
   await openStackLesson(page);
@@ -286,6 +308,9 @@ test("이미 알아요·바로 설명은 문항 없이 해당 입력만 보냄",
   await panel(page).getByRole("button", { name: "바로 설명" }).click();
   await expect(panel(page)).toContainText(
     "진단을 멈추고 바로 설명으로 넘어가요.",
+  );
+  await expect(panel(page).locator(".stuck-evidence > li")).toHaveText(
+    "참조와 포인터진단 문항 없음",
   );
   expect(calls.slice(1).map((call) => call.body.input)).toEqual([
     { type: "skip_known", item: "adt-d1" },
@@ -468,4 +493,97 @@ test("390px 모바일에서는 전체 화면 시트로 열리고 가로 스크�
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+});
+
+test("처음부터 다시: 확인 뒤에만 진행 중 세션을 버리고 같은 진입으로 새 세션을 시작함", async ({
+  page,
+}) => {
+  const calls = await mockStuck(page, { stage: "diagnose", view: views.q1 }, [
+    { stage: "diagnose", view: views.q2 },
+  ]);
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  const sheet = panel(page);
+  await sheet.getByRole("radio", { name: /B\./ }).check();
+  await sheet.getByRole("button", { name: "답 제출" }).click();
+  await expect(sheet).toContainText("노드가 다음 노드를");
+  // 실수 방지: 취소하면 아무 요청 없이 그대로 남음
+  await sheet.getByRole("button", { name: "처음부터 다시" }).click();
+  const confirm = sheet.getByRole("group", {
+    name: "처음부터 다시 시작할까요?",
+  });
+  await confirm.getByRole("button", { name: "취소" }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(sheet).toContainText("노드가 다음 노드를");
+  expect(calls).toHaveLength(2);
+  await sheet.getByRole("button", { name: "처음부터 다시" }).click();
+  await sheet
+    .getByRole("group", { name: "처음부터 다시 시작할까요?" })
+    .getByRole("button", { name: "다시 시작" })
+    .click();
+  await expect(sheet).toContainText("추상 자료형에 대한 설명");
+  expect(calls.slice(2)).toEqual([
+    {
+      method: "POST",
+      body: {
+        entry: {
+          kind: "roadmap",
+          concept: "stack",
+          return_to: "#/learn?concept=stack",
+        },
+      },
+    },
+  ]);
+  expect(
+    await page.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key)!),
+      stuckKey,
+    ),
+  ).toEqual({
+    version: 1,
+    sessions: { "roadmap:stack": restartedId },
+    active: "roadmap:stack",
+  });
+  // 새로고침 재개도 새 세션을 불러오고, 버린 세션은 조회하지 않음
+  await page.reload();
+  await expect(sheet).toContainText("추상 자료형에 대한 설명");
+  expect(calls.filter((call) => call.method === "GET")).toHaveLength(1);
+  expect(
+    await page.evaluate(() =>
+      performance
+        .getEntriesByType("resource")
+        .map((entry) => entry.name)
+        .filter((name) => name.includes("/api/stuck/sessions/")),
+    ),
+  ).toEqual([expect.stringContaining(restartedId)]);
+});
+
+test("붙여넣기 세션의 처음부터 다시는 이전 문장을 채운 입력창으로 돌아감", async ({
+  page,
+}) => {
+  const calls = await mockStuck(
+    page,
+    { stage: "diagnose", view: views.q1 },
+    [],
+  );
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막힌 문장 붙여넣기" }).click();
+  const sheet = panel(page);
+  await sheet
+    .getByRole("textbox")
+    .fill("스택을 배열로 구현하는 부분이 헷갈려요");
+  await sheet.getByRole("button", { name: "이 문장으로 시작" }).click();
+  await expect(sheet).toContainText("추상 자료형에 대한 설명");
+  await sheet.getByRole("button", { name: "처음부터 다시" }).click();
+  await sheet.getByRole("button", { name: "다시 시작" }).click();
+  await expect(sheet.getByRole("textbox")).toHaveValue(
+    "스택을 배열로 구현하는 부분이 헷갈려요",
+  );
+  expect(
+    await page.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key)!).sessions,
+      stuckKey,
+    ),
+  ).toEqual({});
+  expect(calls).toHaveLength(1);
 });

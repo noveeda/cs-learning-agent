@@ -48,6 +48,10 @@
 .stuck-results span { color: var(--color-muted); }
 .stuck-retry { margin-top: var(--space-2); color: var(--color-text); }
 .stuck-footnote { margin-top: var(--space-5); font-size: 11px; color: var(--color-muted); }
+.stuck-restart { border-top: 1px solid var(--color-border); margin-top: var(--space-5); }
+.stuck-confirm { padding: var(--space-3); border: 1px solid #f0cecc; border-radius: var(--radius-control); background: #fff8f7; }
+.stuck-confirm p { margin: 0; }
+.stuck-confirm .stuck-actions { margin-top: var(--space-3); }
 /* 좁은 화면: 전체 화면 시트로 띄워 문항 입력 공간을 확보; 닫으면 아래 학습 화면이 그대로 남아 있음 */
 @media (max-width: 850px) {
   .stuck-panel { inset: 0; width: auto; border-radius: 0; border: 0; }

@@ -109,6 +109,18 @@ test('remembers in-progress sessions per entry, reopens the active one and drops
   assert.equal(loadStuckStore(storage).active, 'roadmap:stack');
 });
 
+test('restarting drops only that entry so reopening starts a new session, keeping other sessions', () => {
+  // "처음부터 다시": 서버 세션은 그대로 두고 브라우저의 진행 중 목록에서만 빼서 다음 열기가 이어서 열기가 되지 않게 함
+  let saved = null;
+  const storage = { getItem: () => saved, setItem: (_, value) => { saved = value; } };
+  const other = 'abcdef0123456789abcdef0123456789';
+  rememberStuckSession(entryKey(entry), id, storage);
+  rememberStuckSession('roadmap:queue', other, storage);
+  finishStuckSession(entryKey(entry), storage);
+  assert.deepEqual(loadStuckStore(storage), { sessions: { 'roadmap:queue': other }, active: 'roadmap:queue' });
+  assert.equal(entryKey(entry) in loadStuckStore(storage).sessions, false);
+});
+
 test('ignores damaged or blocked storage and malformed session IDs', () => {
   const empty = { sessions: {}, active: null };
   for (const raw of [null, '{broken', '[]', '{"version":2}', '{"version":1,"sessions":[]}']) {
