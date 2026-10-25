@@ -33,7 +33,8 @@ const evidenceLabels = {
   known: "맞힘",
   gap: "빈틈",
   self_known: "이미 안다고 표시",
-  no_items: "확인 문항 없음",
+  // 엔진은 진단 문항이 없는 개념을 판단하지 않고 no_items로만 기록
+  no_items: "진단 문항 없음",
 };
 
 const outcomeLabels: Record<string, string> = {
