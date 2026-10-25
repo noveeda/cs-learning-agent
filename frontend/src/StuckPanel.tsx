@@ -176,6 +176,8 @@ export function StuckPanel({
   const inFlight = useRef(false);
   const started = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const alert = useRef<HTMLDivElement>(null);
   const titleOf = (id: string) =>
     concepts.find((concept) => concept.id === id)?.title ?? id;
 
@@ -276,6 +278,15 @@ export function StuckPanel({
       }));
     // 패널은 요청마다 key로 새로 만들어지므로 처음 한 번만 실행
   }, []);
+
+  // 다음 단계 화면은 위에서부터 읽게 함; 같은 패널 안에서 이전 단계의 스크롤 위치가 남지 않도록 처리
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: 0 });
+  }, [session?.version]);
+  // 오류는 긴 화면 아래쪽에 생기므로 안내와 다시 시도 버튼이 보이도록 스크롤
+  useEffect(() => {
+    if (error) alert.current?.scrollIntoView({ block: "nearest" });
+  }, [error]);
 
   const busy = Boolean(pending);
   const view = session?.view;
@@ -629,7 +640,7 @@ export function StuckPanel({
           <X size={18} aria-hidden="true" />
         </button>
       </div>
-      <div className="stuck-body">
+      <div className="stuck-body" ref={scroller}>
         {notice && (
           <p className="stuck-notice" role="status">
             {notice}
@@ -643,7 +654,7 @@ export function StuckPanel({
           </div>
         )}
         {error && (
-          <div className="error" role="alert">
+          <div className="error" role="alert" ref={alert}>
             {error.message}
             {error.retry && (
               <button

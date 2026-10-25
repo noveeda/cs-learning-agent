@@ -4,10 +4,14 @@
 .stuck-unsupported { margin: 0; font-size: 11px; line-height: 1.7; color: var(--color-muted); }
 .concept-actions .stuck-button { width: 100%; }
 .stuck-panel { position: fixed; z-index: 6; top: var(--space-3); right: var(--space-3); bottom: var(--space-3); width: 420px; display: flex; flex-direction: column; box-shadow: 0 12px 48px #24262033; }
-/* 넓은 화면: 학습 화면을 패널 폭만큼 줄여 대화를 가리지 않고 옆에 둠(대화·스크롤은 그대로 유지) */
+/* 넓은 화면의 학습 화면: 화면을 패널 폭만큼 줄여 대화를 가리지 않고 옆에 둠(대화·스크롤은 그대로 유지)
+   - 로드맵은 지도가 좁아지면 읽기 어려워 줄이지 않고 패널을 상세 영역 위에 띄움 */
 @media (min-width: 1200px) {
-  .app:has(.stuck-panel) .workspace { margin-right: 432px; }
-  .stuck-panel { box-shadow: none; }
+  .app:has(.stuck-panel):has(.learning-layout) .workspace { margin-right: 432px; }
+  .app:has(.learning-layout) .stuck-panel { box-shadow: none; }
+  /* 패널이 학습 도움말 자리를 대신하므로 도움말 열을 숨겨 대화 폭을 확보(도식 패널이 열려 있으면 그대로 둠) */
+  .app:has(.stuck-panel) .learning-layout:not(:has(.artifact-panel)) { grid-template-columns: minmax(0, 1fr); }
+  .app:has(.stuck-panel) .learning-support { display: none; }
 }
 .stuck-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--color-border); }
 .stuck-header h2 { margin: 0; font-size: 16px; font-weight: 600; }
