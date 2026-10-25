@@ -1,4 +1,5 @@
 # 파일 역할: 막힘 흐름의 진단 가지치기·상한·보충 순서·혼합형 확인·복귀와, 잘못된 입력·LLM 실패 시 상태 보존을 검증
+import json
 import unittest
 
 from fastapi.testclient import TestClient
@@ -36,8 +37,8 @@ def small_items(concepts, without=()):
 
 # 역할: LLM 역할 가짜 구현; 호출을 기록해 요청당 1회 이하인지 확인하고, 서술 통과 여부를 조절
 class FakeGateway:
-    def __init__(self, identified='top', rubric_pass=True):
-        self.calls, self.identified, self.rubric_pass = [], identified, rubric_pass
+    def __init__(self, identified='top', rubric_pass=True, rubric_extra=0):
+        self.calls, self.identified, self.rubric_pass, self.rubric_extra = [], identified, rubric_pass, rubric_extra
 
     def identify(self, excerpt, concept_map):
         self.calls.append('identify')
@@ -49,7 +50,7 @@ class FakeGateway:
 
     def grade_explanation(self, item, answer):
         self.calls.append('grade')
-        return [self.rubric_pass] * len(item.rubric)
+        return [self.rubric_pass] * (len(item.rubric) + self.rubric_extra)
 
     def summarize(self, state, concept_map):
         self.calls.append('summarize')
@@ -116,6 +117,16 @@ class DiagnosisTests(unittest.TestCase):
         session.diagnose(known={'beta', 'delta'})
         self.assertEqual([f.concept for f in session.state.fixes], ['gamma', 'alpha', 'top'])
         self.assertEqual([g['id'] for g in session.state.view['gaps']], ['gamma', 'alpha'])
+
+    # 검증 목적: 진단 결과 근거에 학습자가 본 문항 문장과 학습자 답이 들어가 "어떤 문항을 틀려 빈틈인지" 보여 줄 수 있는지 확인
+    def test_diagnosis_evidence_shows_question_and_answer(self):
+        session = Session(self)
+        session.diagnose(known={'beta', 'delta'}, skip={'gamma'})
+        evidence = {e['concept']: e for e in session.state.view['evidence']}
+        self.assertEqual(evidence['alpha'], {'concept': 'alpha', 'item': 'alpha-d1', 'result': 'gap',
+                                             'question': 'alpha d1', 'answer': '틀린 답'})
+        self.assertEqual(evidence['beta']['answer'], 'ok')
+        self.assertEqual((evidence['gamma']['result'], evidence['gamma']['answer']), ('self_known', None))
 
     # 검증 목적: 깊이 3을 넘는 선수 개념(eps, 깊이 4)은 모두 틀려도 묻지 않는지 확인
     def test_stops_at_depth_limit(self):
@@ -213,14 +224,24 @@ class RemediationTests(unittest.TestCase):
 
 
 class SafetyTests(unittest.TestCase):
-    # 검증 목적: 화면용 상태(view)에 정답 키·근거·루브릭이 들어가지 않는지 확인
-    def test_view_never_contains_answer_keys(self):
+    # 검증 목적: 진단부터 복귀까지 매 단계 저장 상태(view·log 포함)에 정답 키·근거·루브릭 문자열이 없는지 확인
+    # - 학습자는 늘 틀린 답만 내므로 정답 키 "ok"가 보이면 문항 정보가 샌 것
+    # - JSON 공백 형식에 기대지 않도록 직렬화한 값 자체를 찾음(이전 검사는 공백 차이로 항상 통과했음)
+    def test_state_never_contains_answer_keys(self):
         session = Session(self)
-        while session.state.stage == 'diagnose':
-            item = session.state.view['item']
-            self.assertFalse({'answer', 'rationale', 'rubric'} & set(item))
-            session.send({'type': 'answer', 'item': session.state.pending, 'answer': 'no'})
-        self.assertNotIn('"answer": "ok"', session.state.model_dump_json())
+        secrets = {json.dumps(i.answer) for i in session.items if i.answer}
+        secrets |= {i.rationale for i in session.items} | {r for i in session.items for r in i.rubric or []}
+        send = session.send
+
+        def checked_send(data):
+            dumped = send(data).model_dump_json()
+            self.assertFalse([x for x in secrets if x in dumped], data)
+            return session.state
+
+        session.send = checked_send
+        session.diagnose()
+        session.remediate(check_ok=False)
+        self.assertEqual(session.state.stage, 'complete')
 
     # 검증 목적: 현재 문항이 아닌 답·단계에 맞지 않는 입력·중복 시작은 거부하고 상태를 바꾸지 않는지 확인
     def test_rejects_stale_or_invalid_input(self):
@@ -238,6 +259,17 @@ class SafetyTests(unittest.TestCase):
         before = session.state.model_dump()
         with self.assertRaises(LLMUnavailable):
             step(session.state, StepInput(type='continue'), UnavailableGateway(), session.map, session.items, 1.0)
+        self.assertEqual(session.state.model_dump(), before)
+
+    # 검증 목적: 서술 채점 결과 수가 루브릭과 다르면(LLM 출력 오류) 재시도 가능한 LLMUnavailable로 끝나고 상태가 보존되는지 확인
+    def test_rubric_count_mismatch_is_llm_failure(self):
+        session = Session(self, gateway=FakeGateway(rubric_extra=1))
+        session.send({'type': 'opt_out'})
+        session.send({'type': 'continue'})
+        session.send({'type': 'answer', 'item': session.state.pending, 'answer': 'ok'})
+        before = session.state.model_dump()
+        with self.assertRaises(LLMUnavailable):
+            session.send({'type': 'answer', 'item': session.state.pending, 'answer': '설명'})
         self.assertEqual(session.state.model_dump(), before)
 
     # 검증 목적: 검수 전(draft) 지도로는 진단을 시작하지 않는지 확인

@@ -39,11 +39,13 @@ class Entry(StrictModel):
 
 
 # 역할: 진단한 선수 개념 하나의 결과; 빈틈 판단 근거로 학습자에게 보여 주고 M1·M2 측정에 사용
+# - answer: 학습자가 낸 답; 진단 결과 화면에서 "어떤 답으로 빈틈이 됐는지" 보여 주기 위해 보관(건너뛰기·문항 없음은 None)
 class Probe(StrictModel):
     concept: str
     depth: int
     result: Literal['known', 'gap', 'self_known', 'no_items']
     item: str | None = None
+    answer: str | None = None
 
 
 # 역할: 보충 대상 하나의 진행 기록; attempts는 설명을 받은 횟수(첫 보충 + 재보충)
@@ -195,6 +197,17 @@ def _next_probe(s, ctx):
     _start_remediation(s, ctx)
 
 
+# 역할: 진단 결과 화면의 판정 근거 한 줄; 학습자가 본 문항 문장·보기와 학습자 답만 담고 정답 키·근거·루브릭은 넣지 않음
+def _evidence_view(ctx, probe):
+    view = {'concept': probe.concept, 'item': probe.item, 'result': probe.result, 'question': None, 'answer': probe.answer}
+    if probe.item:
+        shown = _item_view(ctx.item(probe.item))
+        view['question'] = shown['question']
+        if 'options' in shown:
+            view['options'] = shown['options']
+    return view
+
+
 # 역할: 진단 결과로 보충 순서를 정함; 빈틈은 선수 개념이 먼저, 막힌 개념은 마지막(S6 재확인)
 def _start_remediation(s, ctx):
     gaps = {p.concept for p in s.probes if p.result == 'gap'}
@@ -203,8 +216,8 @@ def _start_remediation(s, ctx):
     s.cursor, s.pending, s.stage = 0, None, 'remediate'
     s.view = {'kind': 'diagnosis_result', 'target': _concept_view(ctx, s.target),
               'gaps': [_concept_view(ctx, c) for c in ordered],
-              # 판정 근거: 어떤 문항을 틀려 빈틈으로 봤는지 학습자에게 보여 줌
-              'evidence': [{'concept': p.concept, 'item': p.item, 'result': p.result} for p in s.probes],
+              # 판정 근거: 어떤 문항에 어떤 답을 내서 빈틈으로 봤는지 학습자에게 보여 줌
+              'evidence': [_evidence_view(ctx, p) for p in s.probes],
               'opted_out': s.opted_out}
     _log(s, ctx, 'remediation_planned', s.target, order=[f.concept for f in s.fixes])
 
@@ -240,7 +253,8 @@ def _diagnose(s, ctx):
         _next_probe(s, ctx)
         return
     if ctx.input.type == 'opt_out':
-        # "바로 설명": 진단을 생략하고 막힌 개념만 보충; 측정에서 따로 분리할 수 있게 표시
+        # "바로 설명": 남은 진단을 그만두고 보충으로 넘어감; 측정에서 따로 분리할 수 있게 표시
+        # - 이미 답한 문항에서 찾은 빈틈은 버리지 않고 막힌 개념 앞에 보충(처음부터 누르면 막힌 개념만 보충)
         s.opted_out, s.frontier = True, []
         _log(s, ctx, 'opted_out', s.target, skipped_item=s.pending)
         _start_remediation(s, ctx)
@@ -256,7 +270,8 @@ def _diagnose(s, ctx):
     else:
         answer = _answer_for(s, ctx)
         correct = grade(item, answer)
-        s.probes.append(Probe(concept=item.concept, depth=s.pending_depth, result='known' if correct else 'gap', item=item.id))
+        s.probes.append(Probe(concept=item.concept, depth=s.pending_depth, result='known' if correct else 'gap',
+                              item=item.id, answer=answer))
         _log(s, ctx, 'probe_answered', item.concept, item.id, answer=answer, correct=correct)
         if not correct and s.pending_depth < MAX_DEPTH:
             s.frontier += [(p.id, s.pending_depth + 1) for p in ctx.concept(item.concept).prerequisites]
@@ -308,7 +323,8 @@ def _explain(s, ctx):
     item = ctx.item(s.pending)
     met = ctx.gateway.grade_explanation(item, answer)
     if len(met) != len(item.rubric):
-        raise RuntimeError('루브릭 항목 수와 채점 결과 수가 다릅니다.')
+        # 채점 결과 수가 루브릭과 다르면 LLM 출력 오류로 보고 재시도 가능한 오류(503)로 끝냄; 상태는 아직 바꾸지 않았음
+        raise LLMUnavailable('서술 채점 결과가 올바르지 않습니다. 다시 시도해 주세요.')
     _log(s, ctx, 'explanation_graded', item.concept, item.id, answer=answer, rubric_met=met, check_passed=s.check_passed)
     _conclude(s, ctx, bool(s.check_passed) and all(met), rubric_met=met)
 
