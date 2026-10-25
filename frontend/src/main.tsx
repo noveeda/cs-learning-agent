@@ -1,13 +1,12 @@
-// 파일 역할: React 진입점; 해시 경로·로드맵 상태·개념별 대화 ID·커리큘럼 화면 연결
+// 파일 역할: React 진입점; 개념 지도 로딩·해시 경로·로드맵 상태·개념별 대화 ID·커리큘럼 화면 연결
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { newConversation } from "./api";
+import { loadConceptMap, newConversation } from "./api";
 import { ChatSession } from "./ChatSession";
 import { CurriculumDraft } from "./CurriculumDraft";
 import { LearningShell } from "./LearningShell";
-import { Roadmap } from "./Roadmap";
+import { ConceptMapStatus, Roadmap } from "./Roadmap";
 import {
-  concepts,
   loadRoadmap,
   saveRoadmap,
   type Concept,
@@ -17,24 +16,36 @@ import {
 import "./style.css";
 import "./roadmap.css";
 
-// 역할: URL 해시에서 화면과 알려진 개념만 해석; 잘못된 경로는 학습 화면으로 처리
+// 역할: URL 해시에서 화면과 개념 ID 형식만 해석; 지도에 있는 개념인지는 지도를 받은 뒤 확인
 function readRoute() {
   const hash = window.location.hash || "#/learn";
   const [path, query] = hash.slice(1).split("?");
-  const concept = concepts.find(
-    (item) => item.id === new URLSearchParams(query).get("concept"),
-  );
+  const conceptId = new URLSearchParams(query).get("concept") ?? "";
   return {
     page: path === "/roadmap" ? "roadmap" : "learn",
-    concept: path === "/learn" ? concept : undefined,
+    conceptId:
+      path === "/learn" && /^[a-z][a-z0-9-]{1,40}$/.test(conceptId)
+        ? conceptId
+        : undefined,
     hash,
   };
 }
+
+// 개념 지도 요청 상태: 로드맵과 개념별 학습 화면 모두 지도를 받아야 개념 제목·설명을 알 수 있음
+type ConceptMapState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; concepts: Concept[] };
 
 // 역할: 화면 간 상태를 조율하고 선택 개념의 대화와 학습 표시를 연결
 function App() {
   const [curriculumOpen, setCurriculumOpen] = useState(false);
   const [roadmap, setRoadmap] = useState(loadRoadmap);
+  const [conceptMap, setConceptMap] = useState<ConceptMapState>({
+    status: "loading",
+  });
+  // 값이 바뀔 때마다 지도를 다시 요청; 다시 시도 버튼이 1씩 올림
+  const [mapRequest, setMapRequest] = useState(0);
   const [route, setRoute] = useState(readRoute);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -64,6 +75,22 @@ function App() {
     window.addEventListener("hashchange", onRoute);
     return () => window.removeEventListener("hashchange", onRoute);
   }, []);
+  useEffect(() => {
+    // 늦게 끝난 이전 요청(StrictMode 이중 실행·연속 재시도)이 최신 결과를 덮지 않도록 무시 표시
+    let ignore = false;
+    setConceptMap({ status: "loading" });
+    loadConceptMap().then(
+      (concepts) => {
+        if (!ignore) setConceptMap({ status: "ready", concepts });
+      },
+      (error: Error) => {
+        if (!ignore) setConceptMap({ status: "error", message: error.message });
+      },
+    );
+    return () => {
+      ignore = true;
+    };
+  }, [mapRequest]);
 
   // 역할: 브라우저 저장 성공 뒤에만 화면 상태 갱신; 저장 실패를 성공처럼 표시하지 않음
   function updateRoadmap(next: RoadmapState) {
@@ -110,13 +137,31 @@ function App() {
     if (updateRoadmap(next))
       window.location.hash = `/learn?concept=${concept.id}`;
   }
-  const conceptId = route.concept?.id;
+  const concept =
+    conceptMap.status === "ready"
+      ? conceptMap.concepts.find((item) => item.id === route.conceptId)
+      : undefined;
+  const conceptId = concept?.id;
   const conceptConversation = conceptId
     ? roadmap.conversationIds[conceptId]
     : undefined;
+  // 저장된 대화가 있는 개념 학습 주소는 지도를 받을 때까지 기다림; 제목 없이 대화를 열면 첫 질문이 비게 됨
+  const waitingForMap = Boolean(
+    route.conceptId &&
+    conceptMap.status !== "ready" &&
+    roadmap.conversationIds[route.conceptId],
+  );
   // Direct links without a saved session open the roadmap so starting can be saved first.
+  // 지도에 없는 개념 주소(옛 개념 ID 등)도 로드맵으로 보냄
   const isRoadmap =
-    route.page === "roadmap" || Boolean(route.concept && !conceptConversation);
+    route.page === "roadmap" ||
+    Boolean(route.conceptId && !waitingForMap && !conceptConversation);
+  const mapStatus = (
+    <ConceptMapStatus
+      error={conceptMap.status === "error" ? conceptMap.message : undefined}
+      onRetry={() => setMapRequest((count) => count + 1)}
+    />
+  );
   return (
     <LearningShell
       page={isRoadmap ? "roadmap" : "learn"}
@@ -169,18 +214,25 @@ function App() {
         <CurriculumDraft />
       </div>
       <div hidden={curriculumOpen}>
-        {isRoadmap ? (
-          <Roadmap
-            state={roadmap}
-            onSelect={selectConcept}
-            onStatusChange={updateStatus}
-            onStart={startConcept}
-          />
+        {waitingForMap ? (
+          mapStatus
+        ) : isRoadmap ? (
+          conceptMap.status === "ready" ? (
+            <Roadmap
+              concepts={conceptMap.concepts}
+              state={roadmap}
+              onSelect={selectConcept}
+              onStatusChange={updateStatus}
+              onStart={startConcept}
+            />
+          ) : (
+            mapStatus
+          )
         ) : (
           <ChatSession
             key={conceptConversation || freeId}
             conversationId={conceptConversation || freeId}
-            concept={route.concept}
+            concept={concept}
             learningStatus={
               conceptId
                 ? roadmap.statuses[conceptId] || "not-started"

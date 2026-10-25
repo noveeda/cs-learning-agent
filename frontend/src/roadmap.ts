@@ -1,113 +1,84 @@
-// 파일 역할: 기본 CS 개념·선수 관계·영역 간 연관 관계와 브라우저 학습 상태 저장 규칙
+// 파일 역할: 자료구조·알고리즘 개념 지도의 화면용 타입, 선수 관계 단계 배치, 브라우저 학습 상태 저장 규칙
 export type LearningStatus = "not-started" | "in-progress" | "completed";
 
+// 역할: 직접 선수 개념과 그 근거; 상세 패널에서 "왜 먼저 봐야 하는지"를 보여 주는 데 사용
+export type Prerequisite = { id: string; reason: string };
+
+// 역할: /api/concept-map에서 받은 개념 하나; 로드맵·상세·개념별 대화 화면이 공통으로 사용
+// - domain은 지도 제목(예: 자료구조·알고리즘)을 채워 학습 화면의 영역 표시에 재사용
 export type Concept = {
   id: string;
   title: string;
   domain: string;
   description: string;
-  prerequisites: string[];
-  position: { x: number; y: number };
+  objectives: string[];
+  prerequisites: Prerequisite[];
 };
 
-export const concepts: Concept[] = [
-  {
-    id: "process",
-    title: "프로세스와 스레드",
-    domain: "운영체제",
-    description: "프로그램의 실행 단위와 자원 공유 방식을 이해합니다.",
-    prerequisites: [],
-    position: { x: 22, y: 75 },
-  },
-  {
-    id: "scheduling",
-    title: "CPU 스케줄링",
-    domain: "운영체제",
-    description:
-      "실행할 프로세스를 선택하는 기준과 스케줄링 알고리즘을 비교합니다.",
-    prerequisites: ["process"],
-    position: { x: 40, y: 75 },
-  },
-  {
-    id: "memory",
-    title: "가상 메모리",
-    domain: "운영체제",
-    description:
-      "주소 공간, 페이지와 프레임을 통해 메모리 관리 원리를 배웁니다.",
-    prerequisites: ["process"],
-    position: { x: 31, y: 90 },
-  },
-  {
-    id: "array-list",
-    title: "배열과 연결 리스트",
-    domain: "자료구조",
-    description: "데이터 배치 방식에 따른 접근·삽입·삭제 비용을 비교합니다.",
-    prerequisites: [],
-    position: { x: 16, y: 23 },
-  },
-  {
-    id: "stack-queue",
-    title: "스택과 큐",
-    domain: "자료구조",
-    description: "LIFO와 FIFO의 차이를 이해하고 적절한 활용 상황을 살펴봅니다.",
-    prerequisites: ["array-list"],
-    position: { x: 34, y: 23 },
-  },
-  {
-    id: "tree-graph",
-    title: "트리와 그래프",
-    domain: "자료구조",
-    description: "노드와 간선으로 관계를 표현하고 기본 탐색 방법을 익힙니다.",
-    prerequisites: ["stack-queue"],
-    position: { x: 25, y: 38 },
-  },
-  {
-    id: "network-layers",
-    title: "네트워크 계층",
-    domain: "네트워크",
-    description: "TCP/IP 계층별 역할과 데이터가 전달되는 과정을 이해합니다.",
-    prerequisites: [],
-    position: { x: 68, y: 27 },
-  },
-  {
-    id: "tcp-udp",
-    title: "TCP와 UDP",
-    domain: "네트워크",
-    description: "연결, 신뢰성, 전송 비용을 기준으로 두 프로토콜을 비교합니다.",
-    prerequisites: ["network-layers"],
-    position: { x: 86, y: 27 },
-  },
-  {
-    id: "http",
-    title: "HTTP 요청과 응답",
-    domain: "네트워크",
-    description: "웹 통신의 요청·응답 구조와 메서드, 상태 코드를 배웁니다.",
-    prerequisites: ["tcp-udp"],
-    position: { x: 77, y: 42 },
-  },
-];
+// 역할: 단계(layer)와 같은 줄 안의 가로 위치(x, 줄 가운데가 0)
+export type ConceptLayout = {
+  layers: string[][];
+  positions: Record<string, { layer: number; x: number }>;
+};
 
-// These associations connect applications of concepts across domains, not a required study order.
-export const conceptRelations: {
-  source: string;
-  target: string;
-  description: string;
-  bend: { x: number; y: number };
-}[] = [
-  {
-    source: "scheduling",
-    target: "stack-queue",
-    bend: { x: 39, y: 50 },
-    description:
-      "FCFS·라운드 로빈 스케줄링은 준비 큐에서 프로세스의 실행 순서를 관리합니다.",
-  },
-  {
-    source: "process",
-    target: "tcp-udp",
-    bend: { x: 80, y: -40 },
-    description: "프로세스는 운영체제의 소켓을 통해 TCP·UDP 통신을 수행합니다.",
-  },
-];
+// 역할: 선수 관계를 위→아래 단계로 배치하고 같은 줄 안의 순서를 정해 반환
+// - 단계: 최장 경로 기준(선수 개념 중 가장 깊은 단계 + 1); 선수 개념이 늘 위쪽 줄에 있어 학습 방향이 위→아래로 읽힘
+// - 순서: 바리센터(연결된 개념들의 평균 가로 위치) 정렬을 아래·위로 번갈아 반복해 선 교차를 줄임
+// - AI core가 순환·없는 선수 개념을 거부한 지도를 받으므로 순환 처리는 하지 않음
+export function layoutConcepts(concepts: Concept[]): ConceptLayout {
+  const byId = new Map(concepts.map((concept) => [concept.id, concept]));
+  const layerOf = new Map<string, number>();
+  const depth = (id: string): number => {
+    if (!layerOf.has(id)) {
+      const prerequisites = byId.get(id)!.prerequisites;
+      layerOf.set(
+        id,
+        prerequisites.length
+          ? Math.max(...prerequisites.map((p) => depth(p.id))) + 1
+          : 0,
+      );
+    }
+    return layerOf.get(id)!;
+  };
+  const layers: string[][] = [];
+  for (const { id } of concepts) (layers[depth(id)] ??= []).push(id);
+
+  const successors = new Map<string, string[]>();
+  for (const concept of concepts)
+    for (const p of concept.prerequisites)
+      successors.set(p.id, [...(successors.get(p.id) ?? []), concept.id]);
+  const x = new Map<string, number>();
+  // 역할: 줄 순서대로 가운데 정렬한 가로 위치 부여(간격 1, 가운데 0)
+  const place = (row: string[]) =>
+    row.forEach((id, index) => x.set(id, index - (row.length - 1) / 2));
+  // 역할: 이웃 개념의 평균 가로 위치로 한 줄을 정렬; 이웃이 없으면 현재 위치를 유지해 불필요한 이동 방지
+  const reorder = (row: string[], neighbors: (id: string) => string[]) => {
+    const center = (id: string) => {
+      const linked = neighbors(id);
+      return linked.length
+        ? linked.reduce((sum, item) => sum + x.get(item)!, 0) / linked.length
+        : x.get(id)!;
+    };
+    const keys = new Map(row.map((id) => [id, center(id)]));
+    // sort는 안정 정렬이라 같은 값이면 원래 순서를 유지해 결과가 매번 같음
+    row.sort((a, b) => keys.get(a)! - keys.get(b)!);
+    place(row);
+  };
+  layers.forEach(place);
+  // 2회 왕복이면 현재 36개 지도에서 교차가 충분히 줄고, 더 반복해도 배치가 거의 바뀌지 않음
+  for (let pass = 0; pass < 2; pass += 1) {
+    for (const row of layers.slice(1))
+      reorder(row, (id) => byId.get(id)!.prerequisites.map((p) => p.id));
+    for (const row of layers.slice(0, -1).reverse())
+      reorder(row, (id) => successors.get(id) ?? []);
+  }
+
+  const positions: ConceptLayout["positions"] = {};
+  layers.forEach((row, layer) =>
+    row.forEach((id) => (positions[id] = { layer, x: x.get(id)! })),
+  );
+  return { layers, positions };
+}
 
 export const statusLabels: Record<LearningStatus, string> = {
   "not-started": "미학습",
@@ -115,23 +86,28 @@ export const statusLabels: Record<LearningStatus, string> = {
   completed: "완료",
 };
 
+// 역할: 브라우저에 보관하는 로드맵 상태; selectedId가 빈 문자열이면 지도 첫 개념을 선택한 것으로 봄
 export type RoadmapState = {
   selectedId: string;
   statuses: Record<string, LearningStatus>;
   conversationIds: Record<string, string>;
 };
 
-const storageKey = "cs-roadmap-v1";
+// 옛 9개 개념 로드맵은 cs-roadmap-v1에 남겨 두고 읽지도 지우지도 않음; ID가 겹쳐 엉뚱한 기록이 붙는 것을 막기 위해 키를 분리
+const storageKey = "cs-dsa-roadmap-v1";
+// AI core 개념 ID 규칙과 같은 형식만 저장값 키로 인정
+const conceptIdPattern = /^[a-z][a-z0-9-]{1,40}$/;
 
 // 역할: 외부 저장값이 배열이나 null이 아닌 객체인지 확인하는 타입 가드
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// 역할: 알려진 개념·유효한 상태·대화 ID만 복구; 손상된 저장값은 기본값으로 대체
+// 역할: 형식이 맞는 개념 ID·유효한 상태·대화 ID만 복구; 손상된 저장값은 기본값으로 대체
+// - 지도에 없는 ID라도 형식이 맞으면 보존: 화면은 지도에 있는 개념만 쓰므로 무시되고, 기록은 지워지지 않음
 export function loadRoadmap(storage?: Pick<Storage, "getItem">): RoadmapState {
   const state: RoadmapState = {
-    selectedId: concepts[0].id,
+    selectedId: "",
     statuses: {},
     conversationIds: {},
   };
@@ -140,25 +116,31 @@ export function loadRoadmap(storage?: Pick<Storage, "getItem">): RoadmapState {
       (storage ?? localStorage).getItem(storageKey) ?? "null",
     );
     if (!isRecord(saved) || saved.version !== 1) return state;
-    if (concepts.some((concept) => concept.id === saved.selectedId))
-      state.selectedId = saved.selectedId as string;
-    for (const { id } of concepts) {
-      const status = isRecord(saved.statuses) ? saved.statuses[id] : undefined;
+    if (
+      typeof saved.selectedId === "string" &&
+      conceptIdPattern.test(saved.selectedId)
+    )
+      state.selectedId = saved.selectedId;
+    const statuses = isRecord(saved.statuses) ? saved.statuses : {};
+    for (const [id, status] of Object.entries(statuses)) {
       if (
-        status === "not-started" ||
-        status === "in-progress" ||
-        status === "completed"
+        conceptIdPattern.test(id) &&
+        (status === "not-started" ||
+          status === "in-progress" ||
+          status === "completed")
       )
         state.statuses[id] = status;
-      const conversationId = isRecord(saved.conversationIds)
-        ? saved.conversationIds[id]
-        : undefined;
+    }
+    const conversationIds = isRecord(saved.conversationIds)
+      ? saved.conversationIds
+      : {};
+    for (const [id, conversationId] of Object.entries(conversationIds)) {
       if (
+        conceptIdPattern.test(id) &&
         typeof conversationId === "string" &&
         /^[0-9a-f]{32}$/.test(conversationId)
-      ) {
+      )
         state.conversationIds[id] = conversationId;
-      }
     }
   } catch {
     // Storage access and damaged browser data must not prevent opening the roadmap.
