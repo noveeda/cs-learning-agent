@@ -79,6 +79,7 @@ htmlcov/
 /frontend/playwright-report/
 
 /data/curricula/
+/data/stuck-sessions/
 
 # Claude Code personal settings and worktrees; shared .claude/settings.json and skills stay tracked.
 /.claude/settings.local.json
