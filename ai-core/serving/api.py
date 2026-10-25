@@ -1,10 +1,11 @@
-# 파일 역할: FastAPI로 채팅 스트림·도식 파일·커리큘럼 단계·개념 지도를 제공하는 로컬 전용 AI 서비스
+# 파일 역할: FastAPI로 채팅 스트림·도식 파일·커리큘럼 단계·개념 지도·막힘 세션 단계를 제공하는 로컬 전용 AI 서비스
 """Local web bridge for the diagram agent (no authentication; bind to loopback)."""
 import json
 import logging
 import re
 import os
 import threading
+import time
 import httpx
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from serving.concept_map import load_concept_map
 from serving.curriculum import JobState, ModelGateway, step
+from serving.item_bank import load_item_bank
+from serving.stuck import LLMUnavailable, StepInput, StuckState, UnavailableGateway, step as stuck_step
 from serving.agent import run_agent
 from serving.context import token_counter
 from serving.tools.diagram import Diagram
@@ -66,6 +69,26 @@ def concept_map():
         # 손상되거나 규칙을 어긴 지도는 진단 기준이 될 수 없으므로 일부라도 응답하지 않고, 경로·오류 내용은 로그에만 남김
         logging.exception('Concept map failed to load')
         raise HTTPException(500, '개념 지도를 불러오지 못했습니다.') from None
+
+
+# 역할: 막힘 세션 단계 요청; state가 없으면 시작 입력으로 새 세션을 만듦
+class StuckRequest(BaseModel):
+    state: StuckState | None = None
+    input: StepInput
+
+
+# 역할: 막힘 세션을 한 단계 진행한 새 상태 반환; 저장·버전 관리는 호출한 Spring이 담당
+# - LLM 역할이 필요한 단계는 아직 연결 전이라 503으로 끝나며 상태는 바뀌지 않음(PR6에서 연결)
+# - 현재 단계와 맞지 않는 입력(오래된 화면의 답 등)은 409로 거부해 상태가 꼬이지 않게 함
+@app.post('/stuck/step', response_model=StuckState)
+def stuck_session_step(body: StuckRequest):
+    concept_map, items = load_concept_map(), load_item_bank()
+    try:
+        return stuck_step(body.state, body.input, UnavailableGateway(), concept_map, items, time.time())
+    except LLMUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
 
 
 # 역할: 질문을 받아 에이전트 이벤트를 NDJSON 스트림으로 반환
