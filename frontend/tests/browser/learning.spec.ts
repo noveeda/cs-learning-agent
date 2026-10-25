@@ -1,5 +1,20 @@
 // 파일 역할: 모의 API를 사용하는 실제 브라우저에서 대화·도식·오류·커리큘럼 전환을 검증
+import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
+
+const conceptMap = JSON.parse(
+  readFileSync(
+    new URL("../../../ai-core/content/dsa/concept-map.json", import.meta.url),
+    "utf8",
+  ),
+);
+
+// 앱이 시작할 때마다 개념 지도를 요청하므로 개발 서버 프록시 뒤 실제 서버에 기대지 않게 고정 응답 제공
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/concept-map", (route) =>
+    route.fulfill({ json: conceptMap }),
+  );
+});
 
 const artifact = {
   artifact_id: "diagram",
@@ -195,7 +210,7 @@ test("개념 대화와 로드맵을 유지하며 커리큘럼 입력을 보존�
   await mockConversation(page);
   await page.goto("/#/roadmap");
   await page.getByRole("button", { name: "학습 시작", exact: true }).click();
-  await expect(page).toHaveURL(/#\/learn\?concept=process$/);
+  await expect(page).toHaveURL(/#\/learn\?concept=memory-address$/);
   const question = page.getByLabel("질문", { exact: true });
   await expect(question).toBeEnabled();
   await question.fill("프로세스의 주소 공간을 설명해줘");
@@ -203,7 +218,7 @@ test("개념 대화와 로드맵을 유지하며 커리큘럼 입력을 보존�
   await page.getByLabel("학습 주제", { exact: true }).fill("운영체제 기초");
   await page.getByRole("button", { name: "학습 대화로", exact: true }).click();
   await expect(question).toHaveValue("프로세스의 주소 공간을 설명해줘");
-  await expect(page).toHaveURL(/#\/learn\?concept=process$/);
+  await expect(page).toHaveURL(/#\/learn\?concept=memory-address$/);
   await page.locator(".sidebar").getByRole("button", { name: "로드맵", exact: true }).click();
   await expect(page.getByRole("heading", { name: "로드맵", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "커리큘럼 초안", exact: true }).click();

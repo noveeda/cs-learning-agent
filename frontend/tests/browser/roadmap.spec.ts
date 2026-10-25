@@ -1,14 +1,28 @@
-// 파일 역할: 브라우저에서 개념 선택·학습 상태 복구·관계 강조·키보드 및 모바일 동작을 검증
+// 파일 역할: 브라우저에서 개념 지도 표시·선택·학습 상태 복구·관계 강조·로딩 실패·키보드 및 모바일 동작을 검증
+import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 
-const roadmapKey = "cs-roadmap-v1";
-const processTitle = "프로세스와 스레드";
-const memoryTitle = "가상 메모리";
+// 실제 API가 중계하는 검수 완료 지도를 그대로 응답해 36개 배치를 검증
+const conceptMap = JSON.parse(
+  readFileSync(
+    new URL("../../../ai-core/content/dsa/concept-map.json", import.meta.url),
+    "utf8",
+  ),
+);
+const roadmapKey = "cs-dsa-roadmap-v1";
+const firstTitle = "메모리 주소와 연속 배치";
+const stackTitle = "스택";
 const question = (title: string) => `${title} 개념을 예시와 함께 설명해줘`;
+// 역할: 개념 제목과 학습 상태로 지도 노드 버튼 찾기
+const node = (page: Page, title: string, status = "미학습") =>
+  page.getByRole("button", { name: `${title} · ${status}`, exact: true });
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/conversations/*", (route) =>
     route.fulfill({ json: { messages: [] } }),
+  );
+  await page.route("**/api/concept-map", (route) =>
+    route.fulfill({ json: conceptMap }),
   );
 });
 
@@ -36,38 +50,66 @@ test("개념 선택·상태를 새로고침 후 복구하고 완료 상태로 �
     return route.fulfill({ status: 500 });
   });
   await page.goto("/#/roadmap");
-  await expect(page.locator(".roadmap-node")).toHaveCount(9);
-  await page
-    .getByRole("button", { name: `${memoryTitle} · 미학습`, exact: true })
-    .click();
+  await expect(page.locator(".roadmap-node")).toHaveCount(36);
+  await node(page, stackTitle).click();
   const detail = page.getByRole("region", { name: "선택한 개념" });
   await expect(
-    detail.getByRole("heading", { name: memoryTitle, exact: true }),
+    detail.getByRole("heading", { name: stackTitle, exact: true }),
   ).toBeVisible();
   await page
     .getByLabel("학습 상태", { exact: true })
     .selectOption({ label: "완료" });
   await page.reload();
   await expect(
-    detail.getByRole("heading", { name: memoryTitle, exact: true }),
+    detail.getByRole("heading", { name: stackTitle, exact: true }),
   ).toBeVisible();
   await expect(page.getByLabel("학습 상태", { exact: true })).toHaveValue(
     "completed",
   );
+  await expect(node(page, stackTitle, "완료")).toBeVisible();
   await startLearning(page);
-  await expect(page).toHaveURL(/#\/learn\?concept=memory$/);
+  await expect(page).toHaveURL(/#\/learn\?concept=stack$/);
   await expect(page.getByLabel("질문", { exact: true })).toHaveValue(
-    question(memoryTitle),
+    question(stackTitle),
   );
   await expect
     .poll(() =>
       page.evaluate(
-        (key) => JSON.parse(localStorage.getItem(key)!).statuses.memory,
+        (key) => JSON.parse(localStorage.getItem(key)!).statuses.stack,
         roadmapKey,
       ),
     )
     .toBe("completed");
   expect(requests).toBe(0);
+});
+
+test("상세에 학습 목표·선수 개념 근거·후속 개념을 보여 주고 이동함", async ({
+  page,
+}) => {
+  await page.goto("/#/roadmap");
+  await node(page, stackTitle).click();
+  const detail = page.getByRole("region", { name: "선택한 개념" });
+  const objectives = conceptMap.concepts.find(
+    (concept: { id: string }) => concept.id === "stack",
+  ).objectives as string[];
+  for (const objective of objectives)
+    await expect(detail.locator(".concept-objectives")).toContainText(
+      objective,
+    );
+  await expect(detail).toContainText("7단계");
+  await expect(detail).toContainText("추상 자료형");
+  await detail
+    .getByRole("button", { name: "깊이 우선 탐색", exact: true })
+    .click();
+  await expect(detail.getByRole("heading", { level: 2 })).toHaveText(
+    "깊이 우선 탐색",
+  );
+  // DFS는 선수 개념이 셋: 각 버튼 아래에 지도에 적힌 근거를 함께 표시
+  await expect(
+    detail.locator(".concept-links").first().locator("li"),
+  ).toHaveCount(3);
+  await detail.getByRole("button", { name: "재귀", exact: true }).click();
+  await expect(detail).toContainText("기초 개념부터 바로 시작할 수 있어요.");
 });
 
 test("자유 학습·개념별 대화를 분리하고 새 학습은 해당 개념만 교체함", async ({
@@ -103,7 +145,7 @@ test("자유 학습·개념별 대화를 분리하고 새 학습은 해당 개�
   await expect(input).toBeEnabled();
   await openRoadmap(page);
   await startLearning(page);
-  await expect(input).toHaveValue(question(processTitle));
+  await expect(input).toHaveValue(question(firstTitle));
   expect(calls).toHaveLength(1);
   await page.getByRole("button", { name: "질문 보내기" }).click();
   await expect(input).toBeEnabled();
@@ -111,9 +153,7 @@ test("자유 학습·개념별 대화를 분리하고 새 학습은 해당 개�
   await expect(page.getByLabel("학습 상태", { exact: true })).toHaveValue(
     "in-progress",
   );
-  await page
-    .getByRole("button", { name: `${memoryTitle} · 미학습`, exact: true })
-    .click();
+  await node(page, stackTitle).click();
   await startLearning(page);
   await page.getByRole("button", { name: "질문 보내기" }).click();
   await expect(input).toBeEnabled();
@@ -121,15 +161,13 @@ test("자유 학습·개념별 대화를 분리하고 새 학습은 해당 개�
   expect(new Set(calls.map((call) => call.conversation_id)).size).toBe(3);
   await page.reload();
   await expect(page.getByRole("log", { name: "대화 기록" })).toContainText(
-    `${question(memoryTitle)} 답변`,
+    `${question(stackTitle)} 답변`,
   );
   await openRoadmap(page);
-  await page
-    .getByRole("button", { name: `${processTitle} · 학습 중`, exact: true })
-    .click();
+  await node(page, firstTitle, "학습 중").click();
   await startLearning(page);
   await expect(page.getByRole("log", { name: "대화 기록" })).toContainText(
-    `${question(processTitle)} 답변`,
+    `${question(firstTitle)} 답변`,
   );
   await page.getByRole("button", { name: "새 학습", exact: true }).click();
   await expect(input).toBeEnabled();
@@ -141,10 +179,10 @@ test("자유 학습·개념별 대화를 분리하고 새 학습은 해당 개�
     }),
     roadmapKey,
   );
-  expect(saved.roadmap.conversationIds.process).not.toBe(
+  expect(saved.roadmap.conversationIds["memory-address"]).not.toBe(
     calls[1].conversation_id,
   );
-  expect(saved.roadmap.conversationIds.memory).toBe(calls[2].conversation_id);
+  expect(saved.roadmap.conversationIds.stack).toBe(calls[2].conversation_id);
   expect(saved.free).toBe(calls[0].conversation_id);
   await page
     .locator(".sidebar")
@@ -156,18 +194,21 @@ test("자유 학습·개념별 대화를 분리하고 새 학습은 해당 개�
 });
 
 for (const width of [320, 390]) {
-  test(`${width}px 모바일에서 개념 선택·학습 시작과 화면 너비 유지`, async ({
+  test(`${width}px 모바일에서 단계별 목록으로 개념 선택·학습 시작과 화면 너비 유지`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.goto("/#/roadmap");
-    await page
-      .getByRole("button", { name: `${memoryTitle} · 미학습`, exact: true })
-      .click();
+    await expect(page.locator(".roadmap-edges")).toBeHidden();
+    await expect(
+      page.getByRole("group", { name: "1단계", exact: true }),
+    ).toBeVisible();
+    await expect(node(page, stackTitle)).toContainText("먼저: 추상 자료형");
+    await node(page, stackTitle).click();
     await expect(
       page
         .getByRole("region", { name: "선택한 개념" })
-        .getByRole("heading", { name: memoryTitle, exact: true }),
+        .getByRole("heading", { name: stackTitle, exact: true }),
     ).toBeVisible();
     expect(
       await page.evaluate(
@@ -176,7 +217,7 @@ for (const width of [320, 390]) {
     ).toBe(true);
     await startLearning(page);
     await expect(page.getByLabel("질문", { exact: true })).toHaveValue(
-      question(memoryTitle),
+      question(stackTitle),
     );
     expect(
       await page.evaluate(
@@ -197,7 +238,7 @@ test("응답 중 직접 주소 변경을 막고 원래 개념에 답변을 유�
     await held;
     await route.fulfill({
       contentType: "application/x-ndjson",
-      body: '{"type":"answer","text":"프로세스 답변"}\n{"type":"done"}\n',
+      body: '{"type":"answer","text":"메모리 주소 답변"}\n{"type":"done"}\n',
     });
   });
   await page.goto("/#/roadmap");
@@ -211,15 +252,15 @@ test("응답 중 직접 주소 변경을 막고 원래 개념에 답변을 유�
   ).toBeDisabled();
   await page.evaluate(() => history.back());
   await expect(page.getByRole("alert")).toContainText("응답을 기다린 뒤");
-  await expect(page).toHaveURL(/#\/learn\?concept=process$/);
+  await expect(page).toHaveURL(/#\/learn\?concept=memory-address$/);
   await page.evaluate(() => {
-    location.hash = "/learn?concept=memory";
+    location.hash = "/learn?concept=stack";
   });
-  await expect(page).toHaveURL(/#\/learn\?concept=process$/);
+  await expect(page).toHaveURL(/#\/learn\?concept=memory-address$/);
   release();
   await expect(page.getByLabel("질문", { exact: true })).toBeEnabled();
   await expect(page.getByRole("log", { name: "대화 기록" })).toContainText(
-    "프로세스 답변",
+    "메모리 주소 답변",
   );
 });
 
@@ -245,106 +286,100 @@ test("저장 실패를 알리고 선택·학습 상태·이동을 적용하지 �
   await expect(page.getByLabel("학습 상태", { exact: true })).toHaveValue(
     "not-started",
   );
-  await page
-    .getByRole("button", { name: `${memoryTitle} · 미학습`, exact: true })
-    .click();
+  await node(page, stackTitle).click();
   await expect(
     page
       .getByRole("region", { name: "선택한 개념" })
-      .getByRole("heading", { name: processTitle, exact: true }),
+      .getByRole("heading", { name: firstTitle, exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "학습 시작", exact: true }).click();
   await expect(page).toHaveURL(/#\/roadmap$/);
 });
 
-test("데스크톱 로드맵은 큰 범주 원 안에 개념 노드를 배치", async ({ page }) => {
-  await page.goto("/#/roadmap");
-  const root = page.locator(".roadmap-root");
-  await expect(root).toHaveText("내 로드맵기본 CS");
-  await expect(page.locator(".roadmap-domain")).toHaveCount(3);
-  await expect(page.locator(".domain-edge")).toHaveCount(0);
-  await expect(page.locator(".roadmap-node")).toHaveCount(9);
-  const center = await root.boundingBox();
-  expect(center).not.toBeNull();
-  const positions = await page.locator(".roadmap-node").evaluateAll((nodes) =>
-    nodes.map((node) => {
-      const box = node.getBoundingClientRect();
-      return {
-        x: box.x + box.width / 2,
-        y: box.y + box.height / 2,
-        width: box.width,
-        height: box.height,
-        radius: getComputedStyle(node).borderRadius,
-      };
-    }),
-  );
-  const containment = await page.locator(".roadmap-node").evaluateAll((nodes) =>
-    nodes.every((node) => {
-      const domain = [...document.querySelectorAll(".roadmap-domain")].find(
-        (area) =>
-          area.getAttribute("aria-label") ===
-          `${node.getAttribute("data-domain")} 영역`,
-      )!;
-      const child = node.getBoundingClientRect();
-      const area = domain.getBoundingClientRect();
-      const distance = Math.hypot(
-        child.x + child.width / 2 - area.x - area.width / 2,
-        child.y + child.height / 2 - area.y - area.height / 2,
-      );
-      return distance + child.width / 2 <= area.width / 2;
-    }),
-  );
-  expect(containment).toBe(true);
-  for (const position of positions) {
-    expect(position.width).toBe(position.height);
-    expect(position.radius).toBe("50%");
-  }
-  await page
-    .getByRole("button", { name: "가상 메모리 · 미학습", exact: true })
-    .click();
-  await expect(page.locator(".cross-domain-edge")).toHaveCount(0);
-});
-
-test("노드 호버는 관계 노드·연결선을 강조하고 클릭 선택을 바꾸지 않음", async ({
+test("데스크톱 지도는 선수 개념을 항상 위 단계에 두고 1440px 카드 안에 들어감", async ({
   page,
 }) => {
   await page.goto("/#/roadmap");
-  const stack = page.getByRole("button", {
-    name: "스택과 큐 · 미학습",
-    exact: true,
-  });
-  const process = page.getByRole("button", {
-    name: "프로세스와 스레드 · 미학습",
-    exact: true,
-  });
+  await expect(page.locator(".roadmap-node")).toHaveCount(36);
+  await expect(page.locator(".roadmap-layer")).toHaveCount(10);
+  await expect(page.locator(".prerequisite-edge")).toHaveCount(51);
+  const boxes = Object.fromEntries(
+    await page.locator(".roadmap-node").evaluateAll((nodes) =>
+      nodes.map((item) => {
+        const box = item.getBoundingClientRect();
+        return [item.getAttribute("data-concept"), box];
+      }),
+    ),
+  );
+  for (const concept of conceptMap.concepts as {
+    id: string;
+    prerequisites: { id: string }[];
+  }[])
+    for (const p of concept.prerequisites)
+      expect(boxes[p.id].bottom).toBeLessThan(boxes[concept.id].top);
+  // 노드끼리 겹치지 않음
+  const list = Object.values(boxes) as DOMRect[];
+  for (const [i, a] of list.entries())
+    for (const b of list.slice(i + 1))
+      expect(
+        a.right <= b.left ||
+          b.right <= a.left ||
+          a.bottom <= b.top ||
+          b.bottom <= a.top,
+      ).toBe(true);
+  expect(
+    await page
+      .locator(".roadmap-scroll")
+      .evaluate((item) => item.scrollWidth <= item.clientWidth),
+  ).toBe(true);
+});
+
+test("노드 호버는 직접 선수·후속 개념과 화살표 선을 강조하고 클릭 선택을 바꾸지 않음", async ({
+  page,
+}) => {
+  await page.goto("/#/roadmap");
+  // 웹 글꼴이 늦게 적용되면 지도가 아래로 밀려 마우스가 노드 밖에 남으므로 글꼴 적용 뒤 호버
+  await page.evaluate(() => document.fonts.ready);
+  const stack = node(page, stackTitle);
+  const first = node(page, firstTitle);
+  // 선택 개념(첫 개념)의 선은 탐색하지 않아도 강조
+  await expect(
+    page.locator('.prerequisite-edge[data-emphasis="related"]'),
+  ).toHaveCount(2);
   await stack.hover();
   await expect(stack).toHaveAttribute("data-active", "true");
-  await expect(
-    page.getByRole("button", {
-      name: "배열과 연결 리스트 · 미학습",
-      exact: true,
-    }),
-  ).toHaveAttribute("data-emphasis", "related");
-  await expect(
-    page.getByRole("button", { name: "트리와 그래프 · 미학습", exact: true }),
-  ).toHaveAttribute("data-emphasis", "related");
-  await expect(page.locator(".cross-domain-edge")).toHaveCSS("opacity", "1");
-  await expect(process).toHaveCSS("opacity", "0.3");
-  await expect(process).toHaveAttribute("aria-pressed", "true");
+  await expect(node(page, "추상 자료형과 구현")).toHaveAttribute(
+    "data-emphasis",
+    "related",
+  );
+  await expect(node(page, "깊이 우선 탐색")).toHaveAttribute(
+    "data-emphasis",
+    "related",
+  );
+  await expect(node(page, "해시 함수")).toHaveCSS("opacity", "0.3");
+  const strong = page.locator('.prerequisite-edge[data-emphasis="related"]');
+  await expect(strong).toHaveCount(2);
+  expect(
+    await strong.evaluateAll((lines) =>
+      lines.map((line) => [
+        line.getAttribute("data-source"),
+        line.getAttribute("data-target"),
+        line.getAttribute("marker-end"),
+      ]),
+    ),
+  ).toEqual([
+    ["adt", "stack", "url(#roadmap-arrow)"],
+    ["stack", "dfs", "url(#roadmap-arrow)"],
+  ]);
+  await expect(first).toHaveAttribute("aria-pressed", "true");
   await expect(
     page
       .getByRole("region", { name: "선택한 개념" })
       .getByRole("heading", { level: 2 }),
-  ).toHaveText("프로세스와 스레드");
-  await expect(page.locator(".cross-domain-edge")).toHaveCount(1);
+  ).toHaveText(firstTitle);
   await page.getByRole("heading", { name: "로드맵", exact: true }).hover();
   await expect(stack).toHaveAttribute("data-active", "false");
-  await expect(process).toHaveCSS("opacity", "1");
-  await page.locator(".roadmap-domain").filter({ hasText: "네트워크" }).hover();
-  await expect(
-    page.getByRole("button", { name: "TCP와 UDP · 미학습", exact: true }),
-  ).toHaveAttribute("data-emphasis", "related");
-  await expect(stack).toHaveAttribute("data-emphasis", "muted");
+  await expect(node(page, "해시 함수")).toHaveCSS("opacity", "1");
 });
 
 test("키보드 초점도 관계를 강조하고 움직임 줄이기 설정을 따름", async ({
@@ -352,87 +387,91 @@ test("키보드 초점도 관계를 강조하고 움직임 줄이기 설정을 �
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/#/roadmap");
-  const scheduling = page.getByRole("button", {
-    name: "CPU 스케줄링 · 미학습",
-    exact: true,
-  });
-  const memory = page.getByRole("button", {
-    name: "가상 메모리 · 미학습",
-    exact: true,
-  });
-  await scheduling.focus();
-  await page.keyboard.press("Tab");
-  await expect(memory).toBeFocused();
-  await expect(memory).toHaveAttribute("data-active", "true");
-  await expect(
-    page.getByRole("button", {
-      name: "프로세스와 스레드 · 미학습",
-      exact: true,
-    }),
-  ).toHaveAttribute("data-emphasis", "related");
-  await expect(memory).toHaveCSS("transition-duration", "0s");
-  const dimensions = await memory.evaluate((node) => ({
-    width: node.getBoundingClientRect().width,
-    cssWidth: parseFloat(getComputedStyle(node).width),
+  const reference = node(page, "참조와 포인터");
+  await node(page, "점근 표기법").focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(reference).toBeFocused();
+  await expect(reference).toHaveAttribute("data-active", "true");
+  await expect(node(page, firstTitle)).toHaveAttribute(
+    "data-emphasis",
+    "related",
+  );
+  await expect(node(page, "연결 리스트")).toHaveAttribute(
+    "data-emphasis",
+    "related",
+  );
+  await expect(reference).toHaveCSS("transition-duration", "0s");
+  const dimensions = await reference.evaluate((item) => ({
+    width: item.getBoundingClientRect().width,
+    cssWidth: parseFloat(getComputedStyle(item).width),
   }));
   expect(dimensions.width).toBe(dimensions.cssWidth);
   await page.keyboard.press("Tab");
-  await expect(memory).toHaveAttribute("data-active", "false");
+  await expect(reference).toHaveAttribute("data-active", "false");
 });
 
-test("점선은 영역 간 연관만 표시하고 설명·양방향 강조를 제공함", async ({
+test("개념 지도 로딩 실패를 안내하고 다시 시도하면 지도를 그림", async ({
   page,
 }) => {
+  let fail = true;
+  await page.route("**/api/concept-map", (route) =>
+    fail
+      ? route.fulfill({
+          status: 502,
+          json: {
+            message:
+              "개념 지도를 불러오지 못했습니다. AI core 상태를 확인해 주세요.",
+          },
+        })
+      : route.fulfill({ json: conceptMap }),
+  );
   await page.goto("/#/roadmap");
-  await page.getByRole("group", { name: "전체 로드맵" }).hover();
-  await expect(page.locator(".cross-domain-edge")).toHaveCount(2);
-  const endpoints = await page
-    .locator(".cross-domain-edge")
-    .evaluateAll((lines) =>
-      lines.map((line) => [
-        line.getAttribute("data-source"),
-        line.getAttribute("data-target"),
-      ]),
-    );
-  expect(endpoints).toEqual([
-    ["scheduling", "stack-queue"],
-    ["process", "tcp-udp"],
-  ]);
-  await expect(page.locator(".prerequisite-edge")).toHaveCount(0);
-  const scheduling = page.getByRole("button", {
-    name: "CPU 스케줄링 · 미학습",
-    exact: true,
+  const alert = page.getByRole("alert");
+  await expect(alert).toContainText("AI core 상태를 확인해 주세요.");
+  await expect(page.locator(".roadmap-node")).toHaveCount(0);
+  fail = false;
+  await alert.getByRole("button", { name: "다시 시도" }).click();
+  await expect(page.locator(".roadmap-node")).toHaveCount(36);
+});
+
+test("지도를 받는 동안 로딩 안내를 보여 줌", async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  const queue = page.getByRole("button", {
-    name: "스택과 큐 · 미학습",
-    exact: true,
+  await page.route("**/api/concept-map", async (route) => {
+    await held;
+    await route.fulfill({ json: conceptMap });
   });
-  await scheduling.click();
-  await expect(queue).toHaveAttribute("data-emphasis", "related");
-  const detail = page.getByRole("region", { name: "선택한 개념" });
-  await expect(detail).toContainText("FCFS·라운드 로빈 스케줄링은 준비 큐");
-  await detail.getByRole("button", { name: "스택과 큐", exact: true }).click();
-  await expect(detail.getByRole("heading", { level: 2 })).toHaveText(
-    "스택과 큐",
+  await page.goto("/#/roadmap");
+  await expect(page.getByRole("status")).toContainText(
+    "개념 지도를 불러오는 중",
   );
-  await queue.hover();
-  await expect(scheduling).toHaveAttribute("data-emphasis", "related");
-  await expect(page.locator(".cross-domain-edge")).toHaveCount(1);
-  await page
-    .getByRole("button", { name: "가상 메모리 · 미학습", exact: true })
-    .click();
-  await expect(page.locator(".cross-domain-edge")).toHaveCount(0);
-  await expect(detail).toContainText("아직 연결한 다른 영역의 개념이 없어요.");
+  release();
+  await expect(page.locator(".roadmap-node")).toHaveCount(36);
+});
+
+test("옛 9개 개념 저장값과 개념 주소는 무시하되 지우지 않음", async ({
+  page,
+}) => {
+  const old = JSON.stringify({
+    version: 1,
+    selectedId: "process",
+    statuses: { process: "completed" },
+    conversationIds: { process: "0123456789abcdef0123456789abcdef" },
+  });
+  await page.addInitScript((value) => {
+    if (!localStorage.getItem("cs-roadmap-v1"))
+      localStorage.setItem("cs-roadmap-v1", value);
+  }, old);
+  await page.goto("/#/learn?concept=process");
+  await expect(page).toHaveURL(/concept=process$/);
   await expect(
-    detail.getByRole("button", { name: "프로세스와 스레드", exact: true }),
+    page.getByRole("heading", { name: "로드맵", exact: true }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "프로세스와 스레드 · 미학습", exact: true })
-    .click();
-  await expect(detail).toContainText(
-    "프로세스는 운영체제의 소켓을 통해 TCP·UDP 통신",
+  await expect(node(page, firstTitle)).toHaveAttribute("aria-pressed", "true");
+  await node(page, stackTitle).click();
+  expect(await page.evaluate(() => localStorage.getItem("cs-roadmap-v1"))).toBe(
+    old,
   );
-  await expect(
-    page.getByRole("button", { name: "TCP와 UDP · 미학습", exact: true }),
-  ).toHaveAttribute("data-emphasis", "related");
 });
