@@ -35,7 +35,7 @@ class RoleSettings:
 
 
 # 운영 보호: Spring의 AI core 호출 대기(320초) 안에 한 단계가 끝나도록 역할마다 시도 횟수 × 대기 시간 + 모델 조회 시간을 이 값 이하로 둠
-# - 보충(S4) 단계는 explain과 animate를 차례로 부르므로 두 역할의 합도 이 값 이하
+# - 보충(S4) 단계는 animate와 explain을 차례로 부르므로 두 역할의 합도 이 값 이하
 STEP_BUDGET_SECONDS = 300
 MODEL_LIST_TIMEOUT = 10
 
@@ -67,6 +67,11 @@ PROMPTS = {
                '비유나 다른 말로 바꿔 설명할 때도 정의와 맞는지 확인한다. 정의를 말할 때는 concept.description 문장을 거의 그대로 쓴다. '
                '예시는 상황과 순서로 보여 주고, 새 수치를 만들어 계산하는 예시는 쓰지 않는다. '
                '학습 목표에 계산이 들어 있어 수치가 꼭 필요하면 작은 수로 한 번만 쓰고, 계산식을 모두 적은 뒤 결과를 다시 확인한다. '
+               '입력에 scene이 있으면 이 글 아래에 함께 보이는 단계별 애니메이션의 장면(종류·시작 값·연산 순서)이고, scene.steps는 서버가 계산한 단계별 설명이다. '
+               '예시는 이 장면과 같은 종류·같은 값·같은 연산 순서로 들고, 다른 값이나 다른 종류의 예시를 새로 만들지 않는다. '
+               '단계별 상태와 결과는 steps를 그대로 따르고 직접 계산하지 않는다. 단계 전체는 애니메이션이 보여 주므로 글에서는 핵심 단계 한두 개만 짚는다. '
+               'heap 장면은 order가 min이면 최소 힙, max면 최대 힙이고, hash_table 장면의 해시 함수는 k mod buckets이며 충돌은 체이닝으로 처리한다. '
+               '화면은 수식을 그리지 않으므로 수식 표기(LaTeX, $…$)를 쓰지 않고 → 같은 기호나 말로 쓴다. '
                '연습 문제를 내거나 풀지 않고, 도식·코드 실행은 쓰지 않는다.',
     'grade_explanation': COMMON + ' 작업: 학습자의 서술 답이 채점 기준 각 항목의 핵심 내용을 담았는지 항목별로 판정한다. '
                          '길이·말솜씨·맞춤법이 아니라 핵심 요소가 맞게 들어 있는지만 본다. 표현이 달라도 뜻이 같으면 충족이다. '
@@ -220,12 +225,16 @@ class StuckModelGateway:
         return self._call('identify', user, parse, _schema('identify', schema))
 
     # 역할: S4 보충 설명; 개념의 학습 목표·선수 개념과 학습자가 원래 막힌 맥락을 주고 마크다운 설명을 받음
+    # - scene: 같은 화면에 보일 장면 요약(요청 + 코드가 계산한 단계 캡션 steps). 있으면 그대로 넘겨 글 예시를 장면과 맞추게 함
+    #   프레임(상자 좌표)은 넘기지 않음: 글에는 캡션으로 충분하고 입력 토큰을 늘리지 않기 위함
     # - 확인·서술 문항과 정답은 넘기지 않음: 설명이 곧 정답 풀이가 되거나 정답 키가 새지 않게 하기 위함
-    def explain(self, concept: Concept, attempt: int, entry: Entry) -> str:
+    def explain(self, concept: Concept, attempt: int, entry: Entry, scene: dict | None = None) -> str:
         user = {'concept': {'title': concept.title, 'description': concept.description, 'objectives': concept.objectives,
                             'prerequisites': [{'title': self._title(p.id), 'relation': p.reason} for p in concept.prerequisites]},
                 'stuck_at': ({'concept': self._title(entry.concept)} if entry.kind == 'roadmap' else {'excerpt': entry.excerpt}),
                 'approach': EXPLAIN_APPROACHES.get(attempt, EXPLAIN_APPROACHES[max(EXPLAIN_APPROACHES)])}
+        if scene is not None:
+            user['scene'] = scene
         return self._call('explain', user, lambda content: content)
 
     # 역할: S4 장면 선택; 개념 설명·학습 목표·막힌 맥락·허용 종류의 형식 예시를 주고 kinds 안의 장면 요청 하나를 받음

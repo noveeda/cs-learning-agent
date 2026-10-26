@@ -43,17 +43,19 @@ STACK_SCENE = {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}, {'op': 'push
 
 # 역할: LLM 역할 가짜 구현; 호출을 기록해 요청당 호출 수를 확인하고, 서술 통과 여부와 고를 장면을 조절
 # - scene: choose_animation이 돌려줄 장면 요청(dict), None(장면 없음), 또는 예외 객체(던짐)
+# - explained_scenes: explain이 받은 장면 요약을 호출 순서대로 기록(글 예시와 장면 일치 확인용)
 class FakeGateway:
     def __init__(self, identified='top', rubric_pass=True, rubric_extra=0, scene=STACK_SCENE):
         self.calls, self.identified, self.rubric_pass, self.rubric_extra = [], identified, rubric_pass, rubric_extra
-        self.scene = scene
+        self.scene, self.explained_scenes = scene, []
 
     def identify(self, excerpt, concept_map):
         self.calls.append('identify')
         return self.identified
 
-    def explain(self, concept, attempt, entry):
+    def explain(self, concept, attempt, entry, scene=None):
         self.calls.append('explain')
+        self.explained_scenes.append(scene)
         return f'{concept.id} 설명 {attempt}'
 
     def grade_explanation(self, item, answer):
@@ -263,6 +265,16 @@ class AnimationTests(unittest.TestCase):
         remediated = [e for e in session.state.log if e.kind == 'remediated'][-1]
         self.assertEqual(remediated.detail['animation_kind'], 'stack')
 
+    # 검증 목적: (E2E 문제 3) 보충 글이 화면의 장면과 같은 예시를 쓰도록, 장면을 먼저 고르고 그 요약을 설명에 넘기는지 확인
+    # - 글이 장면을 모르면 최소 힙 글 + 최대 힙 장면, mod 10 글 + mod 5 장면처럼 서로 다른 예시가 한 화면에 나옴
+    # - 요약에는 요청과 함께 코드가 계산한 단계 캡션(steps)을 넣어, 모델이 단계별 상태를 직접 계산하다 틀리지 않게 함
+    def test_explain_receives_chosen_scene(self):
+        gateway = FakeGateway()
+        session = remediation_session(self, 'stack', gateway)
+        self.assertEqual(gateway.calls[-2:], ['animate', 'explain'])
+        steps = [frame['caption'] for frame in session.state.view['animation']['frames']]
+        self.assertEqual(gateway.explained_scenes[-1], {**STACK_SCENE, 'steps': steps})
+
     # 검증 목적: (Review Focus 1) 실행할 수 없는 장면(빈 스택 pop)·장면 선택 LLM 실패에도 503 없이 텍스트 보충만 보여 주고,
     # 실패 이유를 로그에 남기는지 확인
     def test_animation_failure_falls_back_to_text(self):
@@ -277,18 +289,22 @@ class AnimationTests(unittest.TestCase):
                 self.assertTrue(failed[0].detail['reason'])
                 remediated = [e for e in session.state.log if e.kind == 'remediated'][-1]
                 self.assertIsNone(remediated.detail['animation_kind'])
+                # 실행하지 못한 장면은 화면에 없으므로 설명 입력에도 넣지 않음(글이 보이지 않는 장면을 가리키지 않게)
+                self.assertEqual(session.gateway.explained_scenes, [None])
 
     # 검증 목적: 모델이 알맞은 장면이 없다고(null) 고르면 실패 로그 없이 텍스트만 보여 주는지 확인
     def test_null_scene_shows_text_only(self):
         session = remediation_session(self, 'stack', FakeGateway(scene=None))
         self.assertNotIn('animation', session.state.view)
         self.assertNotIn('animation_failed', [e.kind for e in session.state.log])
+        self.assertEqual(session.gateway.explained_scenes, [None])
 
     # 검증 목적: 장면 목록에 없는 개념(logarithm)은 장면 선택 LLM을 부르지 않아 보충 지연이 늘지 않는지 확인
     def test_concept_without_scene_skips_choose(self):
         gateway = FakeGateway()
         session = remediation_session(self, 'logarithm', gateway)
         self.assertEqual(gateway.calls.count('animate'), 0)
+        self.assertEqual(gateway.explained_scenes, [None])
         self.assertNotIn('animation', session.state.view)
 
     # 검증 목적: 개념별 허용 장면 표가 실제 개념 지도 ID와 시뮬레이터 종류만 쓰는지 확인(오타로 장면이 조용히 빠지는 일 방지)
