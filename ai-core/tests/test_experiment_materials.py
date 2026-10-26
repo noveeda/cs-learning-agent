@@ -3,6 +3,7 @@
 # - 자료는 Spring 리소스지만 Java 로더(실험 Task 2)와 따로 이 파일로 먼저 검증함
 import json
 import math
+import os
 import re
 import unittest
 from collections import Counter, deque
@@ -15,7 +16,8 @@ from serving.item_bank import load_item_bank, normalize_short_answer
 
 ROOT = Path(__file__).resolve().parents[2]
 MATERIALS = ROOT / 'backend' / 'src' / 'main' / 'resources' / 'experiment' / 'materials.json'
-CS300 = ROOT / 'codex' / 'model-evaluation' / 'cs-300-v1' / 'questions.jsonl'
+# CS-300은 Git 밖 로컬 자료라 worktree에는 없음; 환경 변수 CS300_QUESTIONS로 메인 체크아웃의 파일을 가리킬 수 있음
+CS300 = Path(os.environ.get('CS300_QUESTIONS', ROOT / 'codex' / 'model-evaluation' / 'cs-300-v1' / 'questions.jsonl'))
 # 실험 계획 Task 1: 선수 개념이 2단계 이상이라 막힘이 생기기 쉬운 후보 개념 8개, 자료 파일 순서가 배정 동점 규칙에 쓰임
 CONCEPTS = ['hash-table', 'bst', 'heap', 'quick-sort', 'merge-sort', 'bfs', 'topological-sort', 'dynamic-programming']
 # 읽기 글 길이(글자 수): 1부는 15분 학습의 본문, 2부는 1부를 이해해야 읽히는 이어지는 내용
