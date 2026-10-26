@@ -13,9 +13,9 @@ from serving.api import BUSY, app
 from serving.concept_map import load_concept_map
 from serving.item_bank import load_item_bank
 from serving.stuck import Entry, LLMUnavailable, StepInput, step
-from serving.animation import SIMULATORS, simulate
+from serving.animation import SCENE_FORMATS, SIMULATORS, simulate
 from serving.animation.model import AnimationRequestModel
-from serving.stuck_llm import (COMMON, EXPLAIN_APPROACHES, SCENE_FORMATS, MODEL_LIST_TIMEOUT, PROMPTS, ROLE_SETTINGS, STEP_BUDGET_SECONDS,
+from serving.stuck_llm import (COMMON, EXPLAIN_APPROACHES, MODEL_LIST_TIMEOUT, PROMPTS, ROLE_SETTINGS, STEP_BUDGET_SECONDS,
                                StuckModelGateway)
 
 MAP = load_concept_map()
@@ -241,6 +241,22 @@ class AnimateTests(unittest.TestCase):
                 gateway(client).choose_animation(self.concept, self.entry, ('heap',))
             self.assertEqual(len(client.requests), ROLE_SETTINGS['animate'].attempts)
 
+    # 검증 목적: 개념별 제한표(CONCEPT_SCENE_LIMITS)가 장면 선택의 schema·형식 예시·응답 검증에 모두 적용되는지 확인
+    # - merge-sort 보충에는 병합 정렬 장면만 나와야 함. 가이드 디코딩이 꺼진 서버에서 온 다른 알고리즘 응답도 거부
+    def test_choose_animation_applies_concept_limits(self):
+        concept = next(c for c in MAP.concepts if c.id == 'merge-sort')
+        merge = {'kind': 'sort', 'algorithm': 'merge', 'values': [4, 1, 3]}
+        client = FakeClient(animate=lambda user, kw: json.dumps({'scene': merge}))
+        request = gateway(client).choose_animation(concept, self.entry, ('sort',))
+        self.assertEqual(request.algorithm, 'merge')
+        _, kw = client.requests[0]
+        (option,) = kw['response_format']['json_schema']['schema']['properties']['scene']['anyOf']
+        self.assertEqual(option['properties']['algorithm']['enum'], ['merge'])
+        self.assertEqual(json.loads(kw['messages'][1]['content'])['formats']['sort']['algorithm'], 'merge')
+        insertion = FakeClient(animate=lambda user, kw: json.dumps({'scene': {**merge, 'algorithm': 'insertion'}}))
+        with self.assertRaises(LLMUnavailable):
+            gateway(insertion).choose_animation(concept, self.entry, ('sort',))
+
     # 검증 목적: 장면 선택 입력에 개념 설명·목표·막힌 맥락·허용 장면·장면 형식 예시만 넣고 문항·정답은 넘기지 않으며,
     # 프롬프트가 실행 가능한 작은 입력, 음수 해시 키 회피, 좁은 null 조건을 지시하는지 확인
     # - 실측(2026-10-26, 90건)에서 null 선택이 81건이었음: 형식 예시가 없고 null 조건이 넓으면 모델이 null로 쏠림
@@ -258,7 +274,7 @@ class AnimateTests(unittest.TestCase):
             self.assertNotIn(i.question, sent)
         prompt = PROMPTS['animate']
         self.assertTrue(prompt.startswith(COMMON))
-        for phrase in ('실행할 수 있는', '음수', 'formats', '반드시', '8개 이하'):
+        for phrase in ('실행할 수 있는', '음수', 'formats', '반드시', '8개 이하', 'nodes에 있는 이름만'):
             self.assertIn(phrase, prompt)
 
     # 검증 목적: 모델에 보여 주는 장면 형식 예시가 모든 장면 종류에 있고, 그 자체로 검증·실행 가능한지 확인

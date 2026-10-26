@@ -1,6 +1,6 @@
 # 파일 역할: 단계별 애니메이션의 프레임 스키마(Box·Arrow·Frame·Animation)와 모델이 고르는 장면 요청 스키마
 # - 모델은 장면 종류와 연산 입력(AnimationRequest)만 고름
-# - 프레임은 시뮬레이터(linear.py·hierarchical.py)가 연산을 실제로 실행해 만듦. 모델이 상태를 지어내면 틀린 그림을 잡을 수 없기 때문
+# - 프레임은 시뮬레이터(linear.py·hierarchical.py·graph.py·sorting.py)가 연산을 실제로 실행해 만듦. 모델이 상태를 지어내면 틀린 그림을 잡을 수 없기 때문
 # - 프레임 JSON은 artifact 이벤트·막힘 view로 프런트엔드 재생기에 그대로 전달됨
 """Animation frame and scene request schemas."""
 from typing import Annotated, Literal, Union
@@ -204,9 +204,61 @@ class HeapRequest(Strict):
     ops: list[Annotated[Union[HeapInsertOp, HeapExtractOp], Field(discriminator='op')]] = Field(min_length=1, max_length=10)
 
 
+# 정점 이름: 노드 상자 안에 들어가는 세 글자 이내
+NodeName = Annotated[str, Field(min_length=1, max_length=3)]
+
+
+# 역할: 그래프 탐색(BFS·DFS) 장면. 정점 8개·간선 12개는 격자 한 화면에 선이 읽히는 분량
+# - 이웃은 이름 오름차순으로 방문(교재 예시와 같은 결정적 순서). 시작 정점에서 닿지 않는 정점은 방문하지 않음
+# - edges의 각 항목은 [끝점, 끝점]. 가이드 디코딩이 튜플(prefixItems)보다 길이 2 배열을 안정적으로 다뤄 이 형식을 씀
+class GraphTraversalRequest(Strict):
+    kind: Literal['graph_traversal']
+    nodes: list[NodeName] = Field(min_length=2, max_length=8)
+    edges: list[Annotated[list[NodeName], Field(min_length=2, max_length=2)]] = Field(max_length=12)
+    directed: bool
+    start: NodeName
+    order: Literal['bfs', 'dfs']
+
+    # 역할: 정점 이름 중복, 없는 시작 정점, 없는 정점을 잇는 간선, 자기 간선, 중복 간선을 거부
+    # - 무방향 그래프에서 [A,B]와 [B,A]는 같은 간선이라 중복으로 봄
+    @model_validator(mode='after')
+    def validate_graph(self):
+        if len(set(self.nodes)) != len(self.nodes):
+            raise ValueError('정점 이름이 중복되었습니다')
+        if self.start not in self.nodes:
+            raise ValueError(f'시작 정점 {self.start}: nodes에 없는 이름입니다')
+        seen = set()
+        for a, b in self.edges:
+            if a not in self.nodes or b not in self.nodes:
+                raise ValueError(f'간선 {a}-{b}: 끝점이 nodes에 없습니다')
+            if a == b:
+                raise ValueError(f'간선 {a}-{b}: 정점 자신을 잇는 간선은 쓸 수 없습니다')
+            key = (a, b) if self.directed else tuple(sorted((a, b)))
+            if key in seen:
+                raise ValueError(f'간선 {a}-{b}: 이미 있는 간선입니다')
+            seen.add(key)
+        return self
+
+
+# 역할: 정렬 장면. 원소 8개는 한 줄에 그리고 단계 수가 MAX_FRAMES 안에 드는 분량
+# - insertion: 원소 하나를 제자리에 넣을 때마다, merge: 구간 병합마다, quick: Lomuto 분할(피벗은 마지막 원소)마다 프레임 하나
+class SortRequest(Strict):
+    kind: Literal['sort']
+    algorithm: Literal['insertion', 'merge', 'quick']
+    values: list[Value] = Field(min_length=2, max_length=8)
+
+
+# 역할: 트리 순회 장면. values를 차례로 이진 탐색 트리에 넣은 뒤 전위·중위·후위 순서로 방문
+class TreeTraversalRequest(Strict):
+    kind: Literal['tree_traversal']
+    values: list[Value] = Field(min_length=1, max_length=9)
+    order: Literal['preorder', 'inorder', 'postorder']
+
+
 # 모델이 고르는 장면 요청 전체. kind 값으로 요청 타입을 구분함
 AnimationRequest = Annotated[
-    Union[ArrayRequest, LinkedListRequest, StackRequest, QueueRequest, HashTableRequest, BSTRequest, HeapRequest],
+    Union[ArrayRequest, LinkedListRequest, StackRequest, QueueRequest, HashTableRequest, BSTRequest, HeapRequest,
+          GraphTraversalRequest, SortRequest, TreeTraversalRequest],
     Field(discriminator='kind')]
 
 

@@ -314,8 +314,8 @@ class AnimationTests(unittest.TestCase):
         self.assertLessEqual({k for kinds in CONCEPT_SCENES.values() for k in kinds}, set(SIMULATORS))
         self.assertEqual(CONCEPT_SCENES['stack'], ('stack',))
         self.assertNotIn('logarithm', CONCEPT_SCENES)
-        # 순회 연산이 없는 bst 장면은 순회 개념과 맞지 않아 뺌(순회 장면은 MVP 3에서 다시 다룸)
-        self.assertNotIn('tree-traversal', CONCEPT_SCENES)
+        # 순회 개념은 bst 장면(삽입·삭제)이 아니라 전용 순회 장면을 씀(MVP 3)
+        self.assertEqual(CONCEPT_SCENES['tree-traversal'], ('tree_traversal',))
 
 class SafetyTests(unittest.TestCase):
     # 검증 목적: 진단부터 복귀까지 매 단계 저장 상태(view·log 포함)에 정답 키·근거·루브릭 문자열이 없는지 확인
