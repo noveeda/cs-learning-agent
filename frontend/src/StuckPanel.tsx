@@ -651,9 +651,9 @@ export function StuckPanel({
           <section>
             <span className="badge">지원 범위 밖</span>
             <p className="stuck-help">
-              붙여넣은 내용에서 지금 지원하는 개념(메모리 주소부터 스택·큐까지
-              선형 구조 11개)을 찾지 못했어요. 문장을 바꿔 다시 붙여넣거나 학습
-              대화에서 질문해 주세요.
+              붙여넣은 내용에서 막힘 풀기를 지원하는 개념을 찾지 못했어요.
+              문항이 준비된 개념만 막힘 풀기를 지원해요. 문장을 바꿔 다시
+              붙여넣거나 학습 대화에서 질문해 주세요.
             </p>
             <div className="stuck-actions">
               <button

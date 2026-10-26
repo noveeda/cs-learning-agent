@@ -388,6 +388,9 @@ test("E2 붙여넣기: 지원 범위 밖 안내 후 원래 학습으로 돌아�
   await expect(panel(page)).toContainText("26/2000자");
   await panel(page).getByRole("button", { name: "이 문장으로 시작" }).click();
   await expect(panel(page)).toContainText("지원하는 개념");
+  // 지원 개념 수는 문항 은행에 따라 늘어나므로 안내에 개수를 박아 두지 않음
+  await expect(panel(page)).toContainText("문항이 준비된 개념");
+  await expect(panel(page)).not.toContainText("11개");
   expect(calls[0].body).toEqual({
     entry: {
       kind: "excerpt",
