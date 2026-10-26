@@ -13,7 +13,9 @@ from serving.api import BUSY, app
 from serving.concept_map import load_concept_map
 from serving.item_bank import load_item_bank
 from serving.stuck import Entry, LLMUnavailable, StepInput, step
-from serving.stuck_llm import (COMMON, EXPLAIN_APPROACHES, MODEL_LIST_TIMEOUT, PROMPTS, ROLE_SETTINGS, STEP_BUDGET_SECONDS,
+from serving.animation import SIMULATORS, simulate
+from serving.animation.model import AnimationRequestModel
+from serving.stuck_llm import (COMMON, EXPLAIN_APPROACHES, SCENE_FORMATS, MODEL_LIST_TIMEOUT, PROMPTS, ROLE_SETTINGS, STEP_BUDGET_SECONDS,
                                StuckModelGateway)
 
 MAP = load_concept_map()
@@ -217,14 +219,16 @@ class AnimateTests(unittest.TestCase):
                 gateway(client).choose_animation(self.concept, self.entry, ('heap',))
             self.assertEqual(len(client.requests), ROLE_SETTINGS['animate'].attempts)
 
-    # 검증 목적: 장면 선택 입력에 개념 설명·목표·막힌 맥락·허용 장면만 넣고 문항·정답은 넘기지 않으며,
-    # 프롬프트가 실행 가능한 작은 입력과 음수 해시 키 회피를 지시하는지 확인
+    # 검증 목적: 장면 선택 입력에 개념 설명·목표·막힌 맥락·허용 장면·장면 형식 예시만 넣고 문항·정답은 넘기지 않으며,
+    # 프롬프트가 실행 가능한 작은 입력, 음수 해시 키 회피, 좁은 null 조건을 지시하는지 확인
+    # - 실측(2026-10-26, 90건)에서 null 선택이 81건이었음: 형식 예시가 없고 null 조건이 넓으면 모델이 null로 쏠림
     def test_choose_animation_request_content(self):
         client = FakeClient(animate=lambda user, kw: json.dumps({'scene': None}))
         gateway(client).choose_animation(self.concept, self.entry, ('heap',))
         _, kw = client.requests[0]
         user = json.loads(kw['messages'][1]['content'])
-        self.assertEqual(set(user), {'concept', 'stuck_at', 'scenes'})
+        self.assertEqual(set(user), {'concept', 'stuck_at', 'scenes', 'formats'})
+        self.assertEqual(user['formats'], {'heap': SCENE_FORMATS['heap']})
         self.assertEqual((user['concept']['objectives'], user['stuck_at'], user['scenes']),
                          (self.concept.objectives, {'excerpt': '힙에서 삽입 후 왜 위로 올라가요?'}, ['heap']))
         sent = json.dumps(kw['messages'], ensure_ascii=False)
@@ -232,8 +236,17 @@ class AnimateTests(unittest.TestCase):
             self.assertNotIn(i.question, sent)
         prompt = PROMPTS['animate']
         self.assertTrue(prompt.startswith(COMMON))
-        for phrase in ('실행할 수 있는', '음수', 'null'):
+        for phrase in ('실행할 수 있는', '음수', 'formats', '기본적으로', '8개 이하', '연산 과정과 관계없는 내용일 때뿐'):
             self.assertIn(phrase, prompt)
+
+    # 검증 목적: 모델에 보여 주는 장면 형식 예시가 모든 장면 종류에 있고, 그 자체로 검증·실행 가능한지 확인
+    # - 예시가 틀리면 모델이 틀린 형식을 따라 해 스키마·시뮬레이션 실패가 늘기 때문
+    def test_scene_formats_are_valid_and_runnable(self):
+        self.assertEqual(set(SCENE_FORMATS), set(SIMULATORS))
+        for kind, example in SCENE_FORMATS.items():
+            request = AnimationRequestModel.model_validate(example).root
+            self.assertEqual(request.kind, kind)
+            simulate(request)
 
 class FailureTests(unittest.TestCase):
     # 검증 목적: 연결 실패·시간 초과는 설정한 횟수만큼 다시 시도한 뒤 LLMUnavailable로 바뀌는지 확인

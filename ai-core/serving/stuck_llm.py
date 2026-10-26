@@ -78,14 +78,32 @@ PROMPTS = {
                  '보충한 선수 개념이 원래 막힌 지점을 이해하는 데 어떻게 이어지는지 2~4문장, 300자 이내로 정리한다. '
                  '새 개념이나 원리를 새로 설명하지 않는다: stuck_at과 filled 목록에 있는 개념만 언급해 연결을 말하고, 확신할 수 없는 이유는 쓰지 않는다. '
                  '아직 이해 확인을 통과하지 못한 개념이 있으면 사실대로 짧게 말하고 다시 볼 것을 권하며, 이해했다고 쓰지 않는다. 마크다운 제목은 쓰지 않는다.',
-    'animate': COMMON + ' 작업: 보충 설명과 함께 보여 줄 단계별 애니메이션 장면을 고른다. '
+    'animate': COMMON + ' 작업: 보충 설명과 함께 보여 줄 단계별 애니메이션 장면을 만든다. '
                '장면은 서버가 연산을 실제로 실행해 그리므로, 장면 종류와 시작 값·연산 목록만 고른다. '
-               'scenes에 있는 종류 중에서 concept의 학습 목표와 학습자가 막힌 맥락(stuck_at)을 가장 잘 보여 주는 장면을 하나 고른다. '
-               '원소는 3~5개, 연산은 3~6개 정도로 작게 두어 학습자가 한 단계씩 따라갈 수 있게 한다. '
+               'scenes는 이 개념의 핵심 연산을 보여 주도록 미리 고른 장면 종류이므로 기본적으로 그중 하나로 장면을 만든다. '
+               'formats는 각 장면 종류의 입력 형식 예시다. 형식만 참고하고, 값과 연산은 concept의 학습 목표와 stuck_at에 맞게 새로 고른다. '
+               '원소는 3~5개(많아도 8개 이하), 연산은 3~6개 정도로 작게 두어 학습자가 한 단계씩 따라갈 수 있게 한다. '
                '연산은 시작 상태부터 차례로 실행할 수 있는 것만 쓴다: 빈 스택·큐·힙에서 꺼내기, 없는 값 삭제, 범위 밖 인덱스, '
                '가득 찬 큐에 넣기, 이진 탐색 트리에 같은 값 다시 넣기는 쓰지 않는다. '
                '해시 테이블 키는 0 이상의 정수로 고른다: 음수 키의 나머지 계산은 언어마다 달라 학습자를 헷갈리게 한다. '
-               '단계별 연산으로 보여 주는 것이 이 개념의 이해에 도움이 되지 않으면 scene을 null로 한다. JSON schema에 맞게 응답한다.',
+               'scene을 null로 하는 것은 stuck_at이 연산 과정과 관계없는 내용일 때뿐이다(용어의 유래, 다른 과목 질문 등). JSON schema에 맞게 응답한다.',
+}
+
+# 장면 종류별 입력 형식 예시; 장면 선택 요청에 허용 종류의 예시만 넣음
+# - json_schema(가이드 디코딩)는 모델 입력에 보이지 않아, 예시가 없으면 모델이 연산 형식을 몰라 null로 쏠림
+#   (실측 2026-10-26: 예시 없이 90건 중 null 81건 → 예시와 좁은 null 조건으로 진단 3/3 장면 생성)
+# - 값은 일부러 짧고 평범하게 둠: 모델이 예시를 그대로 베끼지 않고 학습 목표에 맞게 새로 고르게 하기 위함
+SCENE_FORMATS = {
+    'array': {'kind': 'array', 'values': [2, 4, 6], 'ops': [{'op': 'access', 'index': 1}, {'op': 'insert', 'index': 0, 'value': 1},
+                                                             {'op': 'delete', 'index': 2}]},
+    'linked_list': {'kind': 'linked_list', 'values': [2, 4], 'ops': [{'op': 'insert_head', 'value': 1},
+                                                                      {'op': 'insert_after', 'target': 2, 'value': 3},
+                                                                      {'op': 'delete', 'value': 4}]},
+    'stack': {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}, {'op': 'push', 'value': 2}, {'op': 'pop'}]},
+    'queue': {'kind': 'queue', 'capacity': 4, 'circular': False, 'ops': [{'op': 'enqueue', 'value': 1}, {'op': 'dequeue'}]},
+    'hash_table': {'kind': 'hash_table', 'buckets': 5, 'ops': [{'op': 'insert', 'key': 3}, {'op': 'search', 'key': 3}]},
+    'bst': {'kind': 'bst', 'ops': [{'op': 'insert', 'value': 5}, {'op': 'insert', 'value': 2}, {'op': 'delete', 'value': 5}]},
+    'heap': {'kind': 'heap', 'order': 'max', 'ops': [{'op': 'insert', 'value': 4}, {'op': 'extract'}]},
 }
 
 # 복귀 요약에 넘길 보충 결과 표기; 내부 코드 대신 학습자에게 보여 줄 말로 바꿔 모델이 그대로 옮겨 쓰게 함
@@ -209,7 +227,7 @@ class StuckModelGateway:
                 'approach': EXPLAIN_APPROACHES.get(attempt, EXPLAIN_APPROACHES[max(EXPLAIN_APPROACHES)])}
         return self._call('explain', user, lambda content: content)
 
-    # 역할: S4 장면 선택; 개념 설명·학습 목표·막힌 맥락을 주고 kinds 안의 장면 요청 하나 또는 None(장면 없음)을 받음
+    # 역할: S4 장면 선택; 개념 설명·학습 목표·막힌 맥락·허용 종류의 형식 예시를 주고 kinds 안의 장면 요청 하나 또는 None(장면 없음)을 받음
     # - 응답 schema를 kinds에 든 요청 타입과 null로 묶어(가이드 디코딩) 허용 밖 장면·잘못된 필드를 형식 단계에서 막고, 응답 후에도 다시 검증
     # - 확인·서술 문항과 정답은 넘기지 않음: 애니메이션이 정답 풀이가 되지 않게 하기 위함
     # - 실행 가능 여부(빈 스택 pop 등)는 여기서 보지 않음: 호출한 엔진이 simulate로 확인하고 실패하면 텍스트만 보여 줌
@@ -225,7 +243,7 @@ class StuckModelGateway:
 
         user = {'concept': {'title': concept.title, 'description': concept.description, 'objectives': concept.objectives},
                 'stuck_at': ({'concept': self._title(entry.concept)} if entry.kind == 'roadmap' else {'excerpt': entry.excerpt}),
-                'scenes': list(kinds)}
+                'scenes': list(kinds), 'formats': {kind: SCENE_FORMATS[kind] for kind in kinds}}
         return self._call('animate', user, parse, _schema('animate', _scene_schema(kinds)))
 
     # 역할: S5·S6 서술 채점; 루브릭 항목마다 충족 여부를 같은 순서의 list[bool]로 반환
