@@ -119,7 +119,10 @@ class SubjectTest(unittest.TestCase):
         with_subjects = generate_profiles(two_subject_map(), ['priority-queue'], 5, seed=7)
         without = generate_profiles(two_subject_map(subjects=False), ['priority-queue'], 5, seed=7)
         self.assertEqual(with_subjects, without)
-        self.assertEqual(select_targets(MAP, subject='dsa'), select_targets(MAP))
+        # 실제 지도: 운영체제 과목이 들어온 뒤에도 --subject dsa는 MVP 3 측정(2026-10-26)과 같은 대상 10개를 고름
+        self.assertEqual(select_targets(MAP, subject='dsa'),
+                         ['mst', 'shortest-path', 'bst', 'priority-queue', 'dfs', 'heap', 'bfs', 'heap-sort', 'merge-sort',
+                          'quick-sort'])
 
     # 검증 목적: 기록에 다른 과목 선수 개념 목록(cross_subject)을 남기고, 요약이 전체·과목 경계 빈틈의
     # 빈틈 단위 합산 recall·precision과 Wilson 95% 구간을 따로 내는지 확인
