@@ -161,9 +161,10 @@ def expected_answers(items):
 class LinearItemBankTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.items = load_item_bank()
+        # 다른 묶음 문항은 각 묶음의 test_item_answers_<묶음>.py가 검사하므로 선형 범위만 고름
+        cls.items = [i for i in load_item_bank() if i.concept in LINEAR_SCOPE]
 
-    # 검증 목적: PR3a 범위의 개념만 정확히 담겼는지 확인
+    # 검증 목적: PR3a 범위의 개념이 모두 담겼는지 확인
     def test_covers_exactly_linear_scope(self):
         self.assertEqual({i.concept for i in self.items}, LINEAR_SCOPE)
 
