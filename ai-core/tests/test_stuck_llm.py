@@ -225,12 +225,13 @@ class FailureTests(unittest.TestCase):
 
 
 # 역할: 실제 지도·문항 은행과 가짜 모델로 세션을 끝까지 진행; 진단은 모두 틀리고 확인 문항은 정답 키로 맞힘
-def run_session(test, entry, client):
+# - items: 특정 개념 문항을 뺀 목록을 넣어 "문항 없는 개념"을 실제 문항 은행과 무관하게 만들 때 씀
+def run_session(test, entry, client, items=ITEMS):
     g, state, calls = gateway(client), None, 0
     data = {'type': 'start', 'entry': entry}
     while True:
         before = len(client.requests)
-        state = step(state, StepInput.model_validate(data), g, MAP, ITEMS, 1.0)
+        state = step(state, StepInput.model_validate(data), g, MAP, items, 1.0)
         test.assertLessEqual(len(client.requests) - before, 1, '요청당 LLM 호출은 1회 이하')
         calls += 1
         if state.stage in ('complete', 'out_of_scope') or calls > 200:
@@ -263,9 +264,12 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(client.requests[0][0], 'identify')
 
     # 검증 목적: 지도에는 있지만 문항 은행이 없는 개념(MVP 지원 밖)과 지도 밖("none")은 범위 밖으로 끝나는지 확인
+    # - 문항 묶음이 늘면 실제 은행에서 문항 없는 개념이 사라지므로, tree 문항을 뺀 목록을 주입해 그 상황을 만듦
     def test_unsupported_or_unknown_concept_is_out_of_scope(self):
+        without_tree = [i for i in ITEMS if i.concept != 'tree']
         for identified in ('tree', 'none'):
-            state = run_session(self, {'kind': 'excerpt', 'excerpt': '막힌 문장', 'return_to': '/#/roadmap'}, happy_client(identified))
+            state = run_session(self, {'kind': 'excerpt', 'excerpt': '막힌 문장', 'return_to': '/#/roadmap'}, happy_client(identified),
+                                without_tree)
             self.assertEqual(state.stage, 'out_of_scope', identified)
 
     # 검증 목적: 모델 실패 시 원래 상태가 그대로 남는지(Spring이 마지막 저장 상태로 재시도 가능) 확인
