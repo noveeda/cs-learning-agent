@@ -67,10 +67,14 @@ class SplitTest(unittest.TestCase):
 
     # 검증: PR #70 검수에서 찾은, 질문 표현은 달라도 모범 답 핵심이 같은 문항들이 한 묶음으로 같은 분할에 들어감
     # - 스택 연산 묶음은 쌍 두 개(E08.Q02·E12.Q07, E08.Q02·E09.Q06)가 이어져 세 문항이 한 묶음이 됨
+    # - 큐 묶음은 같은 문장 묶음과 SAME_MEANING 쌍이 이어지는 경우(두 묶는 방식이 함께 작동하는지 확인)
     def test_review_groups_stay_together(self):
         groups = [('E05.Q02', 'E12.Q04'), ('E04.Q02', 'E11.Q08'), ('E04.Q03', 'E07.Q04'),
-                  ('E08.Q02', 'E12.Q07', 'E09.Q06')]
+                  ('E08.Q02', 'E12.Q07', 'E09.Q06'), ('E11.Q09', 'E11.Q10'), ('E09.Q01', 'E12.Q06', 'E09.Q02')]
         rows = [row(q, 0, 4.0) for group in groups for q in group] + [row(f'E01.Q{q:02d}', 0, 4.0) for q in range(1, 9)]
+        # 큐 묶음: E09.Q01·E12.Q06은 질문 문장이 같아 묶이고, E09.Q02는 SAME_MEANING 쌍(E09.Q02·E12.Q06)으로 이어짐
+        rows[[r['id'] for r in rows].index('E09.Q01.A00')]['question'] = 'What is a queue?'
+        rows[[r['id'] for r in rows].index('E12.Q06.A00')]['question'] = 'What is a queue?'
         for seed in range(40):
             dev, _ = mohler.split_questions(rows, seed=seed)
             for group in groups:
