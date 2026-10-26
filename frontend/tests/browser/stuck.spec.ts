@@ -160,6 +160,94 @@ const arrayInsert = {
   ],
 };
 
+// AI core 시뮬레이터(PR #65 simulate)가 만든 무방향 그래프 BFS(정점 5개·간선 5개, 시작 A) 결과를 같은 값으로 다시 구성
+// - 가로 10칸이라 휴대폰 폭에서 크게 줄어드는 장면이고, 무방향 간선은 양쪽 방향 화살표 두 개로 옴
+const graphNodes: [string, number, number][] = [
+  ["A", 3, 0],
+  ["B", 9, 2],
+  ["C", 1, 3],
+  ["D", 9, 3],
+  ["E", 3, 5],
+];
+const graphEdges = [
+  [0, 1],
+  [0, 2],
+  [1, 3],
+  [1, 4],
+  [2, 4],
+].flatMap(([a, b]) => [
+  { source: `n${a}`, target: `n${b}`, label: null },
+  { source: `n${b}`, target: `n${a}`, label: null },
+]);
+const bfsQueues = [
+  ["A"],
+  ["B", "C"],
+  ["C", "D", "E"],
+  ["D", "E"],
+  ["E"],
+  [],
+  [],
+];
+const bfsCaptions = [
+  "시작 정점 A부터 BFS: 큐에 A 추가",
+  "A 방문 → 큐 앞에서 꺼냄, 새 이웃 B, C 큐 뒤에 추가",
+  "B 방문 → 큐 앞에서 꺼냄, 새 이웃 D, E 큐 뒤에 추가",
+  "C 방문 → 큐 앞에서 꺼냄, 새로 넣을 이웃 없음",
+  "D 방문 → 큐 앞에서 꺼냄, 새로 넣을 이웃 없음",
+  "E 방문 → 큐 앞에서 꺼냄, 새로 넣을 이웃 없음",
+  "BFS 끝: 방문 순서 A → B → C → D → E",
+];
+// 단계 step에서 방금 방문한 정점은 new, 그 전에 방문한 정점은 active로 칠함(마지막 단계는 모두 active)
+const graphBfs = {
+  kind: "graph_traversal",
+  title: "BFS(무방향 그래프, 시작 A)",
+  frames: bfsCaptions.map((caption, step) => {
+    const visited = Math.min(step, graphNodes.length);
+    const fresh = step >= 1 && step <= graphNodes.length ? step - 1 : -1;
+    const tone = (i: number) =>
+      i === fresh ? "new" : i < visited ? "active" : "normal";
+    return {
+      boxes: [
+        ...graphNodes.map(([label, x, y], i) => ({
+          id: `n${i}`,
+          label,
+          x,
+          y,
+          shape: "node",
+          tone: tone(i),
+        })),
+        { id: "lv", label: "방문", x: 0, y: 6, shape: "label", tone: "normal" },
+        ...graphNodes.slice(0, visited).map(([label], i) => ({
+          id: `v${i}`,
+          label,
+          x: i + 1,
+          y: 6,
+          shape: "cell",
+          tone: i === fresh ? "new" : "normal",
+        })),
+        {
+          id: "lw",
+          label: "queue",
+          x: 0,
+          y: 7,
+          shape: "label",
+          tone: "normal",
+        },
+        ...bfsQueues[step].map((label, i) => ({
+          id: `q${i}`,
+          label,
+          x: i + 1,
+          y: 7,
+          shape: "cell",
+          tone: "normal",
+        })),
+      ],
+      arrows: graphEdges,
+      caption,
+    };
+  }),
+};
+
 type Reply =
   { stage: string; view: object } | { status: number; message: string };
 
@@ -603,6 +691,59 @@ test("보충 애니메이션: 375px에서 가로 스크롤 없이 축소되고 �
   await player.focus();
   await page.keyboard.press("ArrowLeft");
   await expect(player).toContainText("1 / 2");
+});
+
+test("그래프 BFS 장면: 375px에서 가로 스크롤 없이 축소되고 다음·이전으로 방문·큐 상태가 바뀜", async ({
+  page,
+}) => {
+  await mockStuck(
+    page,
+    { stage: "check", view: { ...views.remediation, animation: graphBfs } },
+    [],
+  );
+  await page.setViewportSize({ width: 375, height: 812 });
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  const player = panel(page).locator(".animation-player");
+  await expect(player).toContainText("시작 정점 A부터 BFS");
+  await expect(player).toContainText("1 / 7");
+  // 가로 10칸(640) 장면도 패널 폭 안으로 줄고 페이지에 가로 스크롤이 생기지 않음
+  const canvas = await player.locator(".animation-canvas").boundingBox();
+  expect(canvas!.x).toBeGreaterThanOrEqual(0);
+  expect(canvas!.x + canvas!.width).toBeLessThanOrEqual(375);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= 375),
+  ).toBe(true);
+  // 줄어든 뒤에도 정점 이름이 12px 이상으로 읽혀야 함
+  const shown = await player.locator(".animation-canvas").evaluate((svg) => {
+    const text = svg.querySelector(".shape-node text")!;
+    const scale =
+      svg.getBoundingClientRect().width /
+      (svg as SVGSVGElement).viewBox.baseVal.width;
+    return parseFloat(getComputedStyle(text).fontSize) * scale;
+  });
+  expect(shown).toBeGreaterThanOrEqual(12);
+  // 무방향 간선 5개는 양쪽 방향 화살표 10개로 그려짐(재생기는 받은 화살표를 그대로 그림)
+  await expect(player.locator(".animation-arrows line")).toHaveCount(10);
+  await player.getByRole("button", { name: "다음 단계" }).click();
+  await expect(player).toContainText("A 방문 → 큐 앞에서 꺼냄");
+  await expect(player).toContainText("2 / 7");
+  // A가 방금 방문한 정점으로 강조되고, 큐 칸은 B·C로 바뀜
+  await expect(
+    player.locator(".animation-box.shape-node", { hasText: "A" }),
+  ).toHaveClass(/tone-new/);
+  await expect(
+    player.locator(".animation-box.shape-cell", { hasText: "C" }),
+  ).toHaveCount(1);
+  // 검수용 화면 기록(test-results는 Git 제외)
+  await page.screenshot({ path: test.info().outputPath("graph-bfs-375.png") });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.screenshot({ path: test.info().outputPath("graph-bfs-1440.png") });
+  await player.getByRole("button", { name: "이전 단계" }).click();
+  await expect(player).toContainText("1 / 7");
+  await expect(
+    player.locator(".animation-box.shape-node", { hasText: "A" }),
+  ).toHaveClass(/tone-normal/);
 });
 
 test("움직임 줄이기 설정이면 상자 이동 transition을 끔", async ({ page }) => {
