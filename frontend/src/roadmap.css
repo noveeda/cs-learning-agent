@@ -1,4 +1,4 @@
-/* 파일 역할: 선수 관계 단계 지도(노드·선·단계 이름)의 위치와 탐색 강조, 상세 패널, 모바일 단계별 목록 배치 */
+/* 파일 역할: 선수 관계 단계 지도(노드·선·단계 이름)의 위치와 탐색 강조, 과목 표식·필터, 상세 패널, 모바일 단계별 목록 배치 */
 .primary { background: var(--color-primary); color: #fff; }
 .primary:hover { background: var(--color-primary-hover); }
 .app-notice { flex-shrink: 0; width: calc(100% - 48px); max-width: none; margin: 0 var(--space-5) var(--space-3); }
@@ -13,6 +13,19 @@
 .roadmap-heading > svg { flex-shrink: 0; color: var(--color-primary); }
 .roadmap-heading h2 { font-size: 20px; margin: var(--space-3) 0; letter-spacing: -.6px; }
 .roadmap-heading p, .roadmap-caption { color: var(--color-muted); font-size: var(--text-small); line-height: 1.8; margin: 0; }
+/* 과목 색: 노드 위쪽 막대와 필터 버튼의 막대에 같은 값을 써서 필터가 범례를 겸함
+   - 파랑(선택·강조)·초록(완료)과 겹치지 않는 색, 흰 바탕에서 글자로 써도 4.5:1 이상 */
+[data-subject] { --subject-color: var(--color-muted); }
+[data-subject=dsa] { --subject-color: #0e7490; }
+[data-subject=os] { --subject-color: #be185d; }
+.subject-filter { display: flex; flex-wrap: wrap; gap: var(--space-1); width: fit-content; max-width: 100%; margin-top: var(--space-5); padding: var(--space-1); border-radius: 10px; background: var(--color-background); }
+.subject-filter button { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--text-small); cursor: pointer; }
+.subject-filter button:hover { color: var(--color-text); }
+.subject-filter button[aria-pressed=true] { background: var(--color-surface); color: var(--color-text); font-weight: 600; }
+.subject-filter button:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
+.subject-swatch { width: 14px; height: 4px; border-radius: 2px; background: var(--subject-color); }
+/* 노드 위 테두리에 걸친 짧은 막대: 학습 상태가 쓰는 테두리 색과 섞이지 않고 글자도 가리지 않음 */
+.roadmap-node[data-subject]::before { content: ""; position: absolute; top: -2px; left: 50%; width: 28px; height: 4px; border-radius: 2px; transform: translateX(-50%); background: var(--subject-color); }
 .roadmap-legend { display: flex; gap: var(--space-3); flex-wrap: wrap; margin: var(--space-5) 0; }
 .status-badge { display: inline-flex; align-items: center; font-size: 11px; padding: 3px 8px; border-radius: 5px; background: var(--color-background); color: var(--color-muted); }
 .status-badge.in-progress { color: var(--color-primary); background: var(--color-primary-soft); }
@@ -62,6 +75,8 @@ select:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 
   .roadmap-node { position: static; width: 100%; height: auto; min-height: 56px; border-radius: 12px; align-items: flex-start; text-align: left; padding: var(--space-3); gap: var(--space-1); }
   .roadmap-node strong { font-size: 13px; }
   .node-prerequisites { display: block; }
+  /* 목록에서는 노드가 static이라(인라인 left·top 무시) 막대를 제목 위 흐름 안에 둠; relative로 바꾸면 인라인 좌표가 다시 적용돼 목록이 어긋남 */
+  .roadmap-node[data-subject]::before { position: static; transform: none; }
   .roadmap-caption { margin-top: var(--space-3); }
 }
 @media(max-width: 580px) {

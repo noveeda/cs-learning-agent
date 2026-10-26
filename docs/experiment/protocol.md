@@ -1,0 +1,71 @@
+# 비교 실험 진행 절차서 (진행자용)
+
+- 대상 계획: [비교 실험 모드](../superpowers/plans/2026-10-26-mvp3-experiment-mode.md) 1절.
+- 진행자는 참여자 옆에서 화면을 함께 보며 진행한다. 참여자가 묻지 않으면 도구 사용법 외에는 개입하지 않는다.
+
+## 1. 하루 전
+
+- [ ] 참여자별 코드(S1~S8)와 일정을 정한다. 코드 번호가 조건 배정을 정하므로, 참여 순서대로 번호를 준다. S9는 리허설용으로 남겨 둔다.
+- [ ] 참여자가 서술 답 수집에 이미 쓴 개념이 있으면 기록해 둔다(진행자 화면의 "제외할 개념").
+- [ ] 동의서([consent.md](consent.md))를 인쇄하거나 화면으로 준비한다.
+
+## 2. 시작 전 점검 (10분)
+
+- [ ] 서비스 상태: `curl -s http://127.0.0.1:8001/health`가 ok, 화면 `http://127.0.0.1:5173/#/experiment`가 열린다.
+- [ ] 운영 모델(8000)에 다른 대량 측정이 돌고 있지 않은지 코디네이터에게 확인한다. 실험 중에는 대량 측정을 멈춘다.
+- [ ] 노트북 화면 폭 1280px 이상, 브라우저 확대 100%.
+- [ ] 다른 탭, 검색, 다른 AI 도구를 닫는다.
+- [ ] 브라우저를 전체 화면(F11)으로 열고 주소창을 숨긴다. 주소에서 `#/experiment`를 지우면 일반 학습 앱이 열리므로, 참여자가 주소창을 건드리지 않게 한다.
+
+## 3. 진행 (약 1시간)
+
+1. **안내(3분):** 동의서를 함께 읽고 동의를 받는다. 아래 문장만 말한다.
+   > "두 가지 학습 도구를 비교하는 실험입니다. 성적과 관계없고, 틀려도 괜찮습니다. 막히면 화면에 있는 도구를 자유롭게 써 보세요."
+   - 어느 도구가 "새로 만든 것"인지, 어느 쪽이 더 좋을 거라고 예상하는지는 말하지 않는다.
+2. **시작 화면:** 참여자 코드, 학년, 수강 여부, 제외할 개념을 입력한다. 같은 코드가 이미 있다는 경고가 나오면 새로 만들지 말고 "재개"를 고른다.
+3. **사전 시험(최대 12분):** 참여자가 혼자 푼다. 화면에는 사전 시험 시간 제한이 없으므로 진행자가 시계로 12분을 재고, 지나면 제출하게 한다. 학습 1·2의 15분은 화면이 서버 시각으로 막는다.
+4. **학습 1·2(각 최대 15분):** 화면에 나온 도구만 쓴다. 진행자는 시간만 본다. 도구 사용법을 물으면 버튼 위치만 알려 준다.
+5. **사후 시험(약 10분)과 설문(약 5분)**
+6. **마무리:** 참여에 감사하고, 원하면 정답 해설을 따로 보여 준다(기록이 끝난 뒤).
+
+## 4. 문제가 생겼을 때
+
+| 상황 | 대처 |
+| --- | --- |
+| 화면이 멈추거나 새로고침함 | 새로고침한다. 같은 단계와 남은 시간으로 돌아온다(서버 시각 기준). |
+| 도구 응답이 30초 넘게 없음 | 기다린다. 오류 안내가 나오면 막힘 도구는 "다시 시도" 버튼을 누르고, 채팅 도구는 같은 질문을 다시 보낸다(채팅에는 다시 시도 버튼이 없다). 시간은 계속 흐르므로 진행자 메모에 기록한다. |
+| 브라우저를 닫음 | 시작 화면에서 같은 코드로 "재개"를 고른다. |
+| 참여자가 중단을 원함 | 바로 멈춘다. 원하면 그 참여자의 기록을 지운다(코디네이터에게 코드를 알림). |
+
+- 모든 예외 상황은 진행자 메모(참여자 코드, 시각, 내용)에 남긴다. 보고서에서 그 학생의 해당 개념을 따로 표시한다.
+
+## 5. 끝난 뒤
+
+- [ ] 그날 실험이 모두 끝나면 서버에서 Spring에 직접 요청해 기록을 내보낸다(Git 밖에 저장):
+  `curl -s http://127.0.0.1:8080/api/experiments/export > ai-core/outputs/experiment/export-<날짜>.json`
+  - 화면 주소(5173)를 거쳐 받지 않는다. 참여자 브라우저에서 기록이 열리지 않게 프록시 경유 요청은 막혀 있다.
+- [ ] 사후 서술 답 채점 시트를 만들어 석사 과정생에게 전달한다:
+  `ai-core/.venv/bin/python ai-core/eval/experiment_report.py grading-sheet --export <파일> --materials backend/src/main/resources/experiment/materials.json --grader G1 --out ai-core/outputs/experiment/grading-G1.csv`
+  - 채점자에게는 참여자, 조건, 개념 순서를 알리지 않는다.
+- [ ] 채점이 돌아오면 보고서를 만든다:
+  `ai-core/.venv/bin/python ai-core/eval/experiment_report.py report --export <파일> --materials backend/src/main/resources/experiment/materials.json --grades <채점 시트 CSV들> --out ai-core/outputs/experiment/report.json`
+- [ ] 보고서를 만든 뒤 원문을 모두 지우고 익명화한 수치(`report.json`)만 남긴다. 동의서 2절("분석이 끝나면 답과 대화 원문은 지우고")의 약속이다.
+  1. 실험 기록: `backend/data/experiments/`의 세션 파일
+  2. 학습 중 쓴 도구 기록: 실험 기록의 `stuck_session`·`chat_conversation` 사건이 가리키는 파일. 아래 명령으로 목록을 뽑아 확인한 뒤 지운다.
+     ```bash
+     jq -r '.. | objects | select(.type=="stuck_session" and .ref != null) | .ref' <export 파일> | sort -u | sed 's|^|backend/data/stuck-sessions/|; s|$|.json|'
+     jq -r '.. | objects | select(.type=="chat_conversation" and .ref != null) | .ref' <export 파일> | sort -u | sed 's|^|backend/data/conversations/|; s|$|.json|'
+     ```
+     - `.ref != null`: 대상 ID가 없는 사건이 `null.json` 같은 잘못된 경로로 나오지 않게 거른다.
+  3. 내보낸 파일(`export-<날짜>.json`)과 채점 시트 원문
+- [ ] 참여자 한 명의 기록만 지울 때(중단하며 삭제를 원하는 경우, 리허설 S9)는 다음 순서로 한다.
+  1. 위 jq 명령 앞에 참여자 필터를 붙여 그 참여자의 도구 기록만 뽑는다. 예: S3
+     ```bash
+     jq -r '.sessions[] | select(.participant=="S3") | .. | objects | select(.type=="stuck_session" and .ref != null) | .ref' <export 파일>
+     jq -r '.sessions[] | select(.participant=="S3") | .. | objects | select(.type=="chat_conversation" and .ref != null) | .ref' <export 파일>
+     ```
+  2. 그 참여자의 세션 파일(`backend/data/experiments/`)과 뽑은 도구 기록 파일을 지운다. 다른 참여자의 파일은 건드리지 않는다.
+
+## 6. 리허설
+
+- 실제 실험 전에 사용자가 직접 참여자 역할로 한 번 진행한다(참여자 코드 `S9`). 시간 배분, 글 난이도, 화면 흐름을 확인하고 리허설이 끝나면 코디네이터가 S9 기록을 지운다(실험 API는 S1~S9만 받는다). 세션 파일뿐 아니라 리허설 중 쓴 막힘 세션·대화 기록도 5절의 "참여자 한 명의 기록만 지울 때" 방법으로 함께 지운다.
