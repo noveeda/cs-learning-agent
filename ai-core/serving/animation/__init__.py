@@ -3,6 +3,7 @@
 """Deterministic step-by-step data structure animations."""
 from uuid import uuid4
 
+from .hierarchical import simulate_bst, simulate_hash_table, simulate_heap
 from .linear import simulate_array, simulate_linked_list, simulate_queue, simulate_stack
 from .model import Animation, AnimationRequest, AnimationRequestModel
 
@@ -12,6 +13,9 @@ SIMULATORS = {
     'linked_list': simulate_linked_list,
     'stack': simulate_stack,
     'queue': simulate_queue,
+    'hash_table': simulate_hash_table,
+    'bst': simulate_bst,
+    'heap': simulate_heap,
 }
 
 

@@ -1,6 +1,6 @@
 # 파일 역할: 단계별 애니메이션의 프레임 스키마(Box·Arrow·Frame·Animation)와 모델이 고르는 장면 요청 스키마
 # - 모델은 장면 종류와 연산 입력(AnimationRequest)만 고름
-# - 프레임은 시뮬레이터(linear.py)가 연산을 실제로 실행해 만듦. 모델이 상태를 지어내면 틀린 그림을 잡을 수 없기 때문
+# - 프레임은 시뮬레이터(linear.py·hierarchical.py)가 연산을 실제로 실행해 만듦. 모델이 상태를 지어내면 틀린 그림을 잡을 수 없기 때문
 # - 프레임 JSON은 artifact 이벤트·막힘 view로 프런트엔드 재생기에 그대로 전달됨
 """Animation frame and scene request schemas."""
 from typing import Annotated, Literal, Union
@@ -161,9 +161,52 @@ class QueueRequest(Strict):
     ops: list[Annotated[Union[EnqueueOp, DequeueOp], Field(discriminator='op')]] = Field(min_length=1, max_length=10)
 
 
+# 역할: 해시 테이블에 키를 넣거나 찾는 연산
+class HashOp(Strict):
+    op: Literal['insert', 'search']
+    key: Value
+
+
+# 역할: h(k) = k mod buckets, 체이닝 해시 테이블 장면. 버킷 11개는 가로 12칸 안에 들어가는 수
+class HashTableRequest(Strict):
+    kind: Literal['hash_table']
+    buckets: int = Field(ge=3, le=11)
+    ops: list[HashOp] = Field(min_length=1, max_length=8)
+
+
+# 역할: 이진 탐색 트리에 값을 넣거나 지우는 연산
+class BSTOp(Strict):
+    op: Literal['insert', 'delete']
+    value: Value
+
+
+# 역할: 빈 이진 탐색 트리에서 시작하는 장면
+class BSTRequest(Strict):
+    kind: Literal['bst']
+    ops: list[BSTOp] = Field(min_length=1, max_length=10)
+
+
+# 역할: 힙 끝에 값을 넣고 sift-up하는 연산
+class HeapInsertOp(Strict):
+    op: Literal['insert']
+    value: Value
+
+
+# 역할: 힙 루트를 꺼내고 sift-down하는 연산
+class HeapExtractOp(Strict):
+    op: Literal['extract']
+
+
+# 역할: 빈 최소·최대 힙에서 시작하는 장면. 교환 단계까지 포함한 프레임 수는 시뮬레이터가 MAX_FRAMES로 막음
+class HeapRequest(Strict):
+    kind: Literal['heap']
+    order: Literal['min', 'max']
+    ops: list[Annotated[Union[HeapInsertOp, HeapExtractOp], Field(discriminator='op')]] = Field(min_length=1, max_length=10)
+
+
 # 모델이 고르는 장면 요청 전체. kind 값으로 요청 타입을 구분함
 AnimationRequest = Annotated[
-    Union[ArrayRequest, LinkedListRequest, StackRequest, QueueRequest],
+    Union[ArrayRequest, LinkedListRequest, StackRequest, QueueRequest, HashTableRequest, BSTRequest, HeapRequest],
     Field(discriminator='kind')]
 
 
