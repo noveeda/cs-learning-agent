@@ -93,6 +93,20 @@ def graded(marks):
 S1, S2 = '1' * 32, '2' * 32
 
 
+# 역할: 끝나지 않은 세션이 섞인 기록(실제 export는 모든 세션을 내보냄, PR #73 검수 ②)
+# - S4: 생성만 하고 사전 시험 전이라 pretest·learn 키가 없음
+# - S5: 학습 1 진행 중; 학습 2는 시작 전이라 concept·condition만 있고 events·started_at이 없음
+def export_with_incomplete():
+    data = export()
+    s4 = {'id': '4' * 32, 'participant': 'S4', 'grade': 1, 'dsa': 'taking', 'exclude': [], 'stage': 'pretest'}
+    s5 = {'id': '5' * 32, 'participant': 'S5', 'grade': 2, 'dsa': 'taken', 'exclude': [], 'stage': 'learn1',
+          'pretest_form': 'A', 'posttest_form': 'B', 'pretest_high': False,
+          'pretest': {'answers': {'exp-heap-A1': 'B', 'exp-bst-A1': 'A'}, 'submitted_at': at(0)},
+          'learn': [slot(1, 'heap', 'system', help_at=(1, 0)), {'slot': 2, 'concept': 'bst', 'condition': 'chat'}]}
+    data['sessions'] += [s4, s5]
+    return data
+
+
 class GradingSheetTest(unittest.TestCase):
     # 검증: 사후 서술 답 중 빈 답을 뺀 것만 모으고, 열은 MVP 3 채점 시트와 같으며, 참가자·조건·개념·문항 ID가 시트에 없음(눈가림)
     # - 채점자가 조건(제안 시스템/채팅)을 알면 판정이 한쪽으로 기울 수 있기 때문
@@ -174,6 +188,54 @@ class StudentTableTest(unittest.TestCase):
         self.assertIsNone(rows[('S2', 'bst')]['explanation'])
         self.assertEqual(rows[('S2', 'heap')]['explanation'], 0.0)
         self.assertIsNone(self.rows()[('S1', 'heap')]['explanation'])
+
+
+class IncompleteSessionTest(unittest.TestCase):
+    # 검증: 사전 시험 전 세션(S4)과 시작 전 학습 슬롯(S5 학습 2)이 있어도 두 명령이 멈추지 않음(PR #73 검수 ②)
+    # - 사전 시험 전 학생은 표에서 빼고 incomplete에 이유와 함께 남김
+    # - 시작 전 슬롯은 started=False로 표에 남기고 O2·O3는 None; 미복귀(False)로 세면 O2가 낮게 잘못 집계됨
+    def test_incomplete_sessions_reported_not_crashing(self):
+        self.assertEqual(len(report.build_grading_sheet(export_with_incomplete(), MATERIALS, 'G1')), 3)
+        result = report.build_report(export_with_incomplete(), MATERIALS, [])
+        self.assertEqual(result['incomplete'], [{'participant': 'S4', 'slot': None, 'reason': 'pretest_not_submitted'},
+                                                {'participant': 'S5', 'slot': 2, 'reason': 'learn_not_started'}])
+        rows = {(r['participant'], r['slot']): r for r in result['rows']}
+        self.assertNotIn('S4', {r['participant'] for r in result['rows']})
+        self.assertEqual((rows[('S5', 2)]['started'], rows[('S5', 2)]['o2'], rows[('S5', 2)]['o3_seconds']), (False, None, None))
+        self.assertEqual((rows[('S5', 2)]['pre'], rows[('S5', 2)]['post']), (0, None))
+        self.assertEqual((rows[('S5', 1)]['started'], rows[('S5', 1)]['o2']), (True, False))
+        self.assertTrue(rows[('S1', 1)]['started'])
+        # 미완료 학생(S5)은 한쪽 조건 값이 없어 조건 차이에서 빠짐
+        self.assertEqual(result['summary']['all']['o2']['n'], 3)
+
+
+class O3RuleTest(unittest.TestCase):
+    def o3(self, events):
+        learn = {'slot': 1, 'concept': 'heap', 'condition': 'system', 'started_at': at(0), 'deadline': at(15), 'events': events}
+        data = export()
+        data['sessions'][0]['learn'][0] = learn
+        rows = report.student_rows(data, MATERIALS, [])
+        return next(r for r in rows if r['participant'] == 'S1' and r['slot'] == 1)
+
+    # 검증: O3는 첫 help_open이 첫 continue_reading보다 앞설 때만 계산하고, 계속 읽기 뒤에만 도움을 열었으면 None(PR #73 검수 ③)
+    # - 서버는 계속 읽기 뒤에도 마감 전이면 help_open을 받으므로, 순서를 보지 않으면 음수 O3가 조건 차이에 섞임
+    def test_help_after_continue_gives_null(self):
+        row = self.o3([{'type': 'continue_reading', 'at': at(5)}, {'type': 'help_open', 'at': at(6)}])
+        self.assertEqual((row['o2'], row['helped'], row['o3_seconds']), (True, True, None))
+        row = self.o3([{'type': 'help_open', 'at': at(2)}, {'type': 'continue_reading', 'at': at(5)},
+                       {'type': 'help_open', 'at': at(6)}])
+        self.assertEqual(row['o3_seconds'], 180)
+
+    # 검증: 시각은 문자열이 아니라 파싱한 값으로 비교함
+    # - 서버 Instant.toString()은 0밀리초면 '…:05Z', 아니면 '…:05.120Z'라 같은 초 안에서 문자열 순서와 시간 순서가 어긋남
+    #   ('.' < 'Z'라 05.120Z가 05Z보다 앞에 정렬됨)
+    def test_times_compared_after_parsing(self):
+        row = self.o3([{'type': 'continue_reading', 'at': '2026-11-10T10:02:05Z'},
+                       {'type': 'help_open', 'at': '2026-11-10T10:02:05.120Z'}])
+        self.assertIsNone(row['o3_seconds'])
+        row = self.o3([{'type': 'help_open', 'at': '2026-11-10T10:02:04.900Z'},
+                       {'type': 'continue_reading', 'at': '2026-11-10T10:02:05Z'}])
+        self.assertEqual(row['o3_seconds'], 0)
 
 
 class SummaryTest(unittest.TestCase):

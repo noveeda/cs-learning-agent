@@ -62,12 +62,15 @@ def _explanation(items):
 
 
 # 역할: 사후 서술 답 목록 [{answer_id, item, answer, session, concept}]; 빈 답은 채점할 내용이 없어 뺌
+# - 사전 시험 전 세션은 learn이 없고, 사후 시험 전 세션은 posttest가 없어 자연히 빠짐(export는 모든 세션을 내보냄)
 def explanation_answers(export, materials):
     by_concept = forms(materials)
     found = []
     for session in export['sessions']:
         answers = (session.get('posttest') or {}).get('answers') or {}
-        for learn in session['learn']:
+        if not answers:
+            continue
+        for learn in session.get('learn') or []:
             item = _explanation(by_concept[learn['concept']][session['posttest_form']])
             text = str(answers.get(item['id']) or '')
             if text.strip():
@@ -107,30 +110,60 @@ def _explanation_score(aid, rubric_len, sheet_labels):
     return sum(ratios) / len(ratios) if ratios else None
 
 
-def _seconds(start, end):
-    parse = lambda value: datetime.fromisoformat(value.replace('Z', '+00:00'))
-    return round((parse(end) - parse(start)).total_seconds())
+# 역할: 서버 시각 문자열(ISO-8601, 끝 'Z')을 시각 값으로 바꿈
+# - 문자열로 비교하지 않는 이유: 서버 Instant.toString()은 0밀리초면 '…:05Z', 아니면 '…:05.120Z'라
+#   같은 초 안에서 문자열 순서('.' < 'Z')와 시간 순서가 어긋남(PR #73 검수)
+def _parse(value):
+    return datetime.fromisoformat(value.replace('Z', '+00:00'))
 
 
-# 역할: 학습 단계 하나의 O2·O3
+# 역할: 시작한 학습 단계 하나의 O2·O3와 도움 사용 여부
 # - O2: 계속 읽기를 눌렀는가(마감 뒤 사건은 서버가 거부하므로 기록에 있으면 시간 안)
-# - O3: 첫 도움 요청(help_open)부터 계속 읽기까지 초; 도움 없이 읽었거나 복귀하지 못했으면 None
-#   0초로 두면 "빨리 복귀"로 잘못 읽히기 때문
+# - O3: 첫 계속 읽기보다 앞선 첫 도움 요청(help_open)부터 그 계속 읽기까지 초
+#   - 서버는 계속 읽기 뒤에도 마감 전이면 help_open을 받으므로, 그 뒤의 도움 요청은 O3에 쓰지 않음(음수 O3 방지)
+#   - 계속 읽기 전에 도움을 연 적이 없거나 복귀하지 못했으면 None; 0초로 두면 "빨리 복귀"로 잘못 읽히기 때문
+# - helped: 이 단계에서 도움을 한 번이라도 열었는가(계속 읽기 뒤 포함)
 def _o2_o3(events):
-    first = lambda kind: next((e['at'] for e in sorted(events, key=lambda e: e['at']) if e['type'] == kind), None)
-    helped, back = first('help_open'), first('continue_reading')
-    return back is not None, helped is not None, _seconds(helped, back) if helped and back else None
+    timed = sorted(((_parse(e['at']), e['type']) for e in events), key=lambda pair: pair[0])
+    back = next((t for t, kind in timed if kind == 'continue_reading'), None)
+    helps = [t for t, kind in timed if kind == 'help_open']
+    before = next((t for t in helps if back is not None and t < back), None)
+    o3 = round((back - before).total_seconds()) if before is not None else None
+    return back is not None, bool(helps), o3
+
+
+# 역할: 끝나지 않은 세션·단계 목록 [{participant, slot, reason}]
+# - pretest_not_submitted: 사전 시험 전이라 개념·조건 배정이 없음 → 학생별 표에서 뺌
+# - learn_not_started: 배정은 됐지만 그 학습 단계를 시작하지 않음(events·started_at 없음) → 표에는 started=False로 남김
+# - 실험 중 중단·재시작이나 진행자의 연습 세션이 export에 함께 나오므로, 멈추지 않고 따로 보고하기 위함
+def incomplete_entries(export):
+    found = []
+    for session in export['sessions']:
+        if not session.get('pretest'):
+            found.append({'participant': session['participant'], 'slot': None, 'reason': 'pretest_not_submitted'})
+            continue
+        for learn in sorted(session.get('learn') or [], key=lambda l: l['slot']):
+            if not _started(learn):
+                found.append({'participant': session['participant'], 'slot': learn['slot'], 'reason': 'learn_not_started'})
+    return found
+
+
+def _started(learn):
+    return bool(learn.get('started_at')) and 'events' in learn
 
 
 # 역할: 학생 × 개념 행 목록(학생별 표)
 # - pre: 사전 형 자동 채점 2문항 정답 수, post: 사후 형 자동 채점 2문항 정답 수, change: post − pre
 # - explanation: 사후 서술 충족 비율(채점자 평균); 빈 답은 채점 없이 0(모른 답이 계산에서 빠져 점수가 부풀지 않게)
 # - 사후 시험 전이면 post·change·explanation은 None
+# - 사전 시험 전 세션은 뺌; 시작 전 학습 단계는 started=False이고 O2·O3·helped는 None(미복귀 False로 세지 않음)
 def student_rows(export, materials, sheets):
     by_concept = forms(materials)
     sheet_labels = [labels(rows) for rows in sheets]
     rows = []
     for session in export['sessions']:
+        if not session.get('pretest'):
+            continue
         pre_answers = session['pretest']['answers']
         post = session.get('posttest')
         for learn in sorted(session['learn'], key=lambda l: l['slot']):
@@ -148,7 +181,8 @@ def student_rows(export, materials, sheets):
                     row['explanation'] = _explanation_score(answer_id(session['id'], item['id']), len(item['rubric']), sheet_labels)
                 else:
                     row['explanation'] = 0.0
-            row['o2'], row['helped'], row['o3_seconds'] = _o2_o3(learn['events'])
+            row['started'] = _started(learn)
+            row['o2'], row['helped'], row['o3_seconds'] = _o2_o3(learn['events']) if row['started'] else (None, None, None)
             rows.append(row)
     return rows
 
@@ -179,12 +213,14 @@ def _grader_agreement(sheets):
     return {'compared': len(common), 'kappa': cohen_kappa(a, b), 'agreement': sum(x == y for x, y in zip(a, b)) / len(common)}
 
 
-# 역할: 보고서 사전; 학생별 표, 조건별 차이 요약(전체 / 사전 점수 높음 제외), 사전 점수 높음 학생, 채점자 일치도
+# 역할: 보고서 사전; 학생별 표, 조건별 차이 요약(전체 / 사전 점수 높음 제외), 사전 점수 높음 학생, 미완료 목록, 채점자 일치도
+# - students는 export의 세션 수(미완료 포함); 미완료 학생은 한쪽 조건 값이 없으면 조건 차이에서 자연히 빠짐
 def build_report(export, materials, sheets):
     rows = student_rows(export, materials, sheets)
     without_high = [r for r in rows if not r['pretest_high']]
     return {'exported_at': export.get('exported_at'), 'students': len(export['sessions']),
             'pretest_high': sorted({r['participant'] for r in rows if r['pretest_high']}),
+            'incomplete': incomplete_entries(export),
             'rows': rows,
             'summary': {'all': {m: _differences(rows, m) for m in METRICS},
                         'excluding_pretest_high': {m: _differences(without_high, m) for m in METRICS}},
