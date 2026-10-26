@@ -23,19 +23,26 @@ COLUMNS = ('answer_id', 'item_id', 'concept', 'question', 'phase', 'author', 'an
 PHASES = ('before', 'after')
 
 
+# 역할: 시트 안에서 겹치지 않는 answer_id('A' + 무작위 숫자 7자리)를 만들어 used에 넣고 반환
+# - 무작위인 이유: 채점자가 문항 순서나 작성자를 짐작하지 못하게 하기 위함
+# - 'A'로 시작하는 이유: 엑셀이 숫자처럼 보이는 id(예전 16진수 id의 1e5c3a20 → 지수 표기, 앞자리 0)를 바꾸지 못하게 하기 위함
+# - 예전 16진수 id 시트도 채점 도구가 그대로 읽음(문자열로만 비교)
+def new_answer_id(used):
+    while True:
+        answer_id = f'A{secrets.randbelow(10 ** 7):07d}'
+        if answer_id not in used:
+            used.add(answer_id)
+            return answer_id
+
+
 # 역할: 서술 문항마다 before·after 두 줄을 만들어 반환
 # - concepts가 주어지면 그 개념의 문항만 고름
-# - answer_id는 무작위 8자리(16진수)이고 시트 안에서 겹치지 않음; 채점자가 문항 순서나 작성자를 짐작하지 못하게 하기 위함
 def build_rows(items, concepts=None):
     chosen = [item for item in items if item.purpose == 'explanation' and (concepts is None or item.concept in concepts)]
     used, rows = set(), []
     for item in chosen:
         for phase in PHASES:
-            answer_id = secrets.token_hex(4)
-            while answer_id in used:
-                answer_id = secrets.token_hex(4)
-            used.add(answer_id)
-            rows.append({'answer_id': answer_id, 'item_id': item.id, 'concept': item.concept,
+            rows.append({'answer_id': new_answer_id(used), 'item_id': item.id, 'concept': item.concept,
                          'question': item.question, 'phase': phase, 'author': '', 'answer': ''})
     return rows
 

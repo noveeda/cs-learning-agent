@@ -4,7 +4,6 @@
 # - 지표 정의는 eval/metrics.py 하나만 씀(Mohler 개발 검증과 같은 계산)
 """Compute human-human and AI-human agreement for Korean explanation grading."""
 import argparse
-import csv
 import json
 import random
 import sys
@@ -14,7 +13,7 @@ AI_CORE = Path(__file__).resolve().parents[1]
 if str(AI_CORE) not in sys.path:
     sys.path.insert(0, str(AI_CORE))
 
-from eval.grading_sheet import OUTPUT_ROOT, RUBRIC_SLOTS, SHEET_COLUMNS, grader_seed, read_answers, write_csv  # noqa: E402
+from eval.grading_sheet import OUTPUT_ROOT, RUBRIC_SLOTS, SHEET_COLUMNS, grader_seed, read_answers, read_csv, write_csv  # noqa: E402
 from eval.metrics import cohen_kappa, wilson_interval  # noqa: E402
 
 # 거짓 통과율 10% 이하를 의미 있게 말하려면 미통과 답이 이만큼 필요함(설계 2-4 목표 "미통과 100개 이상")
@@ -76,9 +75,9 @@ def _ai_group(ids, final, ai):
     return group
 
 
-# 역할: 일치도 보고서 dict 반환(맨 앞 키는 warnings)
+# 역할: 일치도 보고서 dict 반환(맨 앞 키는 warnings, 다음은 unknown_ids)
 # - sheets: {채점자 코드: 시트 행}; 1명 또는 2명
-# - answers: 원래 답 시트 행(작성자 구분에만 씀), ai_rows: ai_grade 결과 행
+# - answers: 원래 답 시트 행(작성자 구분과 answer_id 대조에 씀), ai_rows: ai_grade 결과 행
 # - final_rows: 갈린 답의 합의 라벨(answer_id, final_pass), regrade_rows: 채점자 1명일 때 재채점 시트
 # - 채점자 2명이면 최종 라벨은 두 사람이 모두 채점한 답만 씀; 한쪽만 채점한 답은 개수(only_one_grader)만 보고
 def analyze(sheets, answers, ai_rows=None, final_rows=None, regrade_rows=None):
@@ -87,6 +86,16 @@ def analyze(sheets, answers, ai_rows=None, final_rows=None, regrade_rows=None):
     graders = sorted(sheets)
     marked = {g: labels(sheets[g]) for g in graders}
     warnings, report = [], {}
+    # 답 시트에 없는 answer_id를 시트·AI 결과별로 모음
+    # - 엑셀이 숫자처럼 보이는 id를 바꾸면(지수 표기, 앞자리 0 삭제) 짝이 맞지 않아 조용히 빠지므로 드러내기 위함
+    known = {r['answer_id'] for r in answers}
+    unknown = {g: sorted({r['answer_id'] for r in sheets[g]} - known) for g in graders}
+    if ai_rows is not None:
+        unknown['ai'] = sorted({r['answer_id'] for r in ai_rows} - known)
+    unknown = {source: ids for source, ids in unknown.items() if ids}
+    if unknown:
+        warnings.append(f'답 시트에 없는 answer_id가 {sum(map(len, unknown.values()))}개 있습니다'
+                        '(엑셀이 id를 숫자로 바꿨을 수 있음). unknown_ids를 확인하세요.')
     if len(graders) == 2:
         a, b = marked[graders[0]], marked[graders[1]]
         human, common = _compare(a, b)
@@ -121,7 +130,7 @@ def analyze(sheets, answers, ai_rows=None, final_rows=None, regrade_rows=None):
                         'dev': _ai_group([i for i in ids if author.get(i) == 'dev'], final, ai),
                         'all': _ai_group(ids, final, ai),
                         'missing_ai': sum(i not in ai for i in ids)}
-    return {'warnings': warnings, **report}
+    return {'warnings': warnings, 'unknown_ids': unknown, **report}
 
 
 # 역할: 채점자 1명일 때 재채점 시트; 채점이 끝난 답 중 최대 size개를 다른 seed로 골라 섞고 판정 칸을 비움
@@ -132,11 +141,6 @@ def regrade_sheet(rows, grader, size=REGRADE_SIZE):
     picked = rng.sample(picked, min(size, len(picked)))
     blank = {f'met_{k}': '' for k in range(1, RUBRIC_SLOTS + 1)} | {'overall_pass': '', 'note': ''}
     return [{column: ({**row, **blank}[column]) for column in SHEET_COLUMNS} for row in picked]
-
-
-def _read(path):
-    with open(path, encoding='utf-8-sig', newline='') as file:
-        return list(csv.DictReader(file))
 
 
 # 역할: 명령행 실행; 보고서를 쓰고, 다음 사람 작업에 필요한 파일(재채점 시트, 합의 라벨 칸)이 없으면 함께 만듦
@@ -152,11 +156,15 @@ def main(argv=None):
     out = args.out.resolve()
     if not out.is_relative_to(OUTPUT_ROOT) or out.exists():
         parser.error(f'--out은 {OUTPUT_ROOT} 아래의 새 파일이어야 합니다: {out}')
-    sheets = {path.stem: _read(path) for path in args.sheets}
-    answers = read_answers(args.answers)
-    report = analyze(sheets, answers, ai_rows=_read(args.ai) if args.ai else None,
-                     final_rows=_read(args.final) if args.final else None,
-                     regrade_rows=_read(args.regrade) if args.regrade else None)
+    # 사람이 엑셀로 채운 파일은 UTF-8·cp949 모두 읽고, 둘 다 아니면 저장 형식 안내로 멈춤(read_csv)
+    try:
+        sheets = {path.stem: read_csv(path) for path in args.sheets}
+        answers = read_answers(args.answers)
+        extra = {name: read_csv(path) if path else None
+                 for name, path in (('ai_rows', args.ai), ('final_rows', args.final), ('regrade_rows', args.regrade))}
+    except ValueError as exc:
+        parser.error(str(exc))
+    report = analyze(sheets, answers, **extra)
     if len(sheets) == 1 and not args.regrade:
         grader = next(iter(sheets))
         target = args.sheets[0].with_name(f'{grader}-regrade.csv')

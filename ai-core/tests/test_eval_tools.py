@@ -1,5 +1,6 @@
 # 파일 역할: 측정 도구(한국어 답 수집 시트, 장면 선택 성공률)가 채점 기준을 숨기고, 결과를 Git 밖에만 쓰며, 결과를 바르게 분류·집계하는지 검증
 import csv
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -44,11 +45,16 @@ class AnswerSheetTest(unittest.TestCase):
             self.assertTrue(all(row['question'] == item.question and row['concept'] == item.concept for row in mine))
         self.assertTrue(all(row['author'] == '' and row['answer'] == '' for row in rows))
 
-    # 검증: answer_id가 8자리이고 겹치지 않음; 채점 단계에서 답을 문항·작성자와 떼어 가리킬 키로 쓰기 때문
+    # 검증: answer_id가 'A' + 숫자 7자리이고 겹치지 않으며 숫자로 해석되지 않음
+    # - 채점 단계에서 답을 문항·작성자와 떼어 가리킬 키로 쓰기 때문
+    # - 엑셀이 숫자처럼 보이는 id(지수 표기·앞자리 0)를 바꿔 답이 조용히 빠지는 일을 막기 위함
     def test_answer_ids_unique(self):
         answer_sheet.main(['--out', str(self.out)])
         ids = [row['answer_id'] for row in read_sheet(self.out)]
-        self.assertTrue(all(len(value) == 8 for value in ids))
+        self.assertTrue(all(re.fullmatch(r'A\d{7}', value) for value in ids), ids[:3])
+        for value in ids:
+            with self.assertRaises(ValueError):
+                float(value)
         self.assertEqual(len(set(ids)), len(ids))
 
     # 검증: 엑셀에서 한글이 깨지지 않도록 파일이 UTF-8 BOM으로 시작함

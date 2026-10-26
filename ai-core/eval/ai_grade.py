@@ -15,7 +15,7 @@ if str(AI_CORE) not in sys.path:
 
 from openai import OpenAI  # noqa: E402
 
-from eval.grading_sheet import OUTPUT_ROOT, RUBRIC_SLOTS, read_answers  # noqa: E402
+from eval.grading_sheet import OUTPUT_ROOT, RUBRIC_SLOTS, read_answers, read_csv  # noqa: E402
 from serving.concept_map import load_concept_map  # noqa: E402
 from serving.item_bank import load_item_bank  # noqa: E402
 from serving.stuck import LLMUnavailable  # noqa: E402
@@ -57,16 +57,18 @@ def main(argv=None):
     out = args.out.resolve()
     if not out.is_relative_to(OUTPUT_ROOT):
         parser.error(f'--out은 {OUTPUT_ROOT} 아래여야 합니다: {out}')
-    done = set()
-    if out.exists():
-        with open(out, encoding='utf-8-sig', newline='') as file:
-            done = {r['answer_id'] for r in csv.DictReader(file)}
+    # 답 시트는 사람이 엑셀로 채워 cp949로 다시 저장했을 수 있어 read_csv로 읽음(둘 다 아니면 저장 형식 안내로 멈춤)
+    try:
+        answers = read_answers(args.answers)
+        done = {r['answer_id'] for r in read_csv(out)} if out.exists() else set()
+    except ValueError as exc:
+        parser.error(str(exc))
 
     def client():
         return OpenAI(base_url=args.base_url, api_key=os.getenv('VLLM_API_KEY', 'not-needed'), max_retries=0)
 
     gateway = StuckModelGateway(load_concept_map(), threading.Lock(), client_factory=client)
-    items, answers = load_item_bank(), read_answers(args.answers)
+    items = load_item_bank()
     out.parent.mkdir(parents=True, exist_ok=True)
     new_file = not out.exists()
     failed = []

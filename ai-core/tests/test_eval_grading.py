@@ -1,5 +1,9 @@
 # 파일 역할: 한국어 답 채점 도구(채점 시트·AI 채점·일치도)가 눈가림을 지키고, 채점자 수와 빈칸에 상관없이 지표를 바르게 내는지 검증
+import csv
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from eval import agreement, ai_grade, grading_sheet
 from eval.metrics import cohen_kappa
@@ -130,6 +134,65 @@ class AgreementTests(unittest.TestCase):
         self.assertEqual((groups['all']['passes'], groups['all']['fails']), (0, 7))
         self.assertEqual(list(report)[0], 'warnings')
         self.assertTrue(any('거짓 통과율 상한 기준 미달 가능' in w for w in report['warnings']))
+
+
+def write_csv(path, rows, encoding):
+    with open(path, 'w', encoding=encoding, newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+class ExcelSafetyTests(unittest.TestCase):
+    # 역할: 실제 ai-core/outputs/ 안 임시 폴더를 씀; 명령행 도구가 outputs 밖 경로를 거부하기 때문
+    def setUp(self):
+        grading_sheet.OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(dir=grading_sheet.OUTPUT_ROOT)
+        self.dir = Path(self.tmp.name)
+        self.answers = fake_answers()
+        self.answers[8]['answer_id'] = '1e5c3a20'  # MVP 2 답 시트의 16진수 id(하위 호환 확인용)
+        self.g1 = grading_sheet.build_sheet(self.answers, ITEMS, 'G1')
+        self.g2 = grading_sheet.build_sheet(self.answers, ITEMS, 'G2')
+        self.ids = sorted(scored_ids(self.g1))
+        fill(self.g1, {i: True for i in self.ids}), fill(self.g2, {i: True for i in self.ids})
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    # 검증: 엑셀이 답 시트·채점 시트를 cp949(ANSI)로 다시 저장해 돌려줘도 읽히고 보고서가 만들어짐
+    def test_reads_cp949_saved_sheets(self):
+        write_csv(self.dir / 'answers.csv', self.answers, 'cp949')
+        write_csv(self.dir / 'G1.csv', self.g1, 'cp949')
+        write_csv(self.dir / 'G2.csv', self.g2, 'utf-8-sig')
+        self.assertEqual(grading_sheet.read_csv(self.dir / 'G1.csv'), self.g1)
+        self.assertEqual(len(grading_sheet.read_answers([self.dir / 'answers.csv'])), 12)
+        agreement.main(['--sheets', str(self.dir / 'G1.csv'), str(self.dir / 'G2.csv'),
+                        '--answers', str(self.dir / 'answers.csv'), '--out', str(self.dir / 'report.json')])
+        report = json.loads((self.dir / 'report.json').read_text(encoding='utf-8'))
+        self.assertEqual(report['human']['compared'], len(self.ids))
+
+    # 검증: UTF-8도 cp949도 아닌 파일은 깨진 글자로 계산하지 않고, 저장 형식을 알려 주는 한국어 오류로 멈춤
+    def test_unreadable_encoding_reports_korean_error(self):
+        (self.dir / 'G1.csv').write_bytes(b'answer_id,practice\n\xff\xfe,0\n')
+        write_csv(self.dir / 'answers.csv', self.answers, 'utf-8-sig')
+        with self.assertRaisesRegex(ValueError, 'CSV UTF-8'):
+            grading_sheet.read_csv(self.dir / 'G1.csv')
+        with self.assertRaises(SystemExit):
+            agreement.main(['--sheets', str(self.dir / 'G1.csv'), '--answers', str(self.dir / 'answers.csv'),
+                            '--out', str(self.dir / 'report.json')])
+
+    # 검증: 엑셀이 바꾼 id(예: 지수 표기)는 답 시트와 짝이 맞지 않으므로 조용히 빠지지 않고 unknown_ids와 경고로 드러남
+    # - 기존 16진수 id(1e5c3a20)는 바뀌지 않은 한 정상으로 처리됨(하위 호환)
+    def test_unknown_ids_reported(self):
+        changed = next(r for r in self.g1 if r['answer_id'] == self.ids[0])
+        changed['answer_id'] = '1.23E+11'
+        ai_rows = [{'answer_id': i, 'overall_pass': '1'} for i in self.ids] + [{'answer_id': '4.56E+07', 'overall_pass': '1'}]
+        report = agreement.analyze({'G1': self.g1, 'G2': self.g2}, self.answers, ai_rows=ai_rows)
+        self.assertEqual(report['unknown_ids'], {'G1': ['1.23E+11'], 'ai': ['4.56E+07']})
+        self.assertTrue(any('답 시트에 없는 answer_id' in w for w in report['warnings']))
+        self.assertIn('1e5c3a20', self.ids)
+        clean = agreement.analyze({'G1': grading_sheet.build_sheet(self.answers, ITEMS, 'G1')}, self.answers)
+        self.assertEqual(clean['unknown_ids'], {})
 
 
 class AiGradeTests(unittest.TestCase):
