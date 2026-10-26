@@ -194,7 +194,7 @@ def expected_answers(items):
         'exp-bst-B1': join(sorted(leaves(bst(numbers_in(q['exp-bst-B1'].split(':')[1].split('.')[0]))))),
         'exp-heap-A1': join(heap_a),
         'exp-heap-B1': join(heap_b),
-        'exp-quick-sort-A1': join(qa[:pa]),
+        'exp-quick-sort-A1': join(qa[pa + 1:]),  # A·B 모두 피벗 오른쪽: 왼쪽은 작은 값을 원래 순서대로 적기만 해도 맞아 교환을 따라가지 않아도 됨
         'exp-quick-sort-B1': join(qb[pb + 1:]),
         'exp-merge-sort-A1': join(v for i in range(0, len(ma), 2) for v in merge_sort(ma[i:i + 2])),  # 크기 2로 나눠 병합한 단계
         'exp-merge-sort-B1': join(v for i in range(0, len(mb), 2) for v in merge_sort(mb[i:i + 2])),
@@ -213,6 +213,7 @@ def expected_choices():
     absent = [k + 0.5 for k in range(0, 1024)]  # 키 사이의 없는 값을 모두 시도
     tree = parents(32)
     return {
+        'exp-hash-table-A2': str(13 % 8),  # 재해싱: 버킷 4개에서 1번이던 키 13의 새 버킷
         'exp-bst-A2': str(max(comparisons(sorted_tree, k) for k in absent)),
         'exp-bst-B2': str(max(comparisons(low_tree, k) for k in absent)),
         'exp-heap-A2': str(next(c for c, p in tree.items() if p == tree[13] and c != 13)),
