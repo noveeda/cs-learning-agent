@@ -94,7 +94,7 @@ def expected_answers(items):
         'hash-function-d1': join(k % 7 for k in (50, 23, 64)),
         'hash-function-c1': join(sum(letters[c] for c in key) % 11 for key in ('cab', 'dog')),
         'hash-function-c2': sum(k % 8 == 3 for k in (3, 11, 19, 6, 27)),
-        'hash-table-d1': join(chain([12, 7, 3, 17, 22], 5)[2]),
+        'hash-table-d1': join(chain([14, 9, 20, 3, 26, 8], 6)[2]),
         'hash-table-c1': found_in.index(21) + 1,
         'hash-table-c2': join([20 / 8, 20 / 16]),
     }
