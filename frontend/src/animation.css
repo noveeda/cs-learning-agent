@@ -6,10 +6,10 @@
 .animation-canvas { display: block; width: 100%; height: auto; margin: 0 auto; overflow: visible; }
 .animation-box { transition: transform 300ms ease; }
 .animation-box rect { fill: var(--color-surface); stroke: var(--color-text); stroke-width: 2; transition: fill 300ms ease, stroke 300ms ease, opacity 300ms ease; }
-/* 글자 크기는 viewBox 단위라 화면이 좁으면 함께 줄어듦; 9칸 배열을 375px에 줄여도 읽히도록 크게 둠 */
-.animation-box text { font-size: 20px; text-anchor: middle; dominant-baseline: central; fill: var(--color-text); }
+/* 글자 크기는 viewBox 단위라 화면이 좁으면 함께 줄어듦; 가장 넓은 12칸 장면을 344~375px 패널에 줄여도 약 10px 이상으로 읽히도록 크게 둠 */
+.animation-box text { font-size: 26px; text-anchor: middle; dominant-baseline: central; fill: var(--color-text); }
 .animation-box.shape-slot rect { stroke-dasharray: 4 3; stroke: var(--color-muted); }
-.animation-box.shape-label text { font-size: 15px; fill: var(--color-muted); }
+.animation-box.shape-label text { font-size: 18px; fill: var(--color-muted); }
 .animation-box.tone-active rect { fill: var(--color-primary-soft); stroke: var(--color-primary); }
 .animation-box.tone-new rect { fill: var(--color-primary-soft); stroke: var(--color-primary); stroke-width: 2.5; }
 .animation-box.tone-removed rect { stroke: var(--color-error); stroke-dasharray: 4 3; opacity: .55; }

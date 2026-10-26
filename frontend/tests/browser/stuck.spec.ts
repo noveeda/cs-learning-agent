@@ -573,6 +573,15 @@ test("보충 애니메이션: 375px에서 가로 스크롤 없이 축소되고 �
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= 375),
   ).toBe(true);
+  // 줄어든 뒤 화면에 보이는 상자 글자 크기(viewBox 글자 크기 × 축소 비율)가 12px 이상이어야 숫자를 읽을 수 있음
+  const shown = await player.locator(".animation-canvas").evaluate((svg) => {
+    const text = svg.querySelector(".shape-cell text")!;
+    const scale =
+      svg.getBoundingClientRect().width /
+      (svg as SVGSVGElement).viewBox.baseVal.width;
+    return parseFloat(getComputedStyle(text).fontSize) * scale;
+  });
+  expect(shown).toBeGreaterThanOrEqual(12);
   // 검수용 화면 기록(test-results는 Git 제외)
   await page.screenshot({ path: test.info().outputPath("animation-375.png") });
   await player.getByRole("button", { name: "다음 단계" }).click();
