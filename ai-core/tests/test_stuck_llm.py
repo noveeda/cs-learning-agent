@@ -88,8 +88,9 @@ class RequestShapeTests(unittest.TestCase):
 
     # 검증 목적: 모델 선택 결과(docs/model-selection.md 7절)의 역할별 샘플링·분량·시간이 실제 요청 인자로 나가는지 확인
     # - 판정 역할(①③)은 결정적으로 temperature 0, 생성 역할(②④)은 Gemma 4 권장 샘플링(top_k는 vLLM 확장 인자라 extra_body)
+    # - ② explain은 사실 오류를 줄이려고 temperature만 0.7로 낮춤(docs/model-selection.md 7절)
     def test_role_requests_follow_model_selection(self):
-        expected = {'identify': (0.0, None, None, 64, 30), 'explain': (1.0, 0.95, 64, 1536, 60),
+        expected = {'identify': (0.0, None, None, 64, 30), 'explain': (0.7, 0.95, 64, 1536, 60),
                     'grade_explanation': (0.0, None, None, 1024, 30), 'summarize': (1.0, 0.95, 64, 512, 30)}
         client = happy_client()
         state = run_session(self, {'kind': 'excerpt', 'excerpt': '스택의 pop이 이해가 안 돼요', 'return_to': '/x'}, client)
@@ -126,6 +127,20 @@ class RequestShapeTests(unittest.TestCase):
         for i in ITEMS:
             if i.concept == 'adt':
                 self.assertNotIn(i.rationale, sent)
+
+    # 검증 목적: 보충 설명 사실 오류(PR #38 검수: 모델이 즉석에서 만든 수치 예시 오류, 3차 '오해 바로잡기'에서 정의 반전)를 막는 지시가 빠지지 않는지 확인
+    # - 모든 차수: 개념 설명·학습 목표를 사실 근거로 삼고, 새 수치 계산 예시를 만들지 않음
+    # - 2차: 단계별 예시는 원소를 작게 두고 단계마다 상태를 적은 뒤 다시 셈(재측정에서 이동 횟수 오류)
+    # - 3차: 정의를 먼저 정확히 다시 말하고, 오해와 사실을 분명히 나눠 씀
+    def test_explain_prompt_guards_against_factual_errors(self):
+        prompt = PROMPTS['explain']
+        self.assertIn('concept.description과 concept.objectives', prompt)
+        self.assertIn('새 수치를 만들어 계산하는 예시는 쓰지 않는다', prompt)
+        self.assertIn('정의를 한 문장으로 다시 정확히 말한 뒤', EXPLAIN_APPROACHES[3])
+        self.assertIn("'~라고 생각하기 쉽지만 실제로는 ~이다'", EXPLAIN_APPROACHES[3])
+        self.assertIn('새 수치 계산 예시는 넣지 않는다', EXPLAIN_APPROACHES[3])
+        self.assertIn('정의를 말할 때는 concept.description 문장을 거의 그대로 쓴다', prompt)
+        self.assertIn('적어 둔 상태를 다시 세어 맞는지 확인한다', EXPLAIN_APPROACHES[2])
 
     # 검증 목적: 서술 채점이 루브릭 항목 수로 길이를 고정한 criteria 배열 schema를 걸고, 결과를 루브릭 순서의 list[bool]로 돌려주는지 확인
     def test_grade_explanation_keeps_rubric_order(self):

@@ -39,10 +39,11 @@ MODEL_LIST_TIMEOUT = 10
 # 역할별 설정 표; 모델 선택 결과(docs/model-selection.md 7절, gemma-4-26B-A4B-it AWQ, 추론 끔)를 적용
 # - 판정 역할(identify·grade_explanation)은 같은 입력에 같은 판정이 나오도록 temperature 0
 # - 생성 역할(explain·summarize)은 Gemma 4 권장 샘플링(temperature 1.0, top_p 0.95, top_k 64)
+# - explain만 temperature 0.7: 1.0에서 즉석 수치 예시·정의 반전 같은 사실 오류가 나와(PR #38 검수 4/66) 프롬프트 보강과 함께 낮춤(재측정 2/99)
 # - max_tokens는 시험에서 정상 출력이 잘리지 않은 상한, timeout은 측정 지연(①0.2·②2.8·③0.5·④0.9초)에 여유를 둔 값
 ROLE_SETTINGS = {
     'identify': RoleSettings(model=None, temperature=0.0, thinking=False, max_tokens=64, timeout=30, attempts=2),
-    'explain': RoleSettings(model=None, temperature=1.0, top_p=0.95, top_k=64, thinking=False, max_tokens=1536, timeout=60, attempts=2),
+    'explain': RoleSettings(model=None, temperature=0.7, top_p=0.95, top_k=64, thinking=False, max_tokens=1536, timeout=60, attempts=2),
     'grade_explanation': RoleSettings(model=None, temperature=0.0, thinking=False, max_tokens=1024, timeout=30, attempts=2),
     'summarize': RoleSettings(model=None, temperature=1.0, top_p=0.95, top_k=64, thinking=False, max_tokens=512, timeout=30, attempts=2),
 }
@@ -56,7 +57,10 @@ PROMPTS = {
     'explain': COMMON + ' 작업: 학습자가 이해하지 못한 개념 하나를 짧게 보충 설명한다. '
                '300~600자 정도로 쓰고, 마크다운 제목(#)은 쓰지 않고 짧은 문단이나 목록으로 쓴다. 학습 목표를 확인할 수 있게 핵심부터 설명한다. '
                '선수 개념에 기대는 부분은 그 연결을 먼저 짚고, 구체적인 예시를 하나 이상 넣는다. '
-               '사실과 다른 내용을 쓰지 않는다. 비유나 다른 말로 바꿔 설명할 때도 개념의 정의와 어긋나는 문장이 없는지 확인한다. '
+               '사실의 근거는 입력의 concept.description과 concept.objectives다. 그 내용을 뒤집거나 어긋나는 문장을 쓰지 않고, '
+               '비유나 다른 말로 바꿔 설명할 때도 정의와 맞는지 확인한다. 정의를 말할 때는 concept.description 문장을 거의 그대로 쓴다. '
+               '예시는 상황과 순서로 보여 주고, 새 수치를 만들어 계산하는 예시는 쓰지 않는다. '
+               '학습 목표에 계산이 들어 있어 수치가 꼭 필요하면 작은 수로 한 번만 쓰고, 계산식을 모두 적은 뒤 결과를 다시 확인한다. '
                '연습 문제를 내거나 풀지 않고, 도식·코드 실행은 쓰지 않는다.',
     'grade_explanation': COMMON + ' 작업: 학습자의 서술 답이 채점 기준 각 항목의 핵심 내용을 담았는지 항목별로 판정한다. '
                          '길이·말솜씨·맞춤법이 아니라 핵심 요소가 맞게 들어 있는지만 본다. 표현이 달라도 뜻이 같으면 충족이다. '
@@ -75,10 +79,15 @@ OUTCOME_LABELS = {'passed': '이해 확인 통과', 'unresolved': '아직 이해
                   'unchecked': '확인 문항이 없어 확인하지 않음', 'pending': '진행 전'}
 
 # 재보충 때 같은 설명을 반복하지 않도록 시도 횟수마다 설명 방식을 바꿈(MAX_RETRIES 2 → 최대 3번째 시도)
+# - 2차 문구: 단계별 예시에서 이동 횟수·원소 수를 잘못 세는 오류가 있어(재측정) 원소 수를 작게 두고 단계마다 상태를 적은 뒤 다시 세게 함
+# - 3차 문구: '비유와 오해 바로잡기'만 지시하면 오해를 사실처럼 쓰거나 정의를 뒤집는 오류가 몰려(PR #38 검수 3/22) 정의 재진술·오해와 사실 구분·수치 예시 금지를 명시
 EXPLAIN_APPROACHES = {
     1: '정의와 핵심 원리를 먼저 말하고 예시 하나로 확인한다.',
-    2: '앞선 설명으로 이해하지 못했다. 이번에는 구체적인 작은 예시를 한 단계씩 따라가며 설명하고 정의는 마지막에 정리한다.',
-    3: '두 번의 설명으로도 이해하지 못했다. 일상적인 비유와 학습자가 흔히 하는 오해를 바로잡는 방식으로 설명한다.',
+    2: ('앞선 설명으로 이해하지 못했다. 이번에는 원소 두세 개짜리 작은 예시 하나를 한 단계씩 따라가며 설명하고, 각 단계 뒤의 상태를 직접 적는다. '
+        '몇 개·몇 번이라고 말할 때는 적어 둔 상태를 다시 세어 맞는지 확인한다. 정의는 마지막에 정리한다.'),
+    3: ('두 번의 설명으로도 이해하지 못했다. 이번에는 정의를 한 문장으로 다시 정확히 말한 뒤, 일상적인 비유 하나로 설명한다. '
+        "학습자가 흔히 하는 오해를 다룰 때는 '~라고 생각하기 쉽지만 실제로는 ~이다'처럼 틀린 생각과 맞는 사실을 분명히 나눠 쓴다. "
+        '새 수치 계산 예시는 넣지 않는다.'),
 }
 
 
