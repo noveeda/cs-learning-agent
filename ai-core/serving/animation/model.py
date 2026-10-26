@@ -1,6 +1,6 @@
 # 파일 역할: 단계별 애니메이션의 프레임 스키마(Box·Arrow·Frame·Animation)와 모델이 고르는 장면 요청 스키마
 # - 모델은 장면 종류와 연산 입력(AnimationRequest)만 고름
-# - 프레임은 시뮬레이터(linear.py·hierarchical.py·graph.py·sorting.py)가 연산을 실제로 실행해 만듦. 모델이 상태를 지어내면 틀린 그림을 잡을 수 없기 때문
+# - 프레임은 시뮬레이터(linear.py·hierarchical.py·graph.py·sorting.py·scheduling.py)가 연산을 실제로 실행해 만듦. 모델이 상태를 지어내면 틀린 그림을 잡을 수 없기 때문
 # - 프레임 JSON은 artifact 이벤트·막힘 view로 프런트엔드 재생기에 그대로 전달됨
 """Animation frame and scene request schemas."""
 from typing import Annotated, Literal, Union
@@ -257,10 +257,48 @@ class TreeTraversalRequest(Strict):
     order: Literal['preorder', 'inorder', 'postorder']
 
 
+# 역할: CPU 스케줄링 장면의 프로세스 하나
+# - 도착 0~9·실행 1~6은 총 길이가 간트 12칸 안에 들어가도록 고른 범위
+# - priority는 숫자가 작을수록 먼저 실행. priority 알고리즘에서만 쓰고 다른 알고리즘에서는 무시함
+class Proc(Strict):
+    name: Literal['P1', 'P2', 'P3', 'P4', 'P5']
+    arrival: int = Field(ge=0, le=9)
+    burst: int = Field(ge=1, le=6)
+    priority: int | None = Field(default=None, ge=1, le=5)
+
+
+# 역할: CPU 스케줄링 간트 차트 장면. 비선점 FCFS·SJF·우선순위와 RR만 다룸(선점 SRTF는 범위 밖)
+# - quantum은 rr에서만 씀. 다른 알고리즘에서 받은 값은 무시함
+#   형식 예시 하나(quantum·priority 포함)를 개념별 알고리즘 제한으로 바꿔 써도 그대로 유효하게 하기 위함
+class CpuScheduleRequest(Strict):
+    kind: Literal['cpu_schedule']
+    algorithm: Literal['fcfs', 'sjf', 'rr', 'priority']
+    processes: list[Proc] = Field(min_length=1, max_length=5)
+    quantum: int | None = Field(default=None, ge=1, le=4)
+
+    # 역할: 이름 중복, rr의 quantum 누락, priority의 우선순위 누락, 간트 칸 수 초과를 거부
+    # - 총 길이는 도착 순으로 실행해 계산: 쉬지 않는 스케줄러는 알고리즘과 관계없이 마지막 종료 시각이 같음
+    @model_validator(mode='after')
+    def validate_schedule(self):
+        names = [p.name for p in self.processes]
+        if len(set(names)) != len(names):
+            raise ValueError('프로세스 이름이 중복되었습니다')
+        if self.algorithm == 'rr' and self.quantum is None:
+            raise ValueError('rr에는 quantum(1~4)이 필요합니다')
+        if self.algorithm == 'priority' and any(p.priority is None for p in self.processes):
+            raise ValueError('priority 알고리즘은 모든 프로세스에 priority(1~5)가 필요합니다')
+        end = 0
+        for p in sorted(self.processes, key=lambda p: (p.arrival, p.name)):
+            end = max(end, p.arrival) + p.burst
+        if end > GRID_WIDTH:
+            raise ValueError(f'총 길이 {end}: 간트 칸 {GRID_WIDTH}칸을 넘습니다. 실행 시간이나 도착 시각을 줄이세요')
+        return self
+
+
 # 모델이 고르는 장면 요청 전체. kind 값으로 요청 타입을 구분함
 AnimationRequest = Annotated[
     Union[ArrayRequest, LinkedListRequest, StackRequest, QueueRequest, HashTableRequest, BSTRequest, HeapRequest,
-          GraphTraversalRequest, SortRequest, TreeTraversalRequest],
+          GraphTraversalRequest, SortRequest, TreeTraversalRequest, CpuScheduleRequest],
     Field(discriminator='kind')]
 
 
