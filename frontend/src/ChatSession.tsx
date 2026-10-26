@@ -11,10 +11,12 @@ import {
   X,
 } from "lucide-react";
 import {
+  artifactNoun,
   artifactTitle,
   isAnimationArtifact,
   requestChat,
   loadConversation,
+  toolProgress,
   type AnimationArtifact,
   type ChatArtifact,
   type Message,
@@ -40,7 +42,7 @@ function AnimationPanel({
     <aside className="artifact-panel card" aria-label="생성된 애니메이션">
       <div className="panel-header">
         <div>
-          <span className="eyebrow">단계별 그림</span>
+          <span className="eyebrow">학습 애니메이션</span>
           <h2>{artifact.animation.title}</h2>
         </div>
         <button
@@ -150,7 +152,7 @@ export function ChatSession({
       if (event.type === "context")
         setContextNotice(
           event.dropped_messages
-            ? `대화는 모두 저장돼 있어요. 이번 답변에는 토큰 한도에 맞는 최근 대화와 활성 도식을 사용해요.`
+            ? `대화는 모두 저장돼 있어요. 이번 답변에는 토큰 한도에 맞는 최근 대화${artifact ? `와 활성 ${artifactNoun(artifact)}을` : "를"} 사용해요.`
             : "",
         );
       if (event.type === "text_start" || event.type === "tool_started") {
@@ -162,10 +164,11 @@ export function ChatSession({
         setDraft(partialAnswer);
         setStatus("답변을 작성하고 있어요");
       }
+      // 결과가 도식인지 애니메이션인지는 도구 이름으로만 미리 알 수 있음
       if (event.type === "tool_started")
-        setStatus("개념을 도식으로 정리하고 있어요");
+        setStatus(toolProgress(event.name, false));
       if (event.type === "tool_error")
-        setStatus("도식의 연결을 다시 확인하고 있어요");
+        setStatus(toolProgress(event.name, true));
       if (event.type === "artifact") {
         setArtifact(event);
         setPanelOpen(true);
@@ -262,7 +265,7 @@ export function ChatSession({
               onClick={() => setPanelOpen(true)}
             >
               <PanelRightOpen size={16} aria-hidden="true" />
-              도식 열기
+              {artifactNoun(artifact)} 열기
             </button>
           )}
         </div>
@@ -383,7 +386,7 @@ export function ChatSession({
                 </button>
               )}
               {artifact && (
-                <span> 생성된 도식은 도식 패널에서 확인할 수 있습니다.</span>
+                <span>{` 생성된 ${artifactNoun(artifact)}은 ${artifactNoun(artifact)} 패널에서 확인할 수 있습니다.`}</span>
               )}
             </div>
           )}
@@ -421,7 +424,8 @@ export function ChatSession({
             />
             <div className="composer-footer">
               <span>
-                <Layers aria-hidden="true" size={14} /> 필요할 때 도식으로
+                <Layers aria-hidden="true" size={14} /> 필요할 때
+                도식·애니메이션으로
               </span>
               <button
                 className="send"
@@ -456,8 +460,8 @@ export function ChatSession({
             <h2>그림으로 연결해요</h2>
             <p>
               {artifact
-                ? "생성한 도식을 다시 열어 설명과 함께 살펴보세요."
-                : "도식이 생성되면 이 공간에서 확인할 수 있어요."}
+                ? `생성한 ${artifactNoun(artifact)}을 다시 열어 설명과 함께 살펴보세요.`
+                : "도식이나 애니메이션이 생성되면 이 공간에서 확인할 수 있어요."}
             </p>
             {artifact && (
               <button
@@ -465,7 +469,7 @@ export function ChatSession({
                 onClick={() => setPanelOpen(true)}
               >
                 <PanelRightOpen size={16} aria-hidden="true" />
-                도식 열기
+                {artifactNoun(artifact)} 열기
               </button>
             )}
           </section>

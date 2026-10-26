@@ -1,7 +1,7 @@
 // 파일 역할: 네트워크 조각 경계와 중단·도식 이벤트 및 대화 복구를 UI 없이 검증
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { artifactTitle, isAnimationArtifact, requestChat, loadConversation } from '../src/api.ts';
+import { artifactNoun, artifactTitle, isAnimationArtifact, requestChat, loadConversation, toolProgress } from '../src/api.ts';
 
 // 역할: 일부러 응답을 조각내 한글 바이트와 JSON 줄 경계 처리 검증
 function stream(text) {
@@ -129,4 +129,19 @@ test('restores animation artifacts and tells them apart from diagrams', async (t
   const diagram = { artifact_id: 'diagram', url: '/api/artifacts/diagram', diagram: { title: '도식' } };
   assert.equal(isAnimationArtifact(diagram), false);
   assert.equal(artifactTitle(diagram), '도식');
+});
+
+// 검증 목적: 패널·버튼 문구가 artifact 종류에 맞는 이름(도식·애니메이션)을 쓰는지 확인
+test('names artifacts by kind', () => {
+  assert.equal(artifactNoun(animationArtifact), '애니메이션');
+  assert.equal(artifactNoun({ artifact_id: 'd', url: '/api/artifacts/d', diagram: { title: '도식' } }), '도식');
+});
+
+// 검증 목적: 도구 진행 안내가 이벤트의 도구 이름으로 갈려, 애니메이션을 만드는 동안 "도식"이라고 안내하지 않는지 확인
+test('describes tool progress by tool name', () => {
+  assert.match(toolProgress('show_animation', false), /애니메이션/);
+  assert.match(toolProgress('show_animation', true), /애니메이션/);
+  assert.match(toolProgress('create_diagram', false), /도식/);
+  assert.match(toolProgress('create_diagram', true), /도식/);
+  assert.doesNotMatch(toolProgress('show_animation', false), /도식/);
 });

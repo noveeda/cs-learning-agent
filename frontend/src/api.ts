@@ -13,7 +13,7 @@ export type AgentEvent =
   | { type: 'started' | 'done' | 'text_start' }
   | { type: 'tool_started'; name: string }
   | { type: 'tool_finished'; name: string; ok: boolean }
-  | { type: 'tool_error'; error: string }
+  | { type: 'tool_error'; name?: string; error: string }
   | ({ type: 'artifact' } & ChatArtifact)
   | { type: 'answer' | 'text_delta'; text: string }
   | { type: 'context'; input_tokens: number; dropped_messages: number; context_limit: number }
@@ -27,6 +27,20 @@ export function isAnimationArtifact(artifact: ChatArtifact): artifact is Animati
 // 역할: 대화 속 artifact 버튼·패널 제목; 종류마다 제목이 담긴 위치가 달라 한곳에서 꺼냄
 export function artifactTitle(artifact: ChatArtifact): string {
   return isAnimationArtifact(artifact) ? artifact.animation.title : artifact.diagram.title;
+}
+
+// 역할: 패널 열기 버튼·안내 문구에 쓰는 artifact 종류 이름
+export function artifactNoun(artifact: ChatArtifact): '도식' | '애니메이션' {
+  return isAnimationArtifact(artifact) ? '애니메이션' : '도식';
+}
+
+// 역할: 도구 호출 진행 이벤트를 사용자 안내 문구로 바꿈
+// - 결과 artifact가 오기 전이라 종류를 모르므로 이벤트의 도구 이름(name)으로 도식·애니메이션을 구분
+// - failed: 도구 입력이 검증에 실패해 모델이 고쳐 다시 부르는 중(tool_error)
+export function toolProgress(name: string | undefined, failed: boolean): string {
+  if (name === 'show_animation')
+    return failed ? '애니메이션 단계를 다시 확인하고 있어요' : '연산 과정을 애니메이션으로 만들고 있어요';
+  return failed ? '도식의 연결을 다시 확인하고 있어요' : '개념을 도식으로 정리하고 있어요';
 }
 
 // 응답에서 화면이 쓰는 필드만 꺼내기 위한 최소 형태; 그래프 규칙 검증은 AI core가 담당

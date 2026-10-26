@@ -211,6 +211,14 @@ test("애니메이션 artifact: 복구·단계 이동·수정 요청에 artifact
   await expect(page.locator(".artifact-chip")).toContainText("스택 push·pop");
   await panel.getByRole("button", { name: "다음 단계" }).click();
   await expect(panel).toContainText("push 1: 1을 top 위에 올립니다");
+  // 세로 가운데 정렬이면 짧은 장면 위로 빈 점무늬 영역이 크게 남으므로 재생기가 무대 위쪽에 붙어 있는지 확인
+  const stage = await panel.locator(".diagram-stage").boundingBox();
+  const player = await panel.locator(".animation-player").boundingBox();
+  expect(player!.y - stage!.y).toBeLessThan(40);
+  // 입력 안내는 다음 결과의 종류를 모르므로 두 종류를 함께 알림
+  await expect(page.locator(".composer-footer")).toContainText(
+    "도식·애니메이션",
+  );
   // 검수용 화면 기록(test-results는 Git 제외)
   await panel.screenshot({
     path: test.info().outputPath("chat-animation.png"),
@@ -231,6 +239,10 @@ test("애니메이션 artifact: 복구·단계 이동·수정 요청에 artifact
   await panel.getByRole("button", { name: "애니메이션 닫기" }).click();
   await expect(page.locator(".artifact-panel")).toHaveCount(0);
   await expect(input).toBeFocused();
+  // 닫은 뒤 다시 여는 버튼도 "도식"이 아니라 종류에 맞는 이름을 씀
+  await expect(
+    page.getByRole("button", { name: "애니메이션 열기" }).first(),
+  ).toBeVisible();
   expect(svgRequests).toEqual([]);
 });
 
