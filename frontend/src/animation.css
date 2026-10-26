@@ -14,7 +14,8 @@
 /* 글자 크기는 viewBox 단위라 화면이 좁으면 함께 줄어듦; 가장 넓은 12칸 장면을 344~375px 패널에 줄여도 약 10px 이상으로 읽히도록 크게 둠 */
 .animation-box text { font-size: 26px; text-anchor: middle; dominant-baseline: central; fill: var(--color-text); }
 .animation-box.shape-slot rect { stroke-dasharray: 4 3; stroke: var(--color-muted); }
-.animation-box.shape-label text { font-size: 18px; fill: var(--color-muted); }
+/* 이름표(top·front·방문·queue)는 테두리가 없어 칸 폭을 다 쓸 수 있음; 9칸 그래프 장면을 막힘 패널 폭(약 300px)으로 줄여도 10px 이상이 되게 함 */
+.animation-box.shape-label text { font-size: 20px; fill: var(--color-muted); }
 .animation-box.tone-active rect { fill: var(--color-primary-soft); stroke: var(--color-primary); }
 .animation-box.tone-new rect { fill: var(--color-primary-soft); stroke: var(--color-primary); stroke-width: 2.5; }
 .animation-box.tone-removed rect { stroke: var(--color-error); stroke-dasharray: 4 3; opacity: .55; }

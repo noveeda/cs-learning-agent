@@ -119,7 +119,12 @@ export function AnimationPlayer({ animation }: { animation: AnimationData }) {
             const line = arrowLine(source, target);
             return (
               <g key={`${arrow.source}-${arrow.target}`}>
-                <line {...line} markerEnd={`url(#${markerId})`} />
+                <line
+                  {...line}
+                  markerEnd={
+                    arrow.head === false ? undefined : `url(#${markerId})`
+                  }
+                />
                 {arrow.label && (
                   <text
                     x={(line.x1 + line.x2) / 2}

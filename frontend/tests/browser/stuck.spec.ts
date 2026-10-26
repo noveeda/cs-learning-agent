@@ -160,14 +160,14 @@ const arrayInsert = {
   ],
 };
 
-// AI core 시뮬레이터(PR #65 simulate)가 만든 무방향 그래프 BFS(정점 5개·간선 5개, 시작 A) 결과를 같은 값으로 다시 구성
-// - 가로 10칸이라 휴대폰 폭에서 크게 줄어드는 장면이고, 무방향 간선은 양쪽 방향 화살표 두 개로 옴
+// AI core 시뮬레이터(simulate)가 만든 무방향 그래프 BFS(정점 5개·간선 5개, 시작 A) 결과를 같은 값으로 다시 구성
+// - 정점은 오각형 자리(가로 9칸)에 놓이고, 무방향 간선은 화살촉 없는 선(head: false) 하나로 옴
 const graphNodes: [string, number, number][] = [
-  ["A", 3, 0],
-  ["B", 9, 2],
-  ["C", 1, 3],
-  ["D", 9, 3],
-  ["E", 3, 5],
+  ["A", 4, 0],
+  ["B", 8, 2],
+  ["C", 0, 2],
+  ["D", 6, 5],
+  ["E", 2, 5],
 ];
 const graphEdges = [
   [0, 1],
@@ -175,10 +175,12 @@ const graphEdges = [
   [1, 3],
   [1, 4],
   [2, 4],
-].flatMap(([a, b]) => [
-  { source: `n${a}`, target: `n${b}`, label: null },
-  { source: `n${b}`, target: `n${a}`, label: null },
-]);
+].map(([a, b]) => ({
+  source: `n${a}`,
+  target: `n${b}`,
+  label: null,
+  head: false,
+}));
 const bfsQueues = [
   ["A"],
   ["B", "C"],
@@ -707,24 +709,29 @@ test("그래프 BFS 장면: 375px에서 가로 스크롤 없이 축소되고 다
   const player = panel(page).locator(".animation-player");
   await expect(player).toContainText("시작 정점 A부터 BFS");
   await expect(player).toContainText("1 / 7");
-  // 가로 10칸(640) 장면도 패널 폭 안으로 줄고 페이지에 가로 스크롤이 생기지 않음
+  // 가로 9칸(576) 장면이 패널 폭 안으로 줄고 페이지에 가로 스크롤이 생기지 않음
   const canvas = await player.locator(".animation-canvas").boundingBox();
   expect(canvas!.x).toBeGreaterThanOrEqual(0);
   expect(canvas!.x + canvas!.width).toBeLessThanOrEqual(375);
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= 375),
   ).toBe(true);
-  // 줄어든 뒤에도 정점 이름이 12px 이상으로 읽혀야 함
-  const shown = await player.locator(".animation-canvas").evaluate((svg) => {
-    const text = svg.querySelector(".shape-node text")!;
-    const scale =
-      svg.getBoundingClientRect().width /
-      (svg as SVGSVGElement).viewBox.baseVal.width;
-    return parseFloat(getComputedStyle(text).fontSize) * scale;
-  });
-  expect(shown).toBeGreaterThanOrEqual(12);
-  // 무방향 간선 5개는 양쪽 방향 화살표 10개로 그려짐(재생기는 받은 화살표를 그대로 그림)
-  await expect(player.locator(".animation-arrows line")).toHaveCount(10);
+  // 줄어든 뒤 화면 글자 크기(viewBox 글자 크기 × 축소 비율): 정점 이름 12px, 이름표('방문'·'queue') 10px 이상
+  const shownSize = (shape: string) =>
+    player.locator(".animation-canvas").evaluate((svg, selector) => {
+      const text = svg.querySelector(`${selector} text`)!;
+      const scale =
+        svg.getBoundingClientRect().width /
+        (svg as SVGSVGElement).viewBox.baseVal.width;
+      return parseFloat(getComputedStyle(text).fontSize) * scale;
+    }, `.shape-${shape}`);
+  expect(await shownSize("node")).toBeGreaterThanOrEqual(12);
+  expect(await shownSize("label")).toBeGreaterThanOrEqual(10);
+  // 무방향 간선 5개는 화살촉 없는 선 5개로 그려짐(반대 방향 화살표 두 개가 겹치지 않음)
+  await expect(player.locator(".animation-arrows line")).toHaveCount(5);
+  await expect(
+    player.locator(".animation-arrows line[marker-end]"),
+  ).toHaveCount(0);
   await player.getByRole("button", { name: "다음 단계" }).click();
   await expect(player).toContainText("A 방문 → 큐 앞에서 꺼냄");
   await expect(player).toContainText("2 / 7");
@@ -738,6 +745,9 @@ test("그래프 BFS 장면: 375px에서 가로 스크롤 없이 축소되고 다
   // 검수용 화면 기록(test-results는 Git 제외)
   await page.screenshot({ path: test.info().outputPath("graph-bfs-375.png") });
   await page.setViewportSize({ width: 1440, height: 900 });
+  // 넓은 화면에서도 막힘 패널 폭은 비슷해 같은 기준을 지켜야 함
+  expect(await shownSize("node")).toBeGreaterThanOrEqual(12);
+  expect(await shownSize("label")).toBeGreaterThanOrEqual(10);
   await page.screenshot({ path: test.info().outputPath("graph-bfs-1440.png") });
   await player.getByRole("button", { name: "이전 단계" }).click();
   await expect(player).toContainText("1 / 7");
