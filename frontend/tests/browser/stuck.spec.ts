@@ -8,6 +8,20 @@ const conceptMap = JSON.parse(
     "utf8",
   ),
 );
+// 지도 파일에는 없고 AI core가 문항 은행에서 계산해 붙이는 막힘 지원 목록(현재 선형 구조 11개)
+const stuckSupported = [
+  "memory-address",
+  "reference",
+  "logarithm",
+  "big-o",
+  "complexity-analysis",
+  "array",
+  "dynamic-array",
+  "linked-list",
+  "adt",
+  "stack",
+  "queue",
+];
 const stuckKey = "cs-stuck-sessions-v1";
 const sessionId = "0123456789abcdef0123456789abcdef";
 // "처음부터 다시"로 새로 만든 세션은 다른 ID를 받음
@@ -167,7 +181,7 @@ async function mockStuck(page: Page, start: Reply, steps: Reply[]) {
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/concept-map", (route) =>
-    route.fulfill({ json: conceptMap }),
+    route.fulfill({ json: { ...conceptMap, stuck_supported: stuckSupported } }),
   );
   await page.route("**/api/conversations/*", (route) =>
     route.fulfill({ json: { messages: [] } }),
