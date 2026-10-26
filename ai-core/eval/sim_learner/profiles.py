@@ -42,9 +42,12 @@ def prerequisite_depths(concept_map: ConceptMap, concept_id: str, max_depth: int
 # 역할: 진단 대상(막힌 개념)으로 쓸 개념을 결정적으로 고름
 # - 조건: 깊이 3 안에 선수 개념이 있는 개념(최대 진단 깊이까지 내려갈 거리가 있어야 깊은 빈틈을 시험할 수 있음)
 # - 순서: 깊이 3 안 선수 개념이 많은 개념부터(빈틈 조합이 다양하고, 문항 상한 5개를 넘는 빈틈도 만들 수 있음), 같으면 ID 순
-def select_targets(concept_map: ConceptMap, count: int = 10) -> list[str]:
+# - subject를 주면 그 과목 개념만 대상으로 고름(None이면 모든 과목). 선수 개념은 과목을 가리지 않음
+def select_targets(concept_map: ConceptMap, count: int = 10, subject: str | None = None) -> list[str]:
     candidates = []
     for concept in concept_map.concepts:
+        if subject is not None and concept.subject != subject:
+            continue
         depths = prerequisite_depths(concept_map, concept.id)
         if MAX_DEPTH in depths.values():
             candidates.append((-len(depths), concept.id))
@@ -55,12 +58,16 @@ def select_targets(concept_map: ConceptMap, count: int = 10) -> list[str]:
 # - 빈틈 조합은 "씨앗" 개념을 골라 정함. 씨앗을 모르면 씨앗에 기대는 위쪽 개념도 모두 모름 → known이 선수 관계에 대해 닫힘
 # - 조합 순서: 빈틈 0개 → 깊이 1 씨앗 → 깊이 2 씨앗 → 깊이 3 씨앗 → 씨앗 2개(빈틈이 많아 상한 효과를 볼 수 있음)
 #   해당 깊이가 없거나 앞 조합과 같아지면 무작위 씨앗(1~2개)으로 채움
+# - 과목 경계: 대상과 다른 과목의 선수 개념이 깊이 3 안에 있으면, 그중 가장 얕은 개념을 씨앗으로 둔 조합을 빈틈 0개 바로 뒤에 넣음
+#   운영체제 개념에서 막혀 자료구조 선수 개념(queue·priority-queue)이 빈틈인 학습자를 대상마다 반드시 시험하기 위함(로드맵 MVP 4 검증)
+#   다른 과목 선수 개념이 없는 대상(자료구조 개념)은 조합이 그대로라, 같은 seed로 예전 기록의 프로필을 다시 만들 수 있음
 # - 어긋난 프로필: 가장 깊은 선수 개념 하나만 모르고 그 위쪽은 앎(엔진이 위를 맞힌 뒤 가지치기해 놓치는 경우)
 def generate_profiles(concept_map: ConceptMap, targets: list[str], per_target: int, seed: int,
                       slip: float = 0.05, guess: float = 0.25) -> list[Profile]:
     if not 3 <= per_target <= 5:
         raise ValueError('per_target은 3~5여야 합니다.')
     everything = frozenset(c.id for c in concept_map.concepts)
+    subjects = {c.id: c.subject for c in concept_map.concepts}
     consistent, inconsistent = [], []
     for target in targets:
         rng = random.Random(f'{seed}:{target}')
@@ -68,6 +75,9 @@ def generate_profiles(concept_map: ConceptMap, targets: list[str], per_target: i
         by_depth = {d: sorted(c for c, k in depths.items() if k == d) for d in range(1, MAX_DEPTH + 1)}
         plans = [[]] + [[rng.choice(by_depth[d])] for d in range(1, MAX_DEPTH + 1) if by_depth[d]]
         plans.append(rng.sample(sorted(depths), 2) if len(depths) >= 2 else [])
+        crossing = sorted((k, c) for c, k in depths.items() if subjects[c] != subjects[target])
+        if crossing:
+            plans.insert(1, [crossing[0][1]])
         unknowns = []
         for attempt in range(100):
             plan = plans[attempt] if attempt < len(plans) else rng.sample(sorted(depths), rng.randint(1, min(2, len(depths))))
