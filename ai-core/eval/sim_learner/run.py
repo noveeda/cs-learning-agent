@@ -21,8 +21,8 @@ if str(AI_CORE) not in sys.path:
 from eval.metrics import recall_precision, wilson_interval  # noqa: E402
 from eval.sim_learner.client import StuckClient  # noqa: E402
 from eval.sim_learner.learner import Learner, LearnerModel  # noqa: E402
-from eval.sim_learner.profiles import (Profile, generate_profiles, recall_ceiling, select_targets,  # noqa: E402
-                                       true_gaps)
+from eval.sim_learner.profiles import (Profile, generate_profiles, prerequisite_depths, recall_ceiling,  # noqa: E402
+                                       select_targets, true_gaps)
 from serving.concept_map import ConceptMap, load_concept_map  # noqa: E402
 from serving.item_bank import Item, load_item_bank  # noqa: E402
 from serving.stuck import MAX_DIAGNOSIS_ITEMS, Entry, StepInput, UnavailableGateway, step  # noqa: E402
@@ -54,10 +54,14 @@ def oracle_gaps(profile: Profile, concept_map: ConceptMap, items: list[Item]) ->
 # 역할: 프로필 하나로 세션을 끝까지 진행하고 기록 한 줄(dict)을 반환. 실패해도 예외를 던지지 않고 error에 남김
 # - 입력은 stage로 정함: 문항이 있는 단계(diagnose·check·explain)는 답, 나머지(remediate·decide·return)는 계속
 # - 보충 화면을 받은 개념은 학습자가 "알게 됨"으로 바꾼 뒤 그 화면의 확인 문항에 답함
+# - subject·cross_subject: 대상 과목과, 깊이 3 안 선수 개념 중 다른 과목 개념 목록(과목 경계 빈틈 recall을 따로 내기 위함)
 def run_profile(profile: Profile, api, learner: Learner, concept_map: ConceptMap, items: list[Item]) -> dict:
     truth = true_gaps(profile, concept_map) - {profile.target}
     oracle = oracle_gaps(profile, concept_map, items)
-    record = {'profile': profile.id, 'target': profile.target, 'consistent': profile.consistent,
+    subjects = {c.id: c.subject for c in concept_map.concepts}
+    crossing = sorted(c for c in prerequisite_depths(concept_map, profile.target) if subjects[c] != subjects[profile.target])
+    record = {'profile': profile.id, 'target': profile.target, 'subject': subjects[profile.target],
+              'cross_subject': crossing, 'consistent': profile.consistent,
               'slip': profile.slip, 'guess': profile.guess, 'truth': sorted(truth), 'ceiling': recall_ceiling(profile, concept_map),
               'oracle_gaps': sorted(oracle), 'oracle_recall': recall_precision(oracle, truth)[0],
               'gaps': None, 'evidence': [], 'remediated': [], 'outcomes': {}, 'answers': [],
@@ -176,11 +180,32 @@ def _group(records: list[dict]) -> dict:
             'over_remediation_rate': round(over / total, 4), 'over_remediation_ci95': [round(low, 4), round(high, 4)],
             'prerequisite_over_remediation_rate': round(prereq_over / prereq_total, 4) if prereq_total else None,
         }
+    if measured:
+        summary['m1']['pooled'] = _pooled([(set(r['gaps']), set(r['truth'])) for r in measured])
+        crossing = [(set(r['gaps']) & set(r.get('cross_subject', [])), set(r['truth']) & set(r.get('cross_subject', [])))
+                    for r in measured]
+        summary['m1']['cross_subject'] = _pooled(crossing) if any(truth for _, truth in crossing) else None
     finished = [r for r in records if r.get('seconds') is not None and r.get('error') is None]
     if finished:
         summary['seconds_mean'] = round(mean(r['seconds'] for r in finished), 3)
         summary['steps_mean'] = round(mean(r['steps'] for r in finished), 2)
     return summary
+
+
+# 역할: 세션 묶음의 빈틈을 하나씩 세어 합산한 recall·precision과 Wilson 95% 구간(pairs: (찾은 빈틈, 정답 빈틈) 집합 쌍)
+# - 세션 평균(recall_mean)은 빈틈이 적은 세션도 같은 무게라, 빈틈 개수 기준 비율과 그 불확실성을 함께 보고하기 위함
+# - 과목 경계 빈틈은 세션마다 0~2개로 적어 세션 평균보다 빈틈 단위 합산이 해석하기 쉬움
+def _pooled(pairs) -> dict:
+    found = sum(len(predicted & truth) for predicted, truth in pairs)
+    gaps = sum(len(truth) for _, truth in pairs)
+    predicted = sum(len(p) for p, _ in pairs)
+    result = {'gaps': gaps, 'found': found, 'predicted': predicted, 'recall': None, 'recall_ci95': None,
+              'precision': None, 'precision_ci95': None}
+    for name, total in (('recall', gaps), ('precision', predicted)):
+        if total:
+            low, high = wilson_interval(found, total)
+            result[name], result[f'{name}_ci95'] = round(found / total, 4), [round(low, 4), round(high, 4)]
+    return result
 
 
 # 역할: 명령행 인자를 읽어 실행하고 기록(JSONL)·요약(JSON)을 씀
@@ -195,6 +220,7 @@ def main(argv=None):
     parser.add_argument('--per-target', type=int, default=5, help='대상마다 기본 프로필 수(3~5)')
     parser.add_argument('--seed', type=int, default=SEED)
     parser.add_argument('--profiles', type=int, help='앞에서부터 이 수만큼만 실행(시험용)')
+    parser.add_argument('--subject', help='이 과목 개념만 막힌 개념으로 씀(예: os). 없으면 모든 과목')
     args = parser.parse_args(argv)
 
     out = args.out.resolve()
@@ -204,7 +230,10 @@ def main(argv=None):
         parser.error(f'이미 있는 결과는 덮어쓰지 않습니다: {out}')
 
     concept_map, items = load_concept_map(), load_item_bank()
-    profiles = generate_profiles(concept_map, select_targets(concept_map), args.per_target, args.seed)[:args.profiles]
+    targets = select_targets(concept_map, subject=args.subject)
+    if not targets:
+        parser.error(f'막힌 개념으로 쓸 개념이 없는 과목입니다: {args.subject}')
+    profiles = generate_profiles(concept_map, targets, args.per_target, args.seed)[:args.profiles]
     try:
         explainer = LearnerModel(args.learner_url, args.learner_model)
     except Exception as exc:  # noqa: BLE001 - 연결 실패를 세션 실패로 잘못 세지 않도록 시작 전에 종료
@@ -222,7 +251,8 @@ def main(argv=None):
             file.flush()
             print(f"{n}/{len(profiles)} {profile.id}: {record['stage']} recall={record['recall']} "
                   f"over={record['over_remediated']} {record['seconds']}s {record['error'] or ''}", flush=True)
-    summary = {'seed': args.seed, 'per_target': args.per_target, 'learner_model': explainer.model, **summarize(results)}
+    summary = {'seed': args.seed, 'per_target': args.per_target, 'subject': args.subject, 'learner_model': explainer.model,
+               **summarize(results)}
     out.with_suffix('.summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

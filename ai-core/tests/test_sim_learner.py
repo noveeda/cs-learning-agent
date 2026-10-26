@@ -15,7 +15,7 @@ from eval.sim_learner.learner import Learner
 from eval.sim_learner.profiles import (Profile, generate_profiles, prerequisite_depths, recall_ceiling, select_targets,
                                        true_gaps)
 from eval.sim_learner.run import EVAL_ROOT, main, oracle_gaps, run_profile, summarize
-from serving.concept_map import load_concept_map
+from serving.concept_map import ConceptMap, load_concept_map
 from serving.grading import grade
 from serving.item_bank import load_item_bank
 from serving.stuck import MAX_DIAGNOSIS_ITEMS, StepInput, StuckState, step
@@ -73,6 +73,83 @@ def fake_explainer(question, reference):
 
 def profile_with(target, unknown, slip=0.0, guess=0.0, consistent=True):
     return Profile(id='t', target=target, known=ALL - frozenset(unknown) - {target}, slip=slip, guess=guess, consistent=consistent)
+
+
+# 역할: 과목 두 개를 합친 작은 지도(실제 운영체제 지도와 같은 모양). edges는 {개념: (과목, [선수 개념])}
+# - os 개념이 dsa 개념(queue·priority-queue)을 선수로 가져 과목 경계를 넘는 빈틈을 만들 수 있음
+# - subjects=False면 과목 표시를 지운 같은 지도(과목 규칙이 같은 과목 대상 프로필을 바꾸지 않는지 비교용)
+def two_subject_map(subjects=True):
+    edges = {'memory': ('dsa', []), 'adt': ('dsa', ['memory']), 'queue': ('dsa', ['adt']), 'heap': ('dsa', ['adt']),
+             'priority-queue': ('dsa', ['queue', 'heap']), 'proc': ('os', ['queue']), 'metrics': ('os', ['proc']),
+             'fcfs': ('os', ['metrics']), 'prio': ('os', ['fcfs', 'priority-queue']), 'sjf': ('os', ['prio'])}
+    return ConceptMap.model_validate({'id': 'cs', 'title': 'CS', 'version': 1, 'status': 'reviewed', 'concepts': [
+        {'id': cid, 'title': cid, 'description': cid, 'objectives': ['설명할 수 있다.'],
+         'prerequisites': [{'id': p, 'reason': '근거'} for p in prerequisites], 'subject': subject if subjects else None}
+        for cid, (subject, prerequisites) in edges.items()]})
+
+
+class SubjectTest(unittest.TestCase):
+    # 검증 목적: --subject로 고른 과목의 개념만 막힌 개념(target)이 되고, 기본(None)은 모든 과목에서 고름
+    # - 순서는 깊이 3 안 선수 개념 수 내림차순: prio 7개, sjf 6개, fcfs·metrics·proc 3개(같으면 ID 순)
+    def test_select_targets_by_subject(self):
+        subject_map = two_subject_map()
+        self.assertEqual(select_targets(subject_map, subject='os'), ['prio', 'sjf', 'fcfs', 'metrics', 'proc'])
+        self.assertEqual(select_targets(subject_map, subject='dsa'), ['priority-queue'])
+        self.assertEqual(set(select_targets(subject_map)), {'sjf', 'prio', 'fcfs', 'metrics', 'proc', 'priority-queue'})
+        self.assertEqual(select_targets(subject_map, subject='none'), [])
+
+    # 검증 목적: 운영체제 개념에서 막혀 자료구조 선수 개념이 빈틈인 프로필이 대상마다 반드시 들어감(로드맵 MVP 4 검증 문장)
+    # - 깊이 3 안에 다른 과목 개념이 있는 대상은, 가장 얕은 다른 과목 개념을 씨앗으로 둔 프로필이 하나 이상 있어야 함
+    #   예: sjf → prio → priority-queue(깊이 2), fcfs → metrics → proc → queue(깊이 3)
+    def test_cross_subject_gap_profiles(self):
+        subject_map = two_subject_map()
+        subjects = {c.id: c.subject for c in subject_map.concepts}
+        profiles = generate_profiles(subject_map, select_targets(subject_map, subject='os'), 5, seed=7)
+        for target, shallowest in (('sjf', 'priority-queue'), ('prio', 'priority-queue'), ('fcfs', 'queue'),
+                                   ('metrics', 'queue'), ('proc', 'queue')):
+            with self.subTest(target=target):
+                truths = [true_gaps(p, subject_map) for p in profiles if p.target == target and p.consistent]
+                self.assertTrue(any(shallowest in truth for truth in truths))
+                self.assertTrue(all(subjects[c] == 'os' or c in prerequisite_depths(subject_map, target)
+                                    for truth in truths for c in truth))
+
+    # 검증 목적: 과목 규칙은 다른 과목 선수 개념이 있는 대상에만 적용됨. 자료구조 대상 프로필은 과목 표시가 없던 때와 같음
+    # - 이미 측정한 자료구조 기록(seed 7)을 같은 프로필로 다시 만들어 재요약할 수 있게 하기 위함
+    def test_same_subject_targets_unchanged(self):
+        with_subjects = generate_profiles(two_subject_map(), ['priority-queue'], 5, seed=7)
+        without = generate_profiles(two_subject_map(subjects=False), ['priority-queue'], 5, seed=7)
+        self.assertEqual(with_subjects, without)
+        self.assertEqual(select_targets(MAP, subject='dsa'), select_targets(MAP))
+
+    # 검증 목적: 기록에 다른 과목 선수 개념 목록(cross_subject)을 남기고, 요약이 전체·과목 경계 빈틈의
+    # 빈틈 단위 합산 recall·precision과 Wilson 95% 구간을 따로 내는지 확인
+    def test_cross_subject_summary(self):
+        base = {'stage': 'complete', 'error': None, 'seconds': 1.0, 'steps': 10, 'miss_reasons': {}, 'false_gap_reasons': {},
+                'consistent': True, 'ceiling': 1.0, 'oracle_recall': 1.0, 'remediated': [], 'over_remediated': [],
+                'target': 'sjf', 'cross_subject': ['priority-queue', 'queue', 'heap']}
+        results = [
+            {**base, 'truth': ['prio', 'priority-queue', 'heap'], 'gaps': ['prio', 'priority-queue'], 'recall': 2 / 3, 'precision': 1.0},
+            {**base, 'truth': ['prio', 'fcfs'], 'gaps': ['prio', 'fcfs', 'queue'], 'recall': 1.0, 'precision': 2 / 3},
+        ]
+        m1 = summarize(results)['consistent']['m1']
+        self.assertEqual({k: m1['pooled'][k] for k in ('gaps', 'found', 'predicted')}, {'gaps': 5, 'found': 4, 'predicted': 5})
+        self.assertAlmostEqual(m1['pooled']['recall'], 0.8)
+        self.assertAlmostEqual(m1['pooled']['precision'], 0.8)
+        cross = m1['cross_subject']
+        self.assertEqual({k: cross[k] for k in ('gaps', 'found', 'predicted')}, {'gaps': 2, 'found': 1, 'predicted': 2})
+        self.assertAlmostEqual(cross['recall'], 0.5)
+        self.assertAlmostEqual(cross['precision'], 0.5)
+        low, high = cross['recall_ci95']
+        self.assertTrue(0.0 < low < 0.5 < high < 1.0)
+        # 과목 표시가 없는 예전 기록(자료구조만)은 과목 경계 빈틈이 없어 None
+        self.assertIsNone(summarize([{**r, 'cross_subject': []} for r in results])['consistent']['m1']['cross_subject'])
+
+    # 검증 목적: 실제 엔진 세션 기록에 대상 과목과 다른 과목의 깊이 3 안 선수 개념 목록이 남는지 확인
+    def test_record_lists_cross_subject_concepts(self):
+        profile = generate_profiles(MAP, ['bst'], 3, seed=1)[0]
+        record = run_profile(profile, FakeApi(), Learner(profile, ITEMS, random.Random(0), fake_explainer), MAP, ITEMS)
+        self.assertEqual(record['cross_subject'], [])
+        self.assertEqual(record['subject'], 'dsa')
 
 
 class ProfileTest(unittest.TestCase):
@@ -226,11 +303,12 @@ class RunTest(unittest.TestCase):
         base = {'stage': 'complete', 'error': None, 'seconds': 1.0, 'steps': 10, 'miss_reasons': {}, 'false_gap_reasons': {}}
         results = [
             {**base, 'consistent': True, 'recall': 1.0, 'precision': 1.0, 'ceiling': 1.0, 'oracle_recall': 1.0,
-             'remediated': ['a', 't'], 'over_remediated': [], 'target': 't'},
+             'remediated': ['a', 't'], 'over_remediated': [], 'target': 't', 'truth': ['a'], 'gaps': ['a']},
             {**base, 'consistent': True, 'recall': 0.5, 'precision': 0.5, 'ceiling': 0.5, 'oracle_recall': 0.5,
-             'remediated': ['a', 'b', 't'], 'over_remediated': ['b'], 'target': 't', 'miss_reasons': {'not_probed_budget': 1}},
+             'remediated': ['a', 'b', 't'], 'over_remediated': ['b'], 'target': 't', 'miss_reasons': {'not_probed_budget': 1},
+             'truth': ['a', 'b'], 'gaps': ['a', 'c']},
             {**base, 'consistent': False, 'recall': 0.0, 'precision': 1.0, 'ceiling': 1.0, 'oracle_recall': 0.0,
-             'remediated': ['t'], 'over_remediated': [], 'target': 't'},
+             'remediated': ['t'], 'over_remediated': [], 'target': 't', 'truth': ['a'], 'gaps': []},
             {**base, 'consistent': True, 'stage': 'diagnose', 'error': '503', 'recall': None, 'precision': None},
         ]
         summary = summarize(results)
@@ -254,6 +332,11 @@ class RunTest(unittest.TestCase):
         EVAL_ROOT.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(dir=EVAL_ROOT, suffix='.jsonl') as existing, self.assertRaises(SystemExit):
             main(['--base-url', 'http://127.0.0.1:1', '--learner-url', 'http://127.0.0.1:1/v1', '--out', existing.name])
+        # 막힌 개념으로 고를 개념이 없는 과목도 API·모델을 부르기 전에 거부
+        with self.assertRaises(SystemExit):
+            main(['--base-url', 'http://127.0.0.1:1', '--learner-url', 'http://127.0.0.1:1/v1', '--subject', 'none',
+                  '--out', str(EVAL_ROOT / 'never-written.jsonl')])
+        self.assertFalse((EVAL_ROOT / 'never-written.jsonl').exists())
 
 
 if __name__ == '__main__':
