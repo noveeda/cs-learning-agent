@@ -1,0 +1,23 @@
+/* 파일 역할: #/experiment 비교 실험 화면 배치; 노트북 대면 진행 기준(휴대폰 폭은 고려하지 않음) */
+.experiment { min-height: 100vh; display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-5); background: var(--color-background, #f6f6f3); }
+.experiment-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.experiment-header h1 { margin: 0; }
+.experiment-clock { margin: 0; font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.experiment-clock.soon { color: var(--color-error); }
+.experiment-error { padding: var(--space-3); border-radius: var(--radius-control); color: var(--color-error); background: var(--color-surface); }
+.experiment-help { color: var(--color-muted); }
+.experiment-card { padding: var(--space-5); max-width: 880px; }
+.experiment-setup, .experiment-items { display: flex; flex-direction: column; gap: var(--space-4); }
+.experiment-setup label, .experiment-setup fieldset { display: flex; flex-direction: column; gap: var(--space-2); }
+.experiment-concepts, .experiment-options { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.experiment-choice { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: var(--space-2); }
+.experiment-items ol { display: flex; flex-direction: column; gap: var(--space-5); padding-left: var(--space-5); }
+.experiment-items textarea, .experiment-items input:not([type]) { width: 100%; }
+/* 학습 단계: 왼쪽 읽기 글, 오른쪽 도구 하나 */
+.experiment-learn { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 1fr); gap: var(--space-4); }
+.experiment-passage { padding: var(--space-5); overflow-y: auto; line-height: 1.8; }
+.experiment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.experiment-tool { min-height: 0; display: flex; flex-direction: column; }
+.experiment-tool .learning-layout { grid-template-columns: minmax(0, 1fr); padding: 0; }
+/* 조건 누출 방지: 채팅 조건에서는 ChatSession의 막힘 진입(붙여넣기)과 추천 질문 노트를 숨김 */
+.experiment-tool.chat .stuck-entry, .experiment-tool.chat .learning-support { display: none; }
