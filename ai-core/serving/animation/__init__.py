@@ -28,7 +28,8 @@ CONCEPT_SCENES: dict[str, tuple[str, ...]] = {
     'stack': ('stack',),
     'queue': ('queue',),
     'hash-function': ('hash_table',), 'hash-table': ('hash_table',),
-    'binary-tree': ('bst',), 'bst': ('bst',), 'tree-traversal': ('bst',),
+    # tree-traversal은 넣지 않음: bst 장면에 순회 연산이 없어 순회 과정을 보여 주지 못함(순회 장면은 MVP 3에서 다룸)
+    'binary-tree': ('bst',), 'bst': ('bst',),
     'heap': ('heap',), 'priority-queue': ('heap',), 'heap-sort': ('heap',),
 }
 

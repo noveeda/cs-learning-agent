@@ -186,7 +186,8 @@ class AnimateTests(unittest.TestCase):
         self.concept = next(c for c in MAP.concepts if c.id == 'heap')
         self.entry = Entry(kind='excerpt', excerpt='힙에서 삽입 후 왜 위로 올라가요?', return_to='/learn')
 
-    # 검증 목적: 장면 선택 응답 schema가 허용 장면 종류(kinds)의 요청 타입과 null만 고를 수 있게 제한되는지 확인
+    # 검증 목적: 장면 선택 응답 schema가 허용 장면 종류(kinds)의 요청 타입만 고를 수 있게 제한되고 null 분기가 없는지 확인
+    # - 실측(2026-10-26)에서 null 분기가 있으면 장면이 분명한 개념(heap·hash-table)도 null로 쏠려 null을 뺌
     # - 가이드 디코딩은 $ref를 풀지 못할 수 있어 schema 안에 $ref가 남지 않는지도 확인
     def test_choose_animation_schema_limits_kinds(self):
         scene = {'kind': 'heap', 'order': 'min', 'ops': [{'op': 'insert', 'value': 3}, {'op': 'insert', 'value': 1}]}
@@ -198,7 +199,8 @@ class AnimateTests(unittest.TestCase):
         options = schema['properties']['scene']['anyOf']
         kinds = [o['properties']['kind']['const'] for o in options if o.get('type') == 'object']
         self.assertEqual(kinds, ['heap'])
-        self.assertIn({'type': 'null'}, options)
+        self.assertNotIn({'type': 'null'}, options)
+        self.assertEqual(schema['properties']['scene']['anyOf'], options)
         for keyword in ('$ref', 'discriminator', 'oneOf'):
             self.assertNotIn(keyword, json.dumps(schema))
         two = FakeClient(animate=lambda user, kw: json.dumps({'scene': None}))
@@ -206,7 +208,7 @@ class AnimateTests(unittest.TestCase):
         options = two.requests[0][1]['response_format']['json_schema']['schema']['properties']['scene']['anyOf']
         self.assertEqual([o['properties']['kind']['const'] for o in options if o.get('type') == 'object'], ['heap', 'bst'])
 
-    # 검증 목적: 모델이 알맞은 장면이 없다고 null을 고르면 None을 돌려주는지 확인
+    # 검증 목적: schema에는 null이 없지만 응답이 null이면(가이드 디코딩이 꺼진 서버 등) 오류 대신 None(텍스트만)을 돌려주는지 확인
     def test_choose_animation_null(self):
         client = FakeClient(animate=lambda user, kw: json.dumps({'scene': None}))
         self.assertIsNone(gateway(client).choose_animation(self.concept, self.entry, ('heap',)))
@@ -236,7 +238,7 @@ class AnimateTests(unittest.TestCase):
             self.assertNotIn(i.question, sent)
         prompt = PROMPTS['animate']
         self.assertTrue(prompt.startswith(COMMON))
-        for phrase in ('실행할 수 있는', '음수', 'formats', '기본적으로', '8개 이하', '연산 과정과 관계없는 내용일 때뿐'):
+        for phrase in ('실행할 수 있는', '음수', 'formats', '반드시', '8개 이하'):
             self.assertIn(phrase, prompt)
 
     # 검증 목적: 모델에 보여 주는 장면 형식 예시가 모든 장면 종류에 있고, 그 자체로 검증·실행 가능한지 확인
