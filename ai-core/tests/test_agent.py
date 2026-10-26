@@ -210,5 +210,5 @@ class AnimationToolTests(unittest.TestCase):
                for value in d['properties']['op'].get('enum', [d['properties']['op'].get('const')])}
         self.assertEqual(set(properties['ops']['items']['properties']['op']['enum']), ops)
         fields = {name for d in defs for name in d.get('properties', {})} - {'kind', 'op'}
-        item_fields = set(properties['ops']['items']['properties'])
+        item_fields = set(properties['ops']['items']['properties']) | set(properties['processes']['items']['properties'])
         self.assertLessEqual(fields, set(properties) | item_fields)
