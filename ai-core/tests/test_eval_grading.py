@@ -77,6 +77,7 @@ class AgreementTests(unittest.TestCase):
         self.assertEqual(human['kind'], 'inter')
         self.assertAlmostEqual(human['kappa'], cohen_kappa([first[i] for i in self.ids], [second[i] for i in self.ids]))
         self.assertIn('element_kappa', human)
+        self.assertAlmostEqual(human['agreement'], (len(self.ids) - 2) / len(self.ids))
         self.assertEqual(report['disagreements'], sorted(self.ids[:2]))
         self.assertEqual(report['final']['pending'], 2)
         settled = agreement.analyze({'G1': self.g1, 'G2': self.g2}, self.answers,
@@ -122,6 +123,11 @@ class AgreementTests(unittest.TestCase):
         self.assertEqual((groups['student']['false_passes'], groups['dev']['false_passes']), (1, 1))
         self.assertAlmostEqual(groups['all']['false_pass_rate'], 2 / 7)
         self.assertEqual(len(groups['all']['false_pass_interval']), 2)
+        # 최종 라벨이 모두 미통과(한 범주)라 kappa만으로는 부풀거나 0이 될 수 있어 일치율·민감도·특이도를 함께 냄
+        self.assertAlmostEqual(groups['all']['agreement'], 5 / 7)
+        self.assertIsNone(groups['all']['sensitivity'])
+        self.assertAlmostEqual(groups['all']['specificity'], 5 / 7)
+        self.assertEqual((groups['all']['passes'], groups['all']['fails']), (0, 7))
         self.assertEqual(list(report)[0], 'warnings')
         self.assertTrue(any('거짓 통과율 상한 기준 미달 가능' in w for w in report['warnings']))
 

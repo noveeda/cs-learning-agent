@@ -42,12 +42,14 @@ def labels(rows):
     return found
 
 
-# 역할: 두 판정 묶음의 공통 답에서 전체 판정 kappa와 요소 단위 kappa(두 쪽 모두 적은 칸만)를 계산
+# 역할: 두 판정 묶음의 공통 답에서 전체 판정 kappa·일치율과 요소 단위 kappa(두 쪽 모두 적은 칸만)를 계산
+# - 일치율을 함께 내는 이유: 판정이 한 범주로 쏠리면 kappa가 부풀거나 0으로 떨어져 kappa만으로는 읽기 어려움
 def _compare(first, second):
     common = sorted(set(first) & set(second))
-    result = {'compared': len(common), 'kappa': None, 'element_kappa': None}
+    result = {'compared': len(common), 'kappa': None, 'agreement': None, 'element_kappa': None}
     if common:
         result['kappa'] = cohen_kappa([first[i]['overall'] for i in common], [second[i]['overall'] for i in common])
+        result['agreement'] = sum(first[i]['overall'] == second[i]['overall'] for i in common) / len(common)
         pairs = [(a, b) for i in common for a, b in zip(first[i]['met'], second[i]['met']) if a is not None and b is not None]
         if pairs:
             result['element_kappa'] = cohen_kappa([a for a, _ in pairs], [b for _, b in pairs])
@@ -56,13 +58,19 @@ def _compare(first, second):
 
 # 역할: 한 묶음(학생·개발자·전체)의 AI 대 최종 라벨 지표
 # - 거짓 통과율: 사람이 미통과로 본 답 중 AI가 통과시킨 비율; 학습자가 이해하지 못했는데 넘어가는 위험을 잼
+# - 민감도(사람 통과 중 AI 통과)·특이도(사람 미통과 중 AI 미통과)·일치율·표본 수를 함께 냄
+#   한 범주만 있는 하위 집단(예: 모두 미통과)에서는 kappa가 부풀거나 0이 되어 그것만으로 판단하면 안 되기 때문
+#   해당 범주 답이 없으면 비율은 None
 def _ai_group(ids, final, ai):
     ids = [i for i in ids if i in ai]
+    passes = [i for i in ids if final[i]]
     fails = [i for i in ids if not final[i]]
     false_passes = sum(ai[i] for i in fails)
-    group = {'n': len(ids), 'fails': len(fails), 'false_passes': false_passes,
+    group = {'n': len(ids), 'passes': len(passes), 'fails': len(fails), 'false_passes': false_passes,
              'kappa': cohen_kappa([final[i] for i in ids], [ai[i] for i in ids]) if ids else None,
              'agreement': sum(final[i] == ai[i] for i in ids) / len(ids) if ids else None,
+             'sensitivity': sum(ai[i] for i in passes) / len(passes) if passes else None,
+             'specificity': (len(fails) - false_passes) / len(fails) if fails else None,
              'false_pass_rate': false_passes / len(fails) if fails else None,
              'false_pass_interval': list(wilson_interval(false_passes, len(fails)))}
     return group
