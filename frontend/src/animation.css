@@ -1,0 +1,34 @@
+/* 파일 역할: 단계별 애니메이션 재생기 배치와 상자·화살표 모양; 막힘 패널 폭(모바일 375px 포함)에 맞춰 SVG를 축소 */
+.animation-player { margin: var(--space-4) 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); }
+.animation-player:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.animation-title { margin: 0 0 var(--space-2); font-weight: 600; }
+/* 채팅 artifact 패널(가로 flex인 diagram-stage) 안에서는 남은 폭을 모두 써서 SVG가 0 폭으로 줄지 않게 함 */
+.diagram-stage .animation-player { flex: 1; min-width: 0; }
+/* 패널 머리글이 이미 같은 제목을 보여 주므로 재생기 안 제목은 숨김(재생기 aria-label에는 제목이 남아 있음) */
+.diagram-stage .animation-title { display: none; }
+/* width 100%로 패널 폭에 맞추고 높이는 viewBox 비율을 따름; 가로 스크롤이 생기지 않게 함 */
+.animation-canvas { display: block; width: 100%; height: auto; margin: 0 auto; overflow: visible; }
+.animation-box { transition: transform 300ms ease; }
+.animation-box rect { fill: var(--color-surface); stroke: var(--color-text); stroke-width: 2; transition: fill 300ms ease, stroke 300ms ease, opacity 300ms ease; }
+/* 글자 크기는 viewBox 단위라 화면이 좁으면 함께 줄어듦; 가장 넓은 12칸 장면을 344~375px 패널에 줄여도 약 10px 이상으로 읽히도록 크게 둠 */
+.animation-box text { font-size: 26px; text-anchor: middle; dominant-baseline: central; fill: var(--color-text); }
+.animation-box.shape-slot rect { stroke-dasharray: 4 3; stroke: var(--color-muted); }
+.animation-box.shape-label text { font-size: 18px; fill: var(--color-muted); }
+.animation-box.tone-active rect { fill: var(--color-primary-soft); stroke: var(--color-primary); }
+.animation-box.tone-new rect { fill: var(--color-primary-soft); stroke: var(--color-primary); stroke-width: 2.5; }
+.animation-box.tone-removed rect { stroke: var(--color-error); stroke-dasharray: 4 3; opacity: .55; }
+.animation-box.tone-removed text { fill: var(--color-error); }
+.animation-arrows { animation: animation-fade 300ms ease; }
+.animation-arrows line { stroke: var(--color-muted); stroke-width: 2; }
+.animation-arrowhead { fill: var(--color-muted); }
+.animation-arrow-label { font-size: 14px; text-anchor: middle; fill: var(--color-muted); }
+.animation-caption { margin: var(--space-2) 0; min-height: 1.8em; }
+.animation-controls { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.animation-controls .button { display: inline-flex; align-items: center; gap: var(--space-1); }
+.animation-step { color: var(--color-muted); font-variant-numeric: tabular-nums; }
+@keyframes animation-fade { from { opacity: 0; } }
+/* 움직임 줄이기 설정이면 이동·색 변화·화살표 등장 효과를 모두 끄고 단계 결과만 바로 보여 줌 */
+@media (prefers-reduced-motion: reduce) {
+  .animation-box, .animation-box rect { transition: none; }
+  .animation-arrows { animation: none; }
+}

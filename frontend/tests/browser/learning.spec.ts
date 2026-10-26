@@ -130,6 +130,110 @@ test("대화·도식 복구, 확대·저장, 화면 크기 변경과 새 학습"
   await expect(page.locator(".artifact-panel")).toHaveCount(0);
 });
 
+// AI core create_animation 결과(PR #44 실제 출력 형식)와 같은 애니메이션 artifact; SVG 경로(url)가 없음
+const stackAnimation = {
+  ok: true,
+  artifact_id: "a".repeat(32),
+  kind: "animation",
+  animation: {
+    kind: "stack",
+    title: "스택 push·pop",
+    frames: [
+      { boxes: [], arrows: [], caption: "빈 스택에서 시작합니다" },
+      {
+        boxes: [
+          { id: "s0", label: "1", x: 0, y: 1, shape: "cell", tone: "new" },
+          {
+            id: "top",
+            label: "top",
+            x: 1,
+            y: 1,
+            shape: "label",
+            tone: "normal",
+          },
+        ],
+        arrows: [{ source: "top", target: "s0", label: null }],
+        caption: "push 1: 1을 top 위에 올립니다",
+      },
+    ],
+  },
+  request: { kind: "stack", ops: [{ op: "push", value: 1 }] },
+};
+
+test("애니메이션 artifact: 복구·단계 이동·수정 요청에 artifact_id 전송·새 결과로 교체", async ({
+  page,
+}) => {
+  await mockConversation(page, [
+    { role: "user", content: "스택 과정을 보여줘", status: "complete" },
+    {
+      role: "assistant",
+      content: "push 과정입니다.",
+      status: "complete",
+      artifacts: [{ type: "artifact", ...stackAnimation }],
+    },
+  ]);
+  const queue = {
+    ...stackAnimation,
+    artifact_id: "c".repeat(32),
+    animation: {
+      kind: "queue",
+      title: "원형 큐 enqueue·dequeue",
+      frames: [{ boxes: [], arrows: [], caption: "빈 큐에서 시작합니다" }],
+    },
+  };
+  await page.route("**/api/chat", async (route) => {
+    // 활성 애니메이션을 고친 결과를 받으려면 도식과 같은 방식으로 artifact_id를 보내야 함
+    expect(route.request().postDataJSON().artifact_id).toBe(
+      stackAnimation.artifact_id,
+    );
+    await route.fulfill({
+      contentType: "application/x-ndjson",
+      body:
+        [
+          { type: "artifact", ...queue },
+          { type: "answer", text: "큐로 바꿨습니다." },
+          { type: "done" },
+        ]
+          .map((event) => JSON.stringify(event))
+          .join("\n") + "\n",
+    });
+  });
+  // SVG 요청이 생기면 도식 패널로 잘못 그린 것이므로 마지막에 0건인지 확인
+  const svgRequests: string[] = [];
+  await page.route("**/api/artifacts/**", (route) => {
+    svgRequests.push(route.request().url());
+    return route.abort();
+  });
+  await page.goto("/");
+  const panel = page.getByRole("complementary", { name: "생성된 애니메이션" });
+  await expect(panel).toContainText("빈 스택에서 시작합니다");
+  await expect(page.locator(".diagram-stage img")).toHaveCount(0);
+  await expect(page.locator(".artifact-chip")).toContainText("스택 push·pop");
+  await panel.getByRole("button", { name: "다음 단계" }).click();
+  await expect(panel).toContainText("push 1: 1을 top 위에 올립니다");
+  // 검수용 화면 기록(test-results는 Git 제외)
+  await panel.screenshot({
+    path: test.info().outputPath("chat-animation.png"),
+  });
+  const input = page.getByLabel("질문", { exact: true });
+  await input.fill("큐로 바꿔줘");
+  await input.press("Enter");
+  await expect(panel).toContainText("원형 큐 enqueue·dequeue");
+  await expect(panel).toContainText("빈 큐에서 시작합니다");
+  // 좁은 화면에서도 가로 스크롤 없이 겹쳐 보이고 닫으면 입력창으로 돌아감
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(panel).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await panel.getByRole("button", { name: "애니메이션 닫기" }).click();
+  await expect(page.locator(".artifact-panel")).toHaveCount(0);
+  await expect(input).toBeFocused();
+  expect(svgRequests).toEqual([]);
+});
+
 test("응답 중 중복 전송 방지와 실패 시 질문·부분 답변 유지", async ({
   page,
 }) => {

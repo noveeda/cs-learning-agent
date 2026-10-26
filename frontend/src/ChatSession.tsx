@@ -1,4 +1,4 @@
-// 파일 역할: 대화 한 세션의 복구·질문 입력·실시간 답변·도식 표시와 실패 후 재시도, 막힘 진입 버튼 담당
+// 파일 역할: 대화 한 세션의 복구·질문 입력·실시간 답변·도식/애니메이션 표시와 실패 후 재시도, 막힘 진입 버튼 담당
 import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import {
@@ -8,18 +8,58 @@ import {
   Check,
   LoaderCircle,
   Layers,
+  X,
 } from "lucide-react";
 import {
+  artifactTitle,
+  isAnimationArtifact,
   requestChat,
   loadConversation,
-  type Artifact,
+  type AnimationArtifact,
+  type ChatArtifact,
   type Message,
   type AgentEvent,
 } from "./api";
 import { AgentNotes } from "./LearningShell";
+import { AnimationPlayer } from "./AnimationPlayer";
 import { DiagramPanel } from "./DiagramPanel";
 import { StuckButton } from "./StuckPanel";
 import { statusLabels, type Concept, type LearningStatus } from "./roadmap";
+
+// 역할: 애니메이션 artifact 패널; 도식 패널과 같은 자리·닫기 동작으로 재생기를 보여 줌
+// - SVG 파일이 없으므로 확대·저장 대신 단계 이동만 둠
+// - artifact가 바뀌면 key로 재생기를 새로 만들어 첫 단계부터 보여 줌
+function AnimationPanel({
+  artifact,
+  onClose,
+}: {
+  artifact: AnimationArtifact;
+  onClose: () => void;
+}) {
+  return (
+    <aside className="artifact-panel card" aria-label="생성된 애니메이션">
+      <div className="panel-header">
+        <div>
+          <span className="eyebrow">단계별 그림</span>
+          <h2>{artifact.animation.title}</h2>
+        </div>
+        <button
+          className="icon-button"
+          aria-label="애니메이션 닫기"
+          onClick={onClose}
+        >
+          <X size={20} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="diagram-stage">
+        <AnimationPlayer
+          key={artifact.artifact_id}
+          animation={artifact.animation}
+        />
+      </div>
+    </aside>
+  );
+}
 
 // 역할: 대화 ID에 해당하는 기록을 복구하고 질문·도식·학습 상태 UI 구성
 // - 막힘 패널은 App이 대화 옆에 띄우므로 여기서는 진입 버튼만 두고 대화 상태는 건드리지 않음
@@ -53,7 +93,8 @@ export function ChatSession({
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [contextNotice, setContextNotice] = useState("");
-  const [artifact, setArtifact] = useState<Artifact | null>(null);
+  // 활성 artifact; 다음 질문에 artifact_id로 보내 수정 요청 대상이 됨(도식·애니메이션 공통)
+  const [artifact, setArtifact] = useState<ChatArtifact | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -83,6 +124,12 @@ export function ChatSession({
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, status, draft]);
+
+  // 역할: 도식·애니메이션 패널을 닫고 다음 질문을 바로 입력하도록 초점을 입력창으로 돌려줌
+  const closePanel = () => {
+    setPanelOpen(false);
+    requestAnimationFrame(() => input.current?.focus());
+  };
 
   // 역할: 중복 전송을 막고 진행 이벤트와 최종 답변 반영; 실패 시 질문과 부분 답변 보존
   async function send(text: string) {
@@ -300,7 +347,7 @@ export function ChatSession({
                       }}
                     >
                       <Check aria-hidden="true" size={14} />
-                      {m.artifact.diagram.title}
+                      {artifactTitle(m.artifact)}
                       <ArrowUpRight aria-hidden="true" size={14} />
                     </button>
                   )}
@@ -432,18 +479,19 @@ export function ChatSession({
           </section>
         </AgentNotes>
       )}
-      {panelOpen && artifact && (
-        <DiagramPanel
-          artifact={artifact}
-          onClose={() => {
-            setPanelOpen(false);
-            requestAnimationFrame(() => input.current?.focus());
-          }}
-          onImageError={() =>
-            setError("도식을 불러오지 못했습니다. 서버 연결을 확인해 주세요.")
-          }
-        />
-      )}
+      {panelOpen &&
+        artifact &&
+        (isAnimationArtifact(artifact) ? (
+          <AnimationPanel artifact={artifact} onClose={closePanel} />
+        ) : (
+          <DiagramPanel
+            artifact={artifact}
+            onClose={closePanel}
+            onImageError={() =>
+              setError("도식을 불러오지 못했습니다. 서버 연결을 확인해 주세요.")
+            }
+          />
+        ))}
     </main>
   );
 }
