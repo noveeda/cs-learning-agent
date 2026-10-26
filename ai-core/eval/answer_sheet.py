@@ -43,6 +43,8 @@ def build_rows(items, concepts=None):
 # 역할: 명령행 인자를 읽어 시트를 씀
 # - --out이 ai-core/outputs/ 밖이면(../ 우회 포함) 파일을 만들지 않고 종료
 # - --concepts에 서술 문항이 없는 개념이 있으면 오타로 보고 종료; 조용히 빈 줄이 빠지는 일을 막음
+# - 이미 있는 파일은 덮어쓰지 않음; 채운 답 원문 보호(Git 밖이라 되살릴 수 없음)
+#   - 'x' 모드로 열어 확인과 생성을 한 번에 함; 확인 뒤 다른 프로세스가 같은 파일을 만드는 틈도 막음
 # - 엑셀에서 한글이 깨지지 않게 UTF-8 BOM(utf-8-sig)으로 씀
 def main(argv=None):
     parser = argparse.ArgumentParser(description='서술 문항 한국어 답 수집 시트 내보내기')
@@ -62,7 +64,11 @@ def main(argv=None):
     rows = build_rows(items, set(args.concepts) if args.concepts else None)
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, 'w', encoding='utf-8-sig', newline='') as file:
+    try:
+        file = open(out, 'x', encoding='utf-8-sig', newline='')
+    except FileExistsError:
+        parser.error(f'이미 있는 파일은 덮어쓰지 않습니다(채운 답 보호). 다른 경로를 쓰세요: {out}')
+    with file:
         writer = csv.DictWriter(file, fieldnames=COLUMNS)
         writer.writeheader()
         writer.writerows(rows)

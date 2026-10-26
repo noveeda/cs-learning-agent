@@ -77,6 +77,13 @@ class AnswerSheetTest(unittest.TestCase):
             answer_sheet.main(['--out', str(self.out), '--concepts', 'stak'])
         self.assertFalse(self.out.exists())
 
+    # 검증: 이미 있는 시트를 다시 만들라고 하면 거부하고 내용을 그대로 둠; 사람이 채운 답 원문은 Git 밖이라 되살릴 수 없기 때문
+    def test_refuses_to_overwrite_existing_sheet(self):
+        self.out.write_text('filled', encoding='utf-8')
+        with self.assertRaises(SystemExit):
+            answer_sheet.main(['--out', str(self.out)])
+        self.assertEqual(self.out.read_text(encoding='utf-8'), 'filled')
+
     # 검증: ai-core/outputs/ 밖 경로와 ../로 빠져나가는 경로를 거부하고 파일을 만들지 않음; 답 원문이 Git에 들어가는 일을 막음
     def test_rejects_path_outside_outputs(self):
         with tempfile.TemporaryDirectory() as other:
