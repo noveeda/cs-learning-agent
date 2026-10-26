@@ -43,6 +43,43 @@ class SplitTest(unittest.TestCase):
         self.assertEqual(set(dev) | set(report), set(questions))
         self.assertEqual((dev, report), mohler.split_questions(list(reversed(rows)), seed=7))
 
+    # 검증: 문항 ID가 달라도 질문 문장(대소문자·문장부호·공백 정리 후)이 같으면 seed와 무관하게 늘 같은 분할에 들어감
+    # - 원본에는 같은 질문이 다른 과제에 다시 나옴(예: E09.Q01·E12.Q06 'What is a queue?')
+    #   둘이 갈리면 dev에서 고른 기준이 report 문항과 같은 질문·모범 답을 이미 본 셈이 됨
+    def test_same_question_text_stays_together(self):
+        rows = [row(f'E01.Q{q:02d}', 0, 4.0) for q in range(1, 9)]
+        twins = [row('E02.Q01', 0, 4.0), row('E03.Q05', 0, 4.0)]
+        twins[0]['question'], twins[1]['question'] = 'What is a queue?', '  what is a QUEUE '
+        for seed in range(40):
+            dev, report = mohler.split_questions(rows + twins, seed=seed)
+            self.assertEqual('E02.Q01' in dev, 'E03.Q05' in dev, seed)
+            self.assertEqual(set(dev) | set(report), {r['id'].rsplit('.', 1)[0] for r in rows + twins})
+            self.assertLessEqual(abs(len(dev) - len(report)), 2)
+
+    # 검증: 문장은 다르지만 뜻이 같다고 명시한 묶음(SAME_MEANING)도 seed와 무관하게 늘 같은 분할에 들어감
+    def test_same_meaning_pairs_stay_together(self):
+        ids = sorted({q for pair in mohler.SAME_MEANING for q in pair}) + [f'E01.Q{q:02d}' for q in range(1, 9)]
+        rows = [row(q, 0, 4.0) for q in ids]
+        for seed in range(40):
+            dev, _ = mohler.split_questions(rows, seed=seed)
+            for first, second in mohler.SAME_MEANING:
+                self.assertEqual(first in dev, second in dev, (seed, first, second))
+
+    # 검증: PR #70 검수에서 찾은, 질문 표현은 달라도 모범 답 핵심이 같은 문항들이 한 묶음으로 같은 분할에 들어감
+    # - 스택 연산 묶음은 쌍 두 개(E08.Q02·E12.Q07, E08.Q02·E09.Q06)가 이어져 세 문항이 한 묶음이 됨
+    # - 큐 묶음은 같은 문장 묶음과 SAME_MEANING 쌍이 이어지는 경우(두 묶는 방식이 함께 작동하는지 확인)
+    def test_review_groups_stay_together(self):
+        groups = [('E05.Q02', 'E12.Q04'), ('E04.Q02', 'E11.Q08'), ('E04.Q03', 'E07.Q04'),
+                  ('E08.Q02', 'E12.Q07', 'E09.Q06'), ('E11.Q09', 'E11.Q10'), ('E09.Q01', 'E12.Q06', 'E09.Q02')]
+        rows = [row(q, 0, 4.0) for group in groups for q in group] + [row(f'E01.Q{q:02d}', 0, 4.0) for q in range(1, 9)]
+        # 큐 묶음: E09.Q01·E12.Q06은 질문 문장이 같아 묶이고, E09.Q02는 SAME_MEANING 쌍(E09.Q02·E12.Q06)으로 이어짐
+        rows[[r['id'] for r in rows].index('E09.Q01.A00')]['question'] = 'What is a queue?'
+        rows[[r['id'] for r in rows].index('E12.Q06.A00')]['question'] = 'What is a queue?'
+        for seed in range(40):
+            dev, _ = mohler.split_questions(rows, seed=seed)
+            for group in groups:
+                self.assertEqual(len({q in dev for q in group}), 1, (seed, group))
+
 
 # 역할: 평가 시험용 데이터; dev 문항 2개·report 문항 2개, 답마다 사람 점수와 AI 충족 목록을 둠
 def evaluation_data(report_cases):

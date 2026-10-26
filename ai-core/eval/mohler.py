@@ -1,6 +1,6 @@
 # 파일 역할: Mohler 단답 채점 데이터(영어 원문)로 운영 서술 채점 경로의 사람 일치도를 재는 개발용 검증 도구(계획 Task 3)
 # - download: Hugging Face 미러의 원본 행을 Git 밖(ai-core/data/raw/mohler/)에 JSONL로 내려받음
-# - split_questions: 문항 단위로 dev·report 절반씩 나눔(같은 문항의 답이 양쪽에 섞이지 않게)
+# - split_questions: 문항 단위로 dev·report 절반씩 나눔(같은 문항의 답, 같은 질문의 다른 문항이 양쪽에 섞이지 않게)
 # - grade: 운영 채점 경로(StuckModelGateway.grade_explanation)로 답마다 루브릭 항목 충족을 판정, 중단 후 이어하기
 # - evaluate: dev에서 AI 통과 임계값을 고르고 report에서 한 번만 kappa·거짓 통과율 등을 잼
 # - 이 결과는 영어 원문 개발용이고, M3 최종 근거는 한국어 사람 라벨이다(설계 2-4)
@@ -14,6 +14,7 @@
 import argparse
 import json
 import random
+import re
 import sys
 import threading
 import urllib.parse
@@ -37,6 +38,29 @@ PAGE = 100
 COLUMNS = ('id', 'question', 'instructor_answer', 'student_answer', 'score_grader_1', 'score_grader_2', 'score_avg')
 # 분할 seed는 결과를 보기 전에 고정(계획 작성일)
 SPLIT_SEED = 20261026
+# 문장은 다르지만 같은 질문인 문항 쌍; 분할에서 한 묶음으로 둠(문장이 정규화 후 완전히 같은 쌍은 코드가 따로 묶음)
+# - 같은 질문·비슷한 모범 답이 dev와 report에 갈리면 dev에서 고른 기준이 report를 본 셈이 되기 때문
+# - 선정 규칙: 질문 표현과 상관없이 "모범 답(instructor_answer)의 핵심이 같으면" 묶음
+#   - 질문 81개 전체 쌍을 질문 문자열 유사도(difflib)와 모범 답 단어 겹침으로 훑고 사람이 골랐음(2026-10-26, PR #70 검수 반영)
+#   - 묶어서 잃는 것은 분할 균형 약간뿐이고, 안 묶으면 누출 위험이 남으므로 경계 사례는 묶는 쪽을 택함
+#   - 쌍이 이어지면(E08.Q02-E12.Q07, E08.Q02-E09.Q06) 한 묶음이 됨
+# - 괄호 안은 질문 유사도
+SAME_MEANING = (
+    ('E04.Q04', 'E11.Q07'),  # static 배열과 아닌 배열의 차이 (0.95)
+    ('E07.Q02', 'E12.Q05'),  # 연결 리스트가 배열보다 나은 점 (0.95)
+    ('E02.Q01', 'E11.Q01'),  # class 정의에 들어가는 요소 (0.85)
+    ('E03.Q01', 'E11.Q04'),  # function signature에 들어가는 것 / function signature란 (0.82, 경계라 안전하게 묶음)
+    ('E10.Q07', 'E12.Q10'),  # BST에서 원소를 찾는 비교·단계 수 (0.78)
+    ('E05.Q02', 'E12.Q04'),  # 선택 정렬의 핵심 아이디어 / 동작 방식; 모범 답 모두 "남은 원소 중 최솟값을 골라 앞 자리와 교환" (0.39)
+    ('E04.Q02', 'E11.Q08'),  # string 타입과 char 배열 문자열의 차이; 모범 답 모두 "char 배열 끝의 null 문자" (0.64)
+    ('E08.Q02', 'E12.Q07'),  # 스택이 정의하는 두 주요 함수 / 스택의 주요 연산; 모범 답 모두 "push and pop" (0.71)
+    ('E08.Q02', 'E09.Q06'),  # 큐의 enqueue에 해당하는 스택 연산; 모범 답 "push"가 위 쌍의 모범 답에 포함됨 (경계라 묶음)
+    ('E04.Q03', 'E07.Q04'),  # 배열 / 연결 리스트를 함수 인자로 넘기는 방식; 모범 답 모두 "by reference" (경계라 묶음)
+    ('E11.Q09', 'E11.Q10'),  # 분할 정복 설명 / 병합 정렬 동작; 모범 답 모두 "나눔 → 재귀로 해결 → 합침" 3단계 (0.51, 경계라 묶음)
+    ('E09.Q02', 'E12.Q06'),  # 큐의 두 주요 함수 / 큐란; E12.Q06 모범 답에 "enqueue and dequeue"가 들어 있음 (0.46)
+                             # - E09.Q06과 스택 연산 묶음처럼 포함 관계라 묶음. E12.Q06은 같은 문장인 E09.Q01과도 묶여 세 문항 묶음이 됨
+)
+# - 경계 탐색은 PR #70 검수 세 번째 라운드로 마감했음. 이후 찾는 후보는 묶지 않고 기록만 함(분할을 계속 바꾸지 않기 위함)
 # 사람 통과 기준(score_avg 0~5점, 이상이면 통과): 주 기준 4.0, 함께 보고 3.5·4.5 (계획 Task 3, 결과 보기 전에 고정)
 HUMAN_THRESHOLDS = (4.0, 3.5, 4.5)
 PRIMARY_HUMAN = 4.0
@@ -79,13 +103,44 @@ def question_id(row_id):
     return row_id.rsplit('.', 1)[0]
 
 
-# 역할: 문항 ID를 seed로 섞어 절반은 dev, 나머지는 report로 나눠 (dev_ids, report_ids)를 정렬된 목록으로 반환
-# - 행 순서와 무관하게 같은 seed면 같은 분할(문항 ID를 먼저 정렬한 뒤 섞음)
+# 역할: 질문 문장을 비교용으로 정리(소문자, 문장부호를 공백으로, 공백 하나로); 'What is a queue?' → 'what is a queue'
+def normalize_question(text):
+    return ' '.join(re.sub(r'[^\w\s]', ' ', text.lower()).split())
+
+
+# 역할: 문항을 묶음 단위로 seed로 섞어 문항 수 절반까지 dev, 나머지는 report로 나눠 (dev_ids, report_ids)를 정렬된 목록으로 반환
+# - 묶음: 정리한 질문 문장이 같은 문항들 + SAME_MEANING 쌍(union-find로 합침). 묶음은 쪼개지 않음
+# - 묶음 때문에 dev가 절반보다 한두 문항 많을 수 있음
+# - 행 순서와 무관하게 같은 seed면 같은 분할(묶음을 정렬한 뒤 섞음)
+# - 묶음이 모두 한 문항이면 예전(문항 ID만 섞던) 분할과 결과가 같음: shuffle은 목록 길이로만 순서를 정하기 때문
 def split_questions(rows, seed=SPLIT_SEED):
-    ids = sorted({question_id(r['id']) for r in rows})
-    random.Random(seed).shuffle(ids)
-    half = len(ids) // 2
-    return sorted(ids[:half]), sorted(ids[half:])
+    parent = {}
+
+    def find(q):
+        while parent[q] != q:
+            q = parent[q]
+        return q
+
+    def union(a, b):
+        parent[find(a)] = find(b)
+
+    by_text = {}
+    for r in rows:
+        q = question_id(r['id'])
+        parent.setdefault(q, q)
+        union(q, by_text.setdefault(normalize_question(r['question']), q))
+    for a, b in SAME_MEANING:
+        if a in parent and b in parent:
+            union(a, b)
+    groups = {}
+    for q in parent:
+        groups.setdefault(find(q), []).append(q)
+    ordered = sorted(sorted(group) for group in groups.values())
+    random.Random(seed).shuffle(ordered)
+    half, dev, report = len(parent) // 2, [], []
+    for group in ordered:
+        (dev if len(dev) < half else report).extend(group)
+    return sorted(dev), sorted(report)
 
 
 # 역할: rubrics.jsonl({question_id, rubric: [..]})을 {question_id: rubric} 사전으로 읽음
