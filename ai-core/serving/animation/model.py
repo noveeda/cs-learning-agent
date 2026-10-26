@@ -35,10 +35,12 @@ class Box(Strict):
 
 
 # 역할: 같은 프레임의 두 상자를 잇는 화살표(포인터·참조)
+# - head: False면 화살촉 없는 선. 무방향 그래프 간선처럼 방향이 없는 연결에 씀(기본은 화살촉 있음)
 class Arrow(Strict):
     source: str
     target: str
     label: str | None = Field(default=None, max_length=8)
+    head: bool = True
 
 
 # 역할: 한 단계의 화면. 상자·화살표 개수 상한은 한 화면에 그릴 수 있는 분량

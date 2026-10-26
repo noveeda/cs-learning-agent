@@ -1,7 +1,10 @@
 # 파일 역할: 그래프 탐색(BFS·DFS)·정렬(삽입·병합·퀵)·트리 순회 장면이 참조 구현과 같은 순서·결과를 그리고,
 # 실행할 수 없는 요청을 거부하며, 개념별로 허용한 알고리즘만 장면 선택 schema에 남기는지 검증
 # - 상태는 코드가 계산한다는 원칙(MVP 2): 프레임의 방문 순서·정렬 결과가 교과서 알고리즘과 다르면 학생이 틀린 과정을 배움
+import itertools
 import json
+import math
+import random
 import unittest
 from collections import deque
 
@@ -28,6 +31,13 @@ def visit_row(animation):
 # 역할: 프레임의 정렬 배열 줄(y=0 cell)을 x 순서대로 읽음
 def array_row(frame):
     return [int(b.label) for b in sorted((b for b in frame.boxes if b.y == 0 and b.shape == 'cell'), key=lambda b: b.x)]
+
+
+# 역할: 점 p에서 선분 a-b까지의 최단 거리(픽셀)
+def segment_distance(p, a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    t = max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy)))
+    return math.dist(p, (a[0] + t * dx, a[1] + t * dy))
 
 
 # 역할: 이웃을 이름 오름차순으로 보는 인접 리스트(참조 구현용)
@@ -115,12 +125,44 @@ class GraphTraversalTest(unittest.TestCase):
         dfs = run({'kind': 'graph_traversal', **GRAPH, 'directed': False, 'start': 'A', 'order': 'dfs'})
         self.assertTrue(any(b.shape == 'label' and b.label == 'stack' for b in dfs.frames[1].boxes))
 
-    # 검증 목적: 프런트엔드는 화살표만 그리므로 무방향 간선은 양쪽 화살표 2개, 방향 간선은 1개로 그림
-    def test_undirected_edges_drawn_both_ways(self):
+    # 검증 목적: 무방향 간선은 화살촉 없는 선 하나, 방향 간선은 화살촉 있는 화살표 하나로 그림
+    # - 반대 방향 화살표 두 개를 겹쳐 그리면 양 끝 화살촉 선으로 보여 무방향 그래프를 잘못 읽게 됨
+    def test_undirected_edges_drawn_as_plain_lines(self):
         undirected = run({'kind': 'graph_traversal', **GRAPH, 'directed': False, 'start': 'A', 'order': 'bfs'})
         directed = run({'kind': 'graph_traversal', **GRAPH, 'directed': True, 'start': 'A', 'order': 'bfs'})
-        self.assertEqual(len(undirected.frames[0].arrows), 8)
+        self.assertEqual(len(undirected.frames[0].arrows), 4)
+        self.assertTrue(all(not arrow.head for arrow in undirected.frames[0].arrows))
         self.assertEqual(len(directed.frames[0].arrows), 4)
+        self.assertTrue(all(arrow.head for arrow in directed.frames[0].arrows))
+        # 기존 장면(연결 리스트 next 등)은 지정하지 않아도 화살촉 있음
+        linked = run({'kind': 'linked_list', 'values': [1, 2], 'ops': [{'op': 'insert_head', 'value': 0}]})
+        self.assertTrue(all(arrow.head for frame in linked.frames for arrow in frame.arrows))
+
+    # 검증 목적: 무작위 그래프 수천 개에서 정점끼리 붙거나 간선이 다른 정점 위를 지나지 않는지 확인
+    # - 거리는 화면 픽셀(칸 64×56) 기준; 정점은 폭 44·높이 40이라 중심이 120px 이상 떨어지면 사이 선이 보이고,
+    #   간선이 다른 정점 중심에서 35px 이상 떨어지면 정점 테두리를 지나지 않음
+    def test_layout_keeps_vertices_apart_on_random_graphs(self):
+        rng = random.Random(7)
+        for _ in range(3000):
+            n = rng.randint(2, 8)
+            nodes = [chr(ord('A') + i) for i in range(n)]
+            directed = rng.random() < 0.5
+            pairs = [p for p in itertools.permutations(nodes, 2) if directed or p[0] < p[1]]
+            edges = [list(p) for p in rng.sample(pairs, min(len(pairs), rng.randint(0, 12)))]
+            request = {'kind': 'graph_traversal', 'nodes': nodes, 'edges': edges, 'directed': directed,
+                       'start': rng.choice(nodes), 'order': rng.choice(['bfs', 'dfs'])}
+            frame = run(request).frames[0]
+            places = {b.id: (b.x * 64, b.y * 56) for b in frame.boxes if b.shape == 'node'}
+            with self.subTest(request=request):
+                self.assertEqual(len(set(places.values())), n)
+                self.assertTrue(all(b.y < 6 for b in frame.boxes if b.shape == 'node'))
+                for a, b in itertools.combinations(places.values(), 2):
+                    self.assertGreaterEqual(math.dist(a, b), 120)
+                for arrow in frame.arrows:
+                    ends = places[arrow.source], places[arrow.target]
+                    for node, center in places.items():
+                        if node not in (arrow.source, arrow.target):
+                            self.assertGreaterEqual(segment_distance(center, *ends), 35)
 
     # 검증 목적: 없는 시작 정점·없는 정점을 잇는 간선·자기 간선·중복 간선·중복 정점 이름은 요청 검증에서 거부
     def test_unknown_start_rejected(self):

@@ -16,7 +16,13 @@ export type Box = {
 };
 
 // 역할: 두 상자를 잇는 화살표(연결 리스트의 next, 포인터 등); 상자 id로 양 끝을 가리킴
-export type Arrow = { source: string; target: string; label?: string | null };
+// - head가 false면 화살촉 없는 선(무방향 그래프 간선); 필드가 없던 기존 장면은 화살촉을 그림
+export type Arrow = {
+  source: string;
+  target: string;
+  label?: string | null;
+  head?: boolean;
+};
 
 // 역할: 한 단계의 화면과 한 줄 설명
 export type Frame = { boxes: Box[]; arrows: Arrow[]; caption: string };

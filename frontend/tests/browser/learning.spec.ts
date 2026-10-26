@@ -211,6 +211,10 @@ test("애니메이션 artifact: 복구·단계 이동·수정 요청에 artifact
   await expect(page.locator(".artifact-chip")).toContainText("스택 push·pop");
   await panel.getByRole("button", { name: "다음 단계" }).click();
   await expect(panel).toContainText("push 1: 1을 top 위에 올립니다");
+  // head를 지정하지 않은 기존 장면의 화살표(top → 원소)는 화살촉을 그대로 그림
+  await expect(panel.locator(".animation-arrows line[marker-end]")).toHaveCount(
+    1,
+  );
   // 세로 가운데 정렬이면 짧은 장면 위로 빈 점무늬 영역이 크게 남으므로 재생기가 무대 위쪽에 붙어 있는지 확인
   const stage = await panel.locator(".diagram-stage").boundingBox();
   const player = await panel.locator(".animation-player").boundingBox();
