@@ -16,8 +16,11 @@ ALGORITHMS = {'fcfs': 'FCFS 스케줄링', 'sjf': 'SJF 스케줄링(비선점)',
 KEYS = {'sjf': lambda p: (p.burst, p.arrival, p.name), 'priority': lambda p: (p.priority, p.arrival, p.name)}
 
 
-# 역할: 스케줄을 계산해 실행 구간 목록을 반환. 구간 = (프로세스 또는 None(유휴), 시작, 끝, 꺼낸 뒤 준비 큐, 끝났는지)
+# 역할: 스케줄을 계산해 실행 구간 목록을 반환. 구간 = (프로세스 또는 None(유휴), 시작, 끝, 기다리는 준비 큐, 끝났는지)
 # - 비선점(FCFS·SJF·우선순위)은 남은 시간을 한 번에, RR은 quantum만큼만 실행
+# - 기다리는 준비 큐: 구간 끝 시각까지 도착한 프로세스를 넣은 뒤의 큐(실행 중인 프로세스는 빼고)
+#   한 구간을 프레임 하나로 묶으므로, 꺼낸 순간의 큐만 그리면 구간 중에 도착해 기다린 프로세스가 화면에서 빠지기 때문
+#   유휴 구간은 비워 둠: 설명이 "준비 큐가 비어"이고, 끝 시각에 도착한 프로세스는 다음 프레임에서 바로 꺼내지기 때문
 # - 준비 큐가 비면 다음 도착까지 유휴 구간을 넣음
 def schedule(req: CpuScheduleRequest) -> list[tuple]:
     pending = sorted(req.processes, key=lambda p: (p.arrival, p.name))
@@ -39,12 +42,12 @@ def schedule(req: CpuScheduleRequest) -> list[tuple]:
         key = KEYS.get(req.algorithm)
         proc = min(ready, key=key) if key else ready[0]
         ready.remove(proc)
-        queue = sorted(ready, key=key) if key else list(ready)
         run = min(req.quantum, left[proc.name]) if req.algorithm == 'rr' else left[proc.name]
         start, time = time, time + run
         left[proc.name] -= run
         # 새 도착을 먼저 넣고 나서 할당량이 끝난 프로세스를 큐 뒤로 보냄(RR 동점 규칙)
         admit(time)
+        queue = sorted(ready, key=key) if key else list(ready)
         if left[proc.name]:
             ready.append(proc)
         segments.append((proc, start, time, queue, not left[proc.name]))
@@ -80,7 +83,8 @@ def describe(req, proc, start, end, done, wait) -> str:
     return f'{span}: {reason}, 남은 일은 큐 뒤로'
 
 
-# 역할: CPU 스케줄링 장면 실행. 첫 프레임은 입력 소개, 구간마다 한 프레임, 마지막 프레임은 평균 대기 시간
+# 역할: CPU 스케줄링 장면 실행. 첫 프레임은 입력 소개, 구간마다 한 프레임, 마지막 프레임은 끝 시각과 평균 대기 시간
+# - 끝 시각은 마지막 설명에 적음: 눈금(y=0)은 칸의 시작 시각만 적고, 12칸을 다 쓰면 끝 시각 눈금을 둘 칸(x=12)이 없기 때문
 # - 대기 시간 = 끝난 시각 - 도착 시각 - 실행 시간(준비 큐에서 기다린 시간의 합)
 def simulate_cpu_schedule(req: CpuScheduleRequest) -> Animation:
     segments = schedule(req)
@@ -100,6 +104,6 @@ def simulate_cpu_schedule(req: CpuScheduleRequest) -> Animation:
         frames.append(gantt_frame(req, total, cells, queue, waits, caption, range(start, end)))
     ordered = [waits[name] for name in sorted(waits)]
     average = sum(ordered) / len(ordered)
-    summary = f'끝: 평균 대기 시간 = ({"+".join(map(str, ordered))})/{len(ordered)} = {average:.2f}'
+    summary = f'끝(시각 {total}): 평균 대기 시간 = ({"+".join(map(str, ordered))})/{len(ordered)} = {average:.2f}'
     frames.append(gantt_frame(req, total, cells, [], waits, summary))
     return build_animation('cpu_schedule', title, frames)
