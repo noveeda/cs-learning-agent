@@ -42,16 +42,21 @@ CONCEPT_SCENES: dict[str, tuple[str, ...]] = {
     'heap': ('heap',), 'priority-queue': ('heap',), 'heap-sort': ('heap',),
     'graph': ('graph_traversal',), 'bfs': ('graph_traversal',), 'dfs': ('graph_traversal',),
     'sorting-basics': ('sort',), 'merge-sort': ('sort',), 'quick-sort': ('sort',),
+    'scheduling-metrics': ('cpu_schedule',), 'fcfs': ('cpu_schedule',), 'sjf': ('cpu_schedule',),
+    'round-robin': ('cpu_schedule',), 'priority-scheduling': ('cpu_schedule',),
 }
 
 # 개념별로 장면 필드의 허용 값을 좁히는 표(개념 지도 ID → {필드: 허용 값})
 # - 같은 장면 종류라도 개념에 맞는 알고리즘만 보여 주기 위함. 예: 병합 정렬 보충에 삽입 정렬 장면이 나오지 않게 함
 # - graph(그래프 기초)는 BFS로 둠: 시작점에서 가까운 정점부터 퍼지는 모습이 경로·연결 요소를 보여 주기에 알맞음
 # - sorting-basics는 선택·삽입·버블 중 장면이 있는 삽입 정렬만. tree-traversal은 전위·중위·후위 모두 허용
+# - scheduling-metrics는 같은 입력의 대기 시간을 비교하기 쉬운 fcfs·sjf만 허용
 # - 장면 선택 schema·형식 예시·응답 검증에 모두 적용(scene_schema, scene_formats, check_limits)
 CONCEPT_SCENE_LIMITS: dict[str, dict[str, tuple[str, ...]]] = {
     'graph': {'order': ('bfs',)}, 'bfs': {'order': ('bfs',)}, 'dfs': {'order': ('dfs',)},
     'sorting-basics': {'algorithm': ('insertion',)}, 'merge-sort': {'algorithm': ('merge',)}, 'quick-sort': {'algorithm': ('quick',)},
+    'scheduling-metrics': {'algorithm': ('fcfs', 'sjf')}, 'fcfs': {'algorithm': ('fcfs',)}, 'sjf': {'algorithm': ('sjf',)},
+    'round-robin': {'algorithm': ('rr',)}, 'priority-scheduling': {'algorithm': ('priority',)},
 }
 
 # 장면 종류별 입력 형식 예시; 장면 선택 요청에 허용 종류의 예시만 넣음
