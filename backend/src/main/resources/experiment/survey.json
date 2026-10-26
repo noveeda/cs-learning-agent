@@ -1,0 +1,7 @@
+[
+  {"id": "survey-1", "format": "scale", "question": "첫 번째 도구는 막힌 부분을 이해하는 데 얼마나 도움이 됐나요?", "options": {"1": "전혀 아니다", "2": "아니다", "3": "보통이다", "4": "그렇다", "5": "매우 그렇다"}},
+  {"id": "survey-2", "format": "scale", "question": "두 번째 도구는 막힌 부분을 이해하는 데 얼마나 도움이 됐나요?", "options": {"1": "전혀 아니다", "2": "아니다", "3": "보통이다", "4": "그렇다", "5": "매우 그렇다"}},
+  {"id": "survey-3", "format": "choice", "question": "다음에 비슷한 상황에서 막히면 어느 도구를 쓰고 싶나요?", "options": {"first": "첫 번째 도구", "second": "두 번째 도구", "either": "상관없음"}},
+  {"id": "survey-4", "format": "text", "question": "글을 읽다가 어디서, 왜 막혔나요?"},
+  {"id": "survey-5", "format": "text", "question": "그 밖에 하고 싶은 말이 있나요?"}
+]
