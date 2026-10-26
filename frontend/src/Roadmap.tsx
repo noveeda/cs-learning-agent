@@ -1,8 +1,10 @@
-// 파일 역할: 개념 지도를 선수 관계 단계(위→아래)로 그리고 관계 강조·상세 선택·학습 진입 제공
+// 파일 역할: 개념 지도를 선수 관계 단계(위→아래)로 그리고 과목 구분·필터, 관계 강조·상세 선택·학습 진입 제공
 import { useMemo, useState, type CSSProperties } from "react";
 import { ArrowUpRight, BookOpen, RotateCcw } from "lucide-react";
 import {
+  filterBySubject,
   layoutConcepts,
+  listSubjects,
   statusLabels,
   type Concept,
   type LearningStatus,
@@ -67,16 +69,35 @@ export function Roadmap({
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
-  const { layers, positions } = useMemo(
-    () => layoutConcepts(concepts),
-    [concepts],
+  // 과목 필터("all" 또는 과목 ID); 저장하지 않는 화면 상태라 새로고침하면 전체로 돌아감
+  const [subjectFilter, setSubjectFilter] = useState("all");
+  const subjects = useMemo(() => listSubjects(concepts), [concepts]);
+  // 과목이 둘 이상일 때만 과목 표식·필터를 보여 줌; 자료구조 지도만 있을 때는 기존 화면과 같음
+  const multiSubject = subjects.length > 1;
+  // 지도가 바뀌어 고른 과목이 없어졌으면 전체로 봄
+  const shownSubject = subjects.some((item) => item.id === subjectFilter)
+    ? subjectFilter
+    : "all";
+  // 지도 배치·선은 필터를 거친 개념(숨긴 과목을 가리키는 선수 관계 제외)으로 그림
+  const visible = useMemo(
+    () => filterBySubject(concepts, shownSubject),
+    [concepts, shownSubject],
   );
+  const { layers, positions } = useMemo(
+    () => layoutConcepts(visible),
+    [visible],
+  );
+  // 상세 패널·선수 개념 이름은 필터와 무관한 원본 개념을 써서 과목 사이 선수 관계도 보여 줌
   const byId = useMemo(
     () => new Map(concepts.map((concept) => [concept.id, concept])),
     [concepts],
   );
-  // 저장된 선택이 지도에 없으면(첫 방문·지도 변경) 첫 개념을 보여 줌
-  const selected = byId.get(state.selectedId) ?? concepts[0];
+  // 역할: 개념이 지금 지도에 그려지는지 확인; 저장값 ID가 constructor 같은 기본 속성 이름이어도 오판하지 않게 자기 속성만 봄
+  const isShown = (id: string) => Object.hasOwn(positions, id);
+  // 저장된 선택이 지도에 없거나 필터로 숨겨졌으면(첫 방문·지도 변경·과목 필터) 보이는 첫 개념을 보여 줌
+  const selected = byId.get(
+    isShown(state.selectedId) ? state.selectedId : visible[0].id,
+  )!;
   const status = state.statuses[selected.id] || "not-started";
   const successorsOf = (id: string) =>
     concepts.filter((concept) =>
@@ -107,6 +128,11 @@ export function Roadmap({
     },
     onBlur: () => setFocusedId(null),
   });
+  // 역할: 상세 패널에서 다른 과목 개념(예: 운영체제 개념의 선수 개념 큐)을 고르면 필터를 풀어 그 개념이 지도에 보이게 함
+  const select = (id: string) => {
+    if (!isShown(id)) setSubjectFilter("all");
+    onSelect(id);
+  };
   const widest = Math.max(...layers.map((ids) => ids.length));
   // 역할: 단계·줄 안 위치를 캔버스 왼쪽 위 기준 px 좌표로 변환
   const origin = (id: string) => ({
@@ -118,7 +144,7 @@ export function Roadmap({
   });
   const width = gutter + widest * column;
   const height = (layers.length - 1) * row + nodeHeight;
-  const edges = concepts.flatMap((concept) =>
+  const edges = visible.flatMap((concept) =>
     concept.prerequisites.map((p) => ({ source: p.id, target: concept.id })),
   );
   // 강조 선을 나중에 그려 옅은 선 위에 보이게 함(SVG는 나중 요소가 위)
@@ -135,7 +161,12 @@ export function Roadmap({
       <section className="card roadmap-map" aria-label="개념 연결 지도">
         <div className="roadmap-heading">
           <div>
-            <span className="badge">{selected.domain} 개념 지도</span>
+            <span className="badge">
+              {shownSubject === "all"
+                ? subjects.map((item) => item.title).join(" + ")
+                : subjects.find((item) => item.id === shownSubject)!.title}{" "}
+              개념 지도
+            </span>
             <h2>어떤 개념을 살펴볼까요?</h2>
             <p>
               위에서 아래로 갈수록 앞 단계 개념을 먼저 알아야 하는 개념이에요.
@@ -145,6 +176,28 @@ export function Roadmap({
           </div>
           <BookOpen size={22} aria-hidden="true" />
         </div>
+        {/* 과목 필터가 범례를 겸함: 버튼의 색 막대가 지도 노드 위쪽의 과목 표식과 같은 모양 */}
+        {multiSubject && (
+          <div className="subject-filter" role="group" aria-label="과목">
+            {[{ id: "all", title: "전체" }, ...subjects].map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                aria-pressed={shownSubject === item.id}
+                onClick={() => setSubjectFilter(item.id)}
+              >
+                {item.id !== "all" && (
+                  <span
+                    className="subject-swatch"
+                    data-subject={item.id}
+                    aria-hidden="true"
+                  />
+                )}
+                {item.title}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="roadmap-legend" aria-label="학습 상태 범례">
           {Object.entries(statusLabels).map(([key, label]) => (
             <span className={`status-badge ${key}`} key={key}>
@@ -226,11 +279,12 @@ export function Roadmap({
                       className={`roadmap-node ${currentStatus}`}
                       key={concept.id}
                       data-concept={concept.id}
+                      data-subject={multiSubject ? concept.subject : undefined}
                       data-active={activeId === concept.id}
                       data-emphasis={emphasis(concept.id)}
                       {...interaction(concept.id)}
                       aria-pressed={selected.id === concept.id}
-                      aria-label={`${concept.title} · ${statusLabels[currentStatus]}`}
+                      aria-label={`${concept.title}${multiSubject ? ` · ${concept.domain}` : ""} · ${statusLabels[currentStatus]}`}
                       style={origin(concept.id)}
                       onClick={() => {
                         onSelect(concept.id);
@@ -305,7 +359,7 @@ export function Roadmap({
               <li key={p.id}>
                 <button
                   className="button secondary"
-                  onClick={() => onSelect(p.id)}
+                  onClick={() => select(p.id)}
                 >
                   {byId.get(p.id)?.title}
                   <ArrowUpRight size={14} aria-hidden="true" />
@@ -324,7 +378,7 @@ export function Roadmap({
               <li key={item.id}>
                 <button
                   className="button secondary"
-                  onClick={() => onSelect(item.id)}
+                  onClick={() => select(item.id)}
                 >
                   {item.title}
                   <ArrowUpRight size={14} aria-hidden="true" />

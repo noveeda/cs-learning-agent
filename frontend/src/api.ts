@@ -44,9 +44,11 @@ export function toolProgress(name: string | undefined, failed: boolean): string 
 }
 
 // 응답에서 화면이 쓰는 필드만 꺼내기 위한 최소 형태; 그래프 규칙 검증은 AI core가 담당
+// - subjects·subject는 여러 과목 지도(MVP 4)부터 오므로 선택 필드로 둠
 type ConceptMapResponse = {
   title: string;
-  concepts: Omit<Concept, 'domain' | 'stuckSupported'>[];
+  subjects?: { id: string; title: string }[];
+  concepts: (Omit<Concept, 'subject' | 'domain' | 'stuckSupported'> & { subject?: string })[];
   stuck_supported?: string[];
 };
 
@@ -58,6 +60,8 @@ export function isStuckSupported(map: { stuck_supported?: string[] }, conceptId:
 }
 
 // 역할: /api/concept-map을 받아 로드맵용 개념 목록으로 변환; 실패 시 화면에 보여 줄 한국어 안내를 담아 예외
+// - domain은 개념이 속한 과목 이름; 합친 지도의 제목(CS 전공)이 아니라 과목 이름이 학습 화면에 보이게 함
+// - subject·subjects가 없는 옛 응답은 자료구조 지도 하나뿐이었으므로 dsa 과목, 이름은 지도 제목으로 봄
 export async function loadConceptMap(): Promise<Concept[]> {
   let response: Response;
   try {
@@ -74,8 +78,10 @@ export async function loadConceptMap(): Promise<Concept[]> {
   }
   if (!Array.isArray(body?.concepts)) throw new Error('개념 지도 형식이 올바르지 않습니다.');
   const map = body as ConceptMapResponse;
-  return map.concepts.map(({ id, title, description, objectives, prerequisites }) => ({
-    id, title, description, objectives, prerequisites, domain: map.title,
+  const subjects = Array.isArray(map.subjects) ? map.subjects : [{ id: 'dsa', title: map.title }];
+  return map.concepts.map(({ id, title, description, objectives, prerequisites, subject = 'dsa' }) => ({
+    id, title, description, objectives, prerequisites, subject,
+    domain: subjects.find((item) => item.id === subject)?.title ?? subject,
     stuckSupported: isStuckSupported(map, id),
   }));
 }
