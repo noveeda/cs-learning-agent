@@ -126,8 +126,13 @@ class RequestShapeTests(unittest.TestCase):
         g = gateway(client)
         self.assertEqual(g.explain(concept, 1, entry), '**추상 자료형과 구현** 보충 설명')
         g.explain(concept, 2, entry)
-        first, second = (json.loads(kw['messages'][1]['content']) for _, kw in client.requests)
+        scene = {**STACK_SCENE, 'steps': ['빈 스택에서 시작합니다', 'push 1: 1을 top 위에 올립니다']}
+        g.explain(concept, 1, entry, scene)
+        first, second, with_scene = (json.loads(kw['messages'][1]['content']) for _, kw in client.requests)
         self.assertEqual(first['concept']['objectives'], concept.objectives)
+        # 장면이 있을 때만 그 요약(요청 + 단계 캡션)을 scene으로 넘김; 장면이 없으면 키 자체가 없어 글만 씀
+        self.assertNotIn('scene', first)
+        self.assertEqual(with_scene['scene'], scene)
         self.assertEqual(first['stuck_at'], {'excerpt': '스택이 왜 추상 자료형이죠?'})
         self.assertEqual((first['approach'], second['approach']), (EXPLAIN_APPROACHES[1], EXPLAIN_APPROACHES[2]))
         self.assertNotIn('response_format', client.requests[0][1])
@@ -149,6 +154,21 @@ class RequestShapeTests(unittest.TestCase):
         self.assertIn('새 수치 계산 예시는 넣지 않는다', EXPLAIN_APPROACHES[3])
         self.assertIn('정의를 말할 때는 concept.description 문장을 거의 그대로 쓴다', prompt)
         self.assertIn('적어 둔 상태를 다시 세어 맞는지 확인한다', EXPLAIN_APPROACHES[2])
+
+    # 검증 목적: 실제 스택 E2E에서 나온 보충 글 문제 두 가지를 막는 지시가 빠지지 않는지 확인
+    # - 문제 2: 화면 Markdown은 수식을 렌더링하지 않아 $\rightarrow$ 같은 LaTeX가 글자 그대로 보였음
+    # - 문제 3: 글 예시(최소 힙·mod 10)와 함께 보이는 장면(최대 힙·mod 5)이 달랐음 → scene과 같은 종류·값을 쓰게 함
+    #   단계 상태는 steps(코드 계산)를 따르게 함: 실측에서 모델이 힙 단계를 직접 계산하다 없는 교환을 쓴 사례가 있었음
+    #   단계 전체는 애니메이션이 보여 주므로 글은 핵심 단계만 짚게 함: 모든 단계를 다시 늘어놓아 글이 길어지는 것을 막음
+    def test_explain_prompt_matches_scene_and_avoids_latex(self):
+        prompt = PROMPTS['explain']
+        self.assertIn('수식 표기(LaTeX, $…$)를 쓰지 않고', prompt)
+        self.assertIn('→ 같은 기호나 말로 쓴다', prompt)
+        self.assertIn('입력에 scene이 있으면', prompt)
+        self.assertIn('같은 종류·같은 값', prompt)
+        self.assertIn('k mod buckets', prompt)
+        self.assertIn('steps를 그대로 따르고 직접 계산하지 않는다', prompt)
+        self.assertIn('핵심 단계 한두 개만', prompt)
 
     # 검증 목적: 서술 채점이 루브릭 항목 수로 길이를 고정한 criteria 배열 schema를 걸고, 결과를 루브릭 순서의 list[bool]로 돌려주는지 확인
     def test_grade_explanation_keeps_rubric_order(self):
@@ -382,6 +402,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['view']['text'], '**스택** 보충 설명')
 
+    # 검증 목적: 실제 Gateway 경로에서 장면 선택이 설명보다 먼저 나가고, 고른 장면 요청이 설명 입력의 scene으로 들어가는지 확인
+    def test_explain_gets_scene_chosen_first(self):
+        clients = []
+
+        def recording():
+            clients.append(happy_client())
+            return clients[-1]
+        with patch('serving.stuck_llm._default_client', recording):
+            response = self.client.post('/stuck/step', json={'state': self.opted, 'input': {'type': 'continue'}})
+        self.assertEqual(response.status_code, 200)
+        requests = [(r, kw) for c in clients for r, kw in c.requests]
+        self.assertEqual([r for r, _ in requests], ['animate', 'explain'])
+        steps = [frame['caption'] for frame in response.json()['view']['animation']['frames']]
+        self.assertEqual(json.loads(requests[1][1]['messages'][1]['content'])['scene'], {**STACK_SCENE, 'steps': steps})
+
     # 검증 목적: 모델 실패와 모델 잠금 사용 중은 모두 503과 한국어 안내로 끝나는지 확인
     def test_model_failure_and_busy_are_503(self):
         failing = lambda: FakeClient(explain=lambda user, kw: APITimeoutError(request=REQUEST))
@@ -393,7 +428,7 @@ class ApiTests(unittest.TestCase):
             busy = self.client.post('/stuck/step', json={'state': self.opted, 'input': {'type': 'continue'}})
         self.assertEqual((busy.status_code, busy.json()['detail']), (503, '다른 요청을 처리 중입니다. 잠시 후 다시 시도해 주세요.'))
 
-    # 검증 목적: (Review Focus 1) 설명은 성공했는데 장면 선택이 시간 초과로 실패해도 503이 아니라 텍스트 보충 화면(200)을 주는지 확인
+    # 검증 목적: (Review Focus 1) 장면 선택이 시간 초과로 실패해도 설명은 장면 없이 진행해 503이 아니라 텍스트 보충 화면(200)을 주는지 확인
     def test_animation_failure_is_not_503(self):
         clients = []
 
@@ -405,7 +440,9 @@ class ApiTests(unittest.TestCase):
             response = self.client.post('/stuck/step', json={'state': self.opted, 'input': {'type': 'continue'}})
         self.assertEqual(response.status_code, 200)
         self.assertEqual([r for c in clients for r, _ in c.requests],
-                         ['explain'] + ['animate'] * ROLE_SETTINGS['animate'].attempts)
+                         ['animate'] * ROLE_SETTINGS['animate'].attempts + ['explain'])
+        explain_user = json.loads(clients[-1].requests[-1][1]['messages'][1]['content'])
+        self.assertNotIn('scene', explain_user)
         self.assertEqual(response.json()['view']['text'], '**스택** 보충 설명')
         self.assertNotIn('animation', response.json()['view'])
         self.assertFalse(BUSY.locked())

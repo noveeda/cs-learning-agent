@@ -101,9 +101,10 @@ class LLMUnavailable(RuntimeError):
 
 # 역할: 흐름이 쓰는 LLM 역할 5가지의 계약; 실제 구현은 stuck_llm, 테스트는 가짜 구현을 주입
 # - choose_animation: 보충 개념에 보여 줄 장면 요청을 kinds 안에서 고르거나, 알맞은 장면이 없으면 None
+# - explain의 scene: 같은 화면에 보일 장면 요약(_animation 참고, 없으면 None). 글 예시를 장면과 같은 값으로 맞추는 데 씀
 class Gateway(Protocol):
     def identify(self, excerpt: str, concept_map: ConceptMap) -> str | None: ...
-    def explain(self, concept: Concept, attempt: int, entry: Entry) -> str: ...
+    def explain(self, concept: Concept, attempt: int, entry: Entry, scene: dict | None = None) -> str: ...
     def grade_explanation(self, item: Item, answer: str) -> list[bool]: ...
     def summarize(self, state: StuckState, concept_map: ConceptMap) -> str: ...
     def choose_animation(self, concept: Concept, entry: Entry, kinds: tuple[str, ...]) -> AnimationRequest | None: ...
@@ -284,30 +285,38 @@ def _diagnose(s, ctx):
     _next_probe(s, ctx)
 
 
-# 역할: 보충 개념의 단계별 애니메이션을 만듦(장면 선택 LLM 1회 + 코드 시뮬레이션); 붙일 수 없으면 None
+# 역할: 보충 개념의 단계별 애니메이션을 만듦(장면 선택 LLM 1회 + 코드 시뮬레이션)
+# - 반환: (설명에 넘길 장면 요약, 프레임 dict). 붙일 수 없으면 (None, None)
+#   요약 = 장면 요청(종류·order·buckets·시작 값·연산) + 코드가 계산한 단계 캡션(steps)
+#   캡션까지 넘기는 이유: 모델이 단계별 상태를 직접 계산하면 틀릴 수 있음(실측에서 최대 힙에 없는 교환을 씀). 상태는 코드가 계산한 것만 씀
 # - 장면 목록(CONCEPT_SCENES)에 없는 개념은 LLM을 부르지 않음
 # - 애니메이션은 설명을 돕는 부가 자료라, 실패(LLM 오류·검증 실패·실행 불가 연산)해도 503으로 흐름을 멈추지 않고
 #   텍스트 보충만 보여 줌. 실패 이유는 장면 선택 성공률 측정을 위해 로그에 남김
 def _animation(s, ctx, concept_id):
     kinds = CONCEPT_SCENES.get(concept_id)
     if not kinds:
-        return None
+        return None, None
     try:
         request = ctx.gateway.choose_animation(ctx.concept(concept_id), s.entry, kinds)
-        return None if request is None else simulate(request).model_dump()
+        if request is None:
+            return None, None
+        animation = simulate(request).model_dump()
+        return {**request.model_dump(), 'steps': [frame['caption'] for frame in animation['frames']]}, animation
     except (LLMUnavailable, ValueError) as exc:
         _log(s, ctx, 'animation_failed', concept_id, reason=str(exc)[:300])
-        return None
+        return None, None
 
 
-# 역할: S4 보충; 현재 빈틈을 설명하고(LLM 1회) 장면이 있으면 애니메이션(LLM 1회)을 붙인 뒤 같은 화면에 확인 문항을 붙임
+# 역할: S4 보충; 장면이 있으면 먼저 고르고(LLM 1회) 그 장면에 맞춰 설명한 뒤(LLM 1회) 같은 화면에 확인 문항을 붙임
+# - 장면을 먼저 고르는 이유: 설명이 장면 값을 알아야 글 예시와 애니메이션이 같은 예시가 됨(E2E에서 최소 힙 글 + 최대 힙 장면 발견)
+# - 실행에 성공한 장면만 설명에 넘김. 장면이 없거나 실패하면 지금처럼 장면 없이 글만 씀
 # - 설명 실패는 지금처럼 LLMUnavailable(503)로 끝내 상태를 보존하고, 애니메이션 실패는 텍스트만으로 진행
 def _remediate(s, ctx):
     _expect(ctx, 'continue')
     fix = s.fixes[s.cursor]
     fix.attempts += 1
-    text = ctx.gateway.explain(ctx.concept(fix.concept), fix.attempts, s.entry)
-    animation = _animation(s, ctx, fix.concept)
+    scene, animation = _animation(s, ctx, fix.concept)
+    text = ctx.gateway.explain(ctx.concept(fix.concept), fix.attempts, s.entry, scene)
     _log(s, ctx, 'remediated', fix.concept, attempt=fix.attempts, animation_kind=animation['kind'] if animation else None)
     s.view = {'kind': 'remediation', 'concept': _concept_view(ctx, fix.concept), 'attempt': fix.attempts, 'text': text,
               'is_target': s.cursor == len(s.fixes) - 1}
