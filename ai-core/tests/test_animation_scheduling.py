@@ -118,6 +118,34 @@ class FrameTests(unittest.TestCase):
         self.assertEqual(queue, ['P1', 'P2'])
         self.assertIn('준비 큐', [b.label for b in frame.boxes if b.y == 3])
 
+    # 검증 목적: 실행 구간 하나를 묶은 프레임에서, 그 구간 끝까지 도착해 기다리는 프로세스가 준비 큐 줄(y=4)에 보임
+    # - 운영 E2E(2026-10-26) 결함: FCFS "0~5" 프레임에서 그 사이 도착한 P2·P3가 큐에 없었음(꺼낸 순간의 큐만 그림)
+    # - SJF·우선순위는 다음에 고를 순서(실행 시간·우선순위 → 도착 → 이름)로, FCFS·RR은 도착 순서로 보임
+    def test_ready_queue_includes_arrivals_during_segment(self):
+        cases = [
+            # FCFS: 0~5에 P1 실행 중 P2(1)·P3(2) 도착
+            (('fcfs', procs(('P1', 0, 5), ('P2', 1, 3), ('P3', 2, 1)), None), '0~5', ['P2', 'P3']),
+            # SJF: 같은 입력, 기다리는 순서는 실행 시간 순(P3 1, P2 3)
+            (('sjf', procs(('P1', 0, 5), ('P2', 1, 3), ('P3', 2, 1)), None), '0~5', ['P3', 'P2']),
+            # RR q=2: P1 0~2 뒤 큐 [P2, P1], P2 2~4 실행 중 P3(3) 도착 → 기다리는 큐 [P1, P3]
+            (('rr', procs(('P1', 0, 3), ('P2', 1, 2), ('P3', 3, 1)), 2), '2~4', ['P1', 'P3']),
+        ]
+        for (algorithm, processes, quantum), span, expected in cases:
+            animation = run(algorithm, processes, quantum)
+            frame = next(f for f in animation.frames if f.caption.startswith(span + ':'))
+            queue = [b.label for b in sorted((b for b in frame.boxes if b.y == 4), key=lambda b: b.x)]
+            self.assertEqual(queue, expected, algorithm)
+
+    # 검증 목적: 마지막 프로세스가 끝나는 시각이 화면에 보임
+    # - 눈금(y=0)은 칸의 시작 시각(0~총길이-1)만 적어, 끝 시각(예: 9)이 어디에도 나오지 않던 결함(운영 E2E 2026-10-26)
+    # - 12칸을 다 쓰는 장면도 끝 시각 12가 보이고 설명 길이 제한(80자)을 지켜야 함
+    def test_end_time_shown(self):
+        animation = run('fcfs', procs(('P1', 0, 5), ('P2', 1, 3), ('P3', 2, 1)))
+        self.assertIn('시각 9', animation.frames[-1].caption)
+        longest = run('rr', procs(('P1', 0, 3), ('P2', 0, 3), ('P3', 0, 2), ('P4', 0, 2), ('P5', 0, 2)), quantum=1)
+        self.assertIn('시각 12', longest.frames[-1].caption)
+        self.assertLessEqual(len(longest.frames[-1].caption), 80)
+
     # 검증 목적: 채팅 도구 경로(create_animation)로 JSON을 넣어도 장면이 만들어짐
     def test_create_animation(self):
         result = create_animation(json.dumps(SCENE_FORMATS['cpu_schedule']))
