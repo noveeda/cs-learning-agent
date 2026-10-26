@@ -1,4 +1,4 @@
-# 파일 역할: 막힘 흐름의 LLM 역할 4가지(개념 특정·보충 설명·서술 채점·복귀 요약)를 vLLM(OpenAI 호환) 모델에 연결
+# 파일 역할: 막힘 흐름의 LLM 역할 5가지(개념 특정·보충 설명·장면 선택·서술 채점·복귀 요약)를 vLLM(OpenAI 호환) 모델에 연결
 # - stuck.py의 Gateway 계약을 구현하고, 모든 모델 오류를 LLMUnavailable(→ API 503, 상태 불변)로 바꿈
 # - 역할별 모델·샘플링·추론·분량·시간 설정은 ROLE_SETTINGS 한곳에서 관리
 """vLLM-backed Gateway for the stuck-session flow."""
@@ -9,9 +9,11 @@ from dataclasses import dataclass
 
 from openai import OpenAI, OpenAIError
 
+from serving.animation.model import AnimationRequest, AnimationRequestModel
 from serving.concept_map import Concept, ConceptMap
 from serving.item_bank import Item
 from serving.stuck import Entry, LLMUnavailable, StuckState
+from serving.tools.diagram import inline_schema
 
 
 # 역할: LLM 역할 하나의 호출 설정
@@ -33,6 +35,7 @@ class RoleSettings:
 
 
 # 운영 보호: Spring의 AI core 호출 대기(320초) 안에 한 단계가 끝나도록 역할마다 시도 횟수 × 대기 시간 + 모델 조회 시간을 이 값 이하로 둠
+# - 보충(S4) 단계는 explain과 animate를 차례로 부르므로 두 역할의 합도 이 값 이하
 STEP_BUDGET_SECONDS = 300
 MODEL_LIST_TIMEOUT = 10
 
@@ -41,11 +44,14 @@ MODEL_LIST_TIMEOUT = 10
 # - 생성 역할(explain·summarize)은 Gemma 4 권장 샘플링(temperature 1.0, top_p 0.95, top_k 64)
 # - explain만 temperature 0.7: 1.0에서 즉석 수치 예시·정의 반전 같은 사실 오류가 나와(PR #38 검수 4/66) 프롬프트 보강과 함께 낮춤(재측정 2/99)
 # - max_tokens는 시험에서 정상 출력이 잘리지 않은 상한, timeout은 측정 지연(①0.2·②2.8·③0.5·④0.9초)에 여유를 둔 값
+# - animate(장면 선택)는 판정 역할처럼 temperature 0. 출력은 연산 10개 이하의 짧은 JSON이라 max_tokens 512
+#   (실모델 지연·성공률은 아직 재지 않았음. Task 10 측정 도구로 확인 예정)
 ROLE_SETTINGS = {
     'identify': RoleSettings(model=None, temperature=0.0, thinking=False, max_tokens=64, timeout=30, attempts=2),
     'explain': RoleSettings(model=None, temperature=0.7, top_p=0.95, top_k=64, thinking=False, max_tokens=1536, timeout=60, attempts=2),
     'grade_explanation': RoleSettings(model=None, temperature=0.0, thinking=False, max_tokens=1024, timeout=30, attempts=2),
     'summarize': RoleSettings(model=None, temperature=1.0, top_p=0.95, top_k=64, thinking=False, max_tokens=512, timeout=30, attempts=2),
+    'animate': RoleSettings(model=None, temperature=0.0, thinking=False, max_tokens=512, timeout=30, attempts=2),
 }
 
 COMMON = ('CS 자료구조 학습을 돕는 튜터다. 한국어로 쓰고, 정확한 번역이 없는 용어는 영어 원어를 함께 쓴다. '
@@ -72,6 +78,14 @@ PROMPTS = {
                  '보충한 선수 개념이 원래 막힌 지점을 이해하는 데 어떻게 이어지는지 2~4문장, 300자 이내로 정리한다. '
                  '새 개념이나 원리를 새로 설명하지 않는다: stuck_at과 filled 목록에 있는 개념만 언급해 연결을 말하고, 확신할 수 없는 이유는 쓰지 않는다. '
                  '아직 이해 확인을 통과하지 못한 개념이 있으면 사실대로 짧게 말하고 다시 볼 것을 권하며, 이해했다고 쓰지 않는다. 마크다운 제목은 쓰지 않는다.',
+    'animate': COMMON + ' 작업: 보충 설명과 함께 보여 줄 단계별 애니메이션 장면을 고른다. '
+               '장면은 서버가 연산을 실제로 실행해 그리므로, 장면 종류와 시작 값·연산 목록만 고른다. '
+               'scenes에 있는 종류 중에서 concept의 학습 목표와 학습자가 막힌 맥락(stuck_at)을 가장 잘 보여 주는 장면을 하나 고른다. '
+               '원소는 3~5개, 연산은 3~6개 정도로 작게 두어 학습자가 한 단계씩 따라갈 수 있게 한다. '
+               '연산은 시작 상태부터 차례로 실행할 수 있는 것만 쓴다: 빈 스택·큐·힙에서 꺼내기, 없는 값 삭제, 범위 밖 인덱스, '
+               '가득 찬 큐에 넣기, 이진 탐색 트리에 같은 값 다시 넣기는 쓰지 않는다. '
+               '해시 테이블 키는 0 이상의 정수로 고른다: 음수 키의 나머지 계산은 언어마다 달라 학습자를 헷갈리게 한다. '
+               '단계별 연산으로 보여 주는 것이 이 개념의 이해에 도움이 되지 않으면 scene을 null로 한다. JSON schema에 맞게 응답한다.',
 }
 
 # 복귀 요약에 넘길 보충 결과 표기; 내부 코드 대신 학습자에게 보여 줄 말로 바꿔 모델이 그대로 옮겨 쓰게 함
@@ -99,6 +113,23 @@ def _default_client():
 
 def _schema(name, schema):
     return {'type': 'json_schema', 'json_schema': {'name': name, 'strict': True, 'schema': schema}}
+
+
+# 역할: 장면 선택 응답 schema; {"scene": kinds에 든 장면 요청 중 하나 | null}
+# - $ref를 펼치고(inline_schema), discriminator 키워드를 빼고 oneOf를 anyOf로 바꿈
+#   가이드 디코딩 엔진이 $ref·discriminator를 다루지 못해도 같은 제약을 걸 수 있게 하기 위함(kind const로 구분되므로 뜻은 같음)
+def _scene_schema(kinds):
+    def clean(node):
+        if isinstance(node, list):
+            return [clean(value) for value in node]
+        if not isinstance(node, dict):
+            return node
+        return {('anyOf' if key == 'oneOf' else key): clean(value) for key, value in node.items() if key != 'discriminator'}
+
+    options = clean(inline_schema(AnimationRequestModel.model_json_schema()))['anyOf']
+    allowed = [next(o for o in options if o['properties']['kind']['const'] == kind) for kind in kinds]
+    return {'type': 'object', 'additionalProperties': False, 'required': ['scene'],
+            'properties': {'scene': {'anyOf': allowed + [{'type': 'null'}]}}}
 
 
 # 역할: 막힘 흐름 Gateway의 vLLM 구현; 요청 한 건(단계 하나)마다 새로 만들어 씀
@@ -177,6 +208,25 @@ class StuckModelGateway:
                 'stuck_at': ({'concept': self._title(entry.concept)} if entry.kind == 'roadmap' else {'excerpt': entry.excerpt}),
                 'approach': EXPLAIN_APPROACHES.get(attempt, EXPLAIN_APPROACHES[max(EXPLAIN_APPROACHES)])}
         return self._call('explain', user, lambda content: content)
+
+    # 역할: S4 장면 선택; 개념 설명·학습 목표·막힌 맥락을 주고 kinds 안의 장면 요청 하나 또는 None(장면 없음)을 받음
+    # - 응답 schema를 kinds에 든 요청 타입과 null로 묶어(가이드 디코딩) 허용 밖 장면·잘못된 필드를 형식 단계에서 막고, 응답 후에도 다시 검증
+    # - 확인·서술 문항과 정답은 넘기지 않음: 애니메이션이 정답 풀이가 되지 않게 하기 위함
+    # - 실행 가능 여부(빈 스택 pop 등)는 여기서 보지 않음: 호출한 엔진이 simulate로 확인하고 실패하면 텍스트만 보여 줌
+    def choose_animation(self, concept: Concept, entry: Entry, kinds: tuple[str, ...]) -> AnimationRequest | None:
+        def parse(content):
+            scene = json.loads(content)['scene']
+            if scene is None:
+                return None
+            request = AnimationRequestModel.model_validate(scene).root
+            if request.kind not in kinds:
+                raise ValueError(f'허용하지 않은 장면 종류: {request.kind}')
+            return request
+
+        user = {'concept': {'title': concept.title, 'description': concept.description, 'objectives': concept.objectives},
+                'stuck_at': ({'concept': self._title(entry.concept)} if entry.kind == 'roadmap' else {'excerpt': entry.excerpt}),
+                'scenes': list(kinds)}
+        return self._call('animate', user, parse, _schema('animate', _scene_schema(kinds)))
 
     # 역할: S5·S6 서술 채점; 루브릭 항목마다 충족 여부를 같은 순서의 list[bool]로 반환
     # - criteria 배열 길이를 루브릭 항목 수로 고정(minItems·maxItems)해 항목 누락·추가를 형식 단계에서 막고, 응답 후에도 다시 확인

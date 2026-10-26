@@ -1,4 +1,4 @@
-# 파일 역할: 막힘 흐름 LLM 역할(vLLM Gateway)의 요청 형태·출력 검증·오류 변환·모델 잠금과, 가짜 모델로 끝까지 가는 흐름을 검증
+# 파일 역할: 막힘 흐름 LLM 역할(vLLM Gateway)의 요청 형태·출력 검증·오류 변환·모델 잠금·장면 선택과, 가짜 모델로 끝까지 가는 흐름을 검증
 import json
 import threading
 import unittest
@@ -13,7 +13,7 @@ from serving.api import BUSY, app
 from serving.concept_map import load_concept_map
 from serving.item_bank import load_item_bank
 from serving.stuck import Entry, LLMUnavailable, StepInput, step
-from serving.stuck_llm import (EXPLAIN_APPROACHES, MODEL_LIST_TIMEOUT, PROMPTS, ROLE_SETTINGS, STEP_BUDGET_SECONDS,
+from serving.stuck_llm import (COMMON, EXPLAIN_APPROACHES, MODEL_LIST_TIMEOUT, PROMPTS, ROLE_SETTINGS, STEP_BUDGET_SECONDS,
                                StuckModelGateway)
 
 MAP = load_concept_map()
@@ -52,13 +52,18 @@ class FakeClient:
         return result if isinstance(result, SimpleNamespace) else reply(result)
 
 
+STACK_SCENE = {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}, {'op': 'push', 'value': 2}, {'op': 'pop'}]}
+
+
 # 역할: 가짜 모델이 정상 응답만 하는 기본 역할 응답; identified로 개념 특정 결과를 정함
+# - 장면 선택은 stack이 허용되면 stack 장면, 아니면 "장면 없음"(null)을 고름
 def happy_client(identified='stack'):
     return FakeClient(
         identify=lambda user, kw: json.dumps({'concept': identified}),
         explain=lambda user, kw: f"**{user['concept']['title']}** 보충 설명",
         grade_explanation=lambda user, kw: json.dumps({'criteria': [{'evidence': '근거 부분', 'met': True} for _ in user['rubric']]}),
         summarize=lambda user, kw: '복귀 요약',
+        animate=lambda user, kw: json.dumps({'scene': STACK_SCENE if 'stack' in user['scenes'] else None}),
     )
 
 
@@ -91,7 +96,8 @@ class RequestShapeTests(unittest.TestCase):
     # - ② explain은 사실 오류를 줄이려고 temperature만 0.7로 낮춤(docs/model-selection.md 7절)
     def test_role_requests_follow_model_selection(self):
         expected = {'identify': (0.0, None, None, 64, 30), 'explain': (0.7, 0.95, 64, 1536, 60),
-                    'grade_explanation': (0.0, None, None, 1024, 30), 'summarize': (1.0, 0.95, 64, 512, 30)}
+                    'grade_explanation': (0.0, None, None, 1024, 30), 'summarize': (1.0, 0.95, 64, 512, 30),
+                    'animate': (0.0, None, None, 512, 30)}
         client = happy_client()
         state = run_session(self, {'kind': 'excerpt', 'excerpt': '스택의 pop이 이해가 안 돼요', 'return_to': '/x'}, client)
         self.assertEqual(state.stage, 'complete')
@@ -167,7 +173,67 @@ class RequestShapeTests(unittest.TestCase):
         for role, settings in ROLE_SETTINGS.items():
             self.assertLessEqual(settings.attempts * settings.timeout + MODEL_LIST_TIMEOUT, STEP_BUDGET_SECONDS, role)
         self.assertEqual(set(ROLE_SETTINGS), set(PROMPTS))
+        # 보충(S4) 한 요청은 설명과 장면 선택을 차례로 부르므로 두 역할의 최악 시간 합도 예산 안이어야 함
+        s4 = sum(ROLE_SETTINGS[r].attempts * ROLE_SETTINGS[r].timeout + MODEL_LIST_TIMEOUT for r in ('explain', 'animate'))
+        self.assertLessEqual(s4, STEP_BUDGET_SECONDS)
 
+
+
+class AnimateTests(unittest.TestCase):
+    def setUp(self):
+        self.concept = next(c for c in MAP.concepts if c.id == 'heap')
+        self.entry = Entry(kind='excerpt', excerpt='힙에서 삽입 후 왜 위로 올라가요?', return_to='/learn')
+
+    # 검증 목적: 장면 선택 응답 schema가 허용 장면 종류(kinds)의 요청 타입과 null만 고를 수 있게 제한되는지 확인
+    # - 가이드 디코딩은 $ref를 풀지 못할 수 있어 schema 안에 $ref가 남지 않는지도 확인
+    def test_choose_animation_schema_limits_kinds(self):
+        scene = {'kind': 'heap', 'order': 'min', 'ops': [{'op': 'insert', 'value': 3}, {'op': 'insert', 'value': 1}]}
+        client = FakeClient(animate=lambda user, kw: json.dumps({'scene': scene}))
+        request = gateway(client).choose_animation(self.concept, self.entry, ('heap',))
+        self.assertEqual((request.kind, request.order, len(request.ops)), ('heap', 'min', 2))
+        _, kw = client.requests[0]
+        schema = kw['response_format']['json_schema']['schema']
+        options = schema['properties']['scene']['anyOf']
+        kinds = [o['properties']['kind']['const'] for o in options if o.get('type') == 'object']
+        self.assertEqual(kinds, ['heap'])
+        self.assertIn({'type': 'null'}, options)
+        for keyword in ('$ref', 'discriminator', 'oneOf'):
+            self.assertNotIn(keyword, json.dumps(schema))
+        two = FakeClient(animate=lambda user, kw: json.dumps({'scene': None}))
+        gateway(two).choose_animation(self.concept, self.entry, ('heap', 'bst'))
+        options = two.requests[0][1]['response_format']['json_schema']['schema']['properties']['scene']['anyOf']
+        self.assertEqual([o['properties']['kind']['const'] for o in options if o.get('type') == 'object'], ['heap', 'bst'])
+
+    # 검증 목적: 모델이 알맞은 장면이 없다고 null을 고르면 None을 돌려주는지 확인
+    def test_choose_animation_null(self):
+        client = FakeClient(animate=lambda user, kw: json.dumps({'scene': None}))
+        self.assertIsNone(gateway(client).choose_animation(self.concept, self.entry, ('heap',)))
+
+    # 검증 목적: 허용 밖 장면 종류나 스키마 위반은 잘못된 출력으로 재시도한 뒤 LLMUnavailable로 바뀌는지 확인
+    def test_choose_animation_rejects_other_kinds(self):
+        for scene in (STACK_SCENE, {'kind': 'heap', 'order': 'min', 'ops': [], 'extra': 1}):
+            client = FakeClient(animate=lambda user, kw, s=scene: json.dumps({'scene': s}))
+            with self.assertRaises(LLMUnavailable):
+                gateway(client).choose_animation(self.concept, self.entry, ('heap',))
+            self.assertEqual(len(client.requests), ROLE_SETTINGS['animate'].attempts)
+
+    # 검증 목적: 장면 선택 입력에 개념 설명·목표·막힌 맥락·허용 장면만 넣고 문항·정답은 넘기지 않으며,
+    # 프롬프트가 실행 가능한 작은 입력과 음수 해시 키 회피를 지시하는지 확인
+    def test_choose_animation_request_content(self):
+        client = FakeClient(animate=lambda user, kw: json.dumps({'scene': None}))
+        gateway(client).choose_animation(self.concept, self.entry, ('heap',))
+        _, kw = client.requests[0]
+        user = json.loads(kw['messages'][1]['content'])
+        self.assertEqual(set(user), {'concept', 'stuck_at', 'scenes'})
+        self.assertEqual((user['concept']['objectives'], user['stuck_at'], user['scenes']),
+                         (self.concept.objectives, {'excerpt': '힙에서 삽입 후 왜 위로 올라가요?'}, ['heap']))
+        sent = json.dumps(kw['messages'], ensure_ascii=False)
+        for i in ITEMS:
+            self.assertNotIn(i.question, sent)
+        prompt = PROMPTS['animate']
+        self.assertTrue(prompt.startswith(COMMON))
+        for phrase in ('실행할 수 있는', '음수', 'null'):
+            self.assertIn(phrase, prompt)
 
 class FailureTests(unittest.TestCase):
     # 검증 목적: 연결 실패·시간 초과는 설정한 횟수만큼 다시 시도한 뒤 LLMUnavailable로 바뀌는지 확인
@@ -230,8 +296,10 @@ def run_session(test, entry, client):
     data = {'type': 'start', 'entry': entry}
     while True:
         before = len(client.requests)
+        # 보충(remediate) 요청만 설명 + 장면 선택으로 2회까지, 나머지는 1회 이하
+        limit = 2 if state and state.stage == 'remediate' else 1
         state = step(state, StepInput.model_validate(data), g, MAP, ITEMS, 1.0)
-        test.assertLessEqual(len(client.requests) - before, 1, '요청당 LLM 호출은 1회 이하')
+        test.assertLessEqual(len(client.requests) - before, limit, '요청당 LLM 호출 상한')
         calls += 1
         if state.stage in ('complete', 'out_of_scope') or calls > 200:
             return state
@@ -253,7 +321,8 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(state.stage, 'complete')
         self.assertEqual((state.view['text'], state.view['return_to']), ('복귀 요약', '/#/roadmap?concept=stack'))
         self.assertTrue(all(f.outcome == 'passed' for f in state.fixes))
-        self.assertEqual({r for r, _ in client.requests}, {'explain', 'grade_explanation', 'summarize'})
+        self.assertEqual({r for r, _ in client.requests}, {'explain', 'grade_explanation', 'summarize', 'animate'})
+        self.assertNotIn('animation_failed', [e.kind for e in state.log])
 
     # 검증 목적: 붙여넣기 진입이 개념 특정으로 시작해 complete까지 가는지 확인
     def test_excerpt_entry_completes(self):
@@ -304,6 +373,23 @@ class ApiTests(unittest.TestCase):
         with BUSY, patch('serving.stuck_llm._default_client', happy_client):
             busy = self.client.post('/stuck/step', json={'state': self.opted, 'input': {'type': 'continue'}})
         self.assertEqual((busy.status_code, busy.json()['detail']), (503, '다른 요청을 처리 중입니다. 잠시 후 다시 시도해 주세요.'))
+
+    # 검증 목적: (Review Focus 1) 설명은 성공했는데 장면 선택이 시간 초과로 실패해도 503이 아니라 텍스트 보충 화면(200)을 주는지 확인
+    def test_animation_failure_is_not_503(self):
+        clients = []
+
+        def failing():
+            clients.append(happy_client())
+            clients[-1].responders['animate'] = lambda user, kw: APITimeoutError(request=REQUEST)
+            return clients[-1]
+        with patch('serving.stuck_llm._default_client', failing):
+            response = self.client.post('/stuck/step', json={'state': self.opted, 'input': {'type': 'continue'}})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([r for c in clients for r, _ in c.requests],
+                         ['explain'] + ['animate'] * ROLE_SETTINGS['animate'].attempts)
+        self.assertEqual(response.json()['view']['text'], '**스택** 보충 설명')
+        self.assertNotIn('animation', response.json()['view'])
+        self.assertFalse(BUSY.locked())
 
 
 if __name__ == '__main__':
