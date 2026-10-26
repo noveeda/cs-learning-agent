@@ -24,6 +24,7 @@ export type ExperimentItem = {
 
 // 역할: GET /api/experiments/{id} 응답; 단계에 따라 필요한 필드만 옴
 // - remaining_seconds는 학습 단계에서만 오는 서버 시각 기준 남은 시간(새로고침해도 늘지 않음)
+// - deadline은 서버 시각 문자열이라 기록용으로만 두고, 화면 시계는 컴퓨터 시계 차이에 영향받지 않는 remaining_seconds로 셈
 // - passage_part2는 "계속 읽기" 뒤에 채워져 새로고침해도 2부를 다시 보여 줄 수 있음
 export type ExperimentView = {
   id: string;
@@ -34,6 +35,7 @@ export type ExperimentView = {
   condition?: "system" | "chat";
   passage_part1?: string;
   passage_part2?: string | null;
+  deadline?: string;
   remaining_seconds?: number;
   posttest?: ExperimentItem[];
   survey?: ExperimentItem[];
@@ -162,29 +164,25 @@ export function nextStage(id: string) {
   return postThenReload(id, "next", {});
 }
 
-// 역할: 학습 단계 사건 기록(시각은 서버가 붙임); continue_reading이면 응답에 2부 글이 옴
-// - timeout은 마감 시각 경계에서 서버와 화면 시계가 조금 어긋나 409가 날 수 있으므로 이미 처리된 것으로 봄
-export async function postEvent(
+// 역할: 학습 단계 사건 기록(시각은 서버가 붙임); 응답은 GET과 같은 화면 상태라 continue_reading 뒤에는 2부 글이 들어 있음
+// - 마감 경계의 409(마감 전 timeout, 마감 뒤 다른 사건)는 그대로 오류로 올려 기록되지 않은 사건을 보낸 것으로 착각하지 않음
+export function postEvent(
   id: string,
   type: EventType,
   ref?: string,
-): Promise<{ passage_part2?: string }> {
-  try {
-    return await call(`${base}/${id}/events`, ref ? { type, ref } : { type });
-  } catch (error) {
-    if (
-      type === "timeout" &&
-      error instanceof ExperimentError &&
-      error.status === 409
-    )
-      return {};
-    throw error;
-  }
+): Promise<ExperimentView> {
+  return call(`${base}/${id}/events`, ref ? { type, ref } : { type });
 }
 
 // 역할: 마감 시각(ms)까지 남은 초; 서버 remaining_seconds를 받은 순간을 기준으로 계산해 0 아래로 내려가지 않음
 export function remainingAt(deadline: number, now: number): number {
   return Math.max(0, Math.ceil((deadline - now) / 1000));
+}
+
+// 역할: 화면 마감 판정; 서버 remaining_seconds는 초 미만을 버린 값이라 화면 마감이 서버보다 최대 1초 이를 수 있어 1초 늦게 마감
+// - 그래야 마감 순간 보내는 timeout·다음 단계 요청이 서버에서 "아직 시간이 남음"으로 거부되지 않음
+export function expiredAt(deadline: number, now: number): boolean {
+  return now >= deadline + 1000;
 }
 
 export function formatClock(seconds: number): string {

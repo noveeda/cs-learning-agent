@@ -12,6 +12,7 @@ import {
   EXPERIMENT_CONCEPTS,
   allAnswered,
   createExperiment,
+  expiredAt,
   formatClock,
   getExperiment,
   loadExperimentId,
@@ -488,11 +489,10 @@ function LearnScreen({
     [view],
   );
   const [now, setNow] = useState(Date.now);
-  const [readPart2, setReadPart2] = useState<string | null>(null);
-  const part2 = readPart2 ?? view.passage_part2 ?? null;
+  const part2 = view.passage_part2 ?? null;
   const [stuck, setStuck] = useState<StuckRequest | null>(null);
   const [busy, setBusy] = useState(false);
-  const expired = remainingAt(deadline, now) === 0;
+  const expired = expiredAt(deadline, now);
   // 붙여넣기 막힘 세션은 복귀 위치별로 하나씩 저장되므로 세션·단계마다 다른 위치를 줘 다른 참가자·단계 세션과 섞이지 않게 함
   const returnTo = `#/experiment?session=${view.id}&stage=${view.stage}`;
   const stuckKey = `excerpt:${returnTo}`;
@@ -506,7 +506,7 @@ function LearnScreen({
     return () => clearInterval(timer);
   }, []);
 
-  // 마감: 도구를 닫고 timeout 기록(마감 직후 409는 postEvent가 정상 처리); 2부를 이미 읽었어도 남은 도구는 닫음
+  // 마감: 도구를 닫고 timeout 기록(1초 늦게 마감해 서버 마감이 이미 지난 뒤 보냄); 2부를 이미 읽었어도 남은 도구는 닫음
   useEffect(() => {
     if (!expired) return;
     setStuck(null);
@@ -553,13 +553,11 @@ function LearnScreen({
     setStuck(null);
   }
 
-  // 역할: 2부 열기(O2 기록); 마감과 겹쳐 거부되면 서버 상태로 다시 그림
+  // 역할: 2부 열기(O2 기록); 응답이 2부가 든 서버 상태라 그대로 그리고, 마감과 겹쳐 거부되면 서버 상태를 다시 읽어 그림
   async function continueReading() {
     setBusy(true);
     try {
-      const result = await postEvent(view.id, "continue_reading");
-      if (result.passage_part2) setReadPart2(result.passage_part2);
-      else onView(await getExperiment(view.id));
+      onView(await postEvent(view.id, "continue_reading"));
     } catch (failure) {
       onError((failure as Error).message);
       onView(await getExperiment(view.id).catch(() => view));

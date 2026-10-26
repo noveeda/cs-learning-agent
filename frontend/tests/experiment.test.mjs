@@ -1,10 +1,11 @@
-// 파일 역할: 비교 실험 화면의 API 호출(중복 참가자 409·마감 직후 timeout 409)·남은 시간 계산·저장 복구를 UI 없이 검증
+// 파일 역할: 비교 실험 화면의 API 호출(중복 참가자 409·마감 경계 사건 409)·남은 시간·마감 판정·저장 복구를 UI 없이 검증
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ExperimentError,
   allAnswered,
   createExperiment,
+  expiredAt,
   formatClock,
   getExperiment,
   loadExperimentId,
@@ -44,6 +45,15 @@ test('counts down from the server remaining seconds and never goes below zero', 
   assert.equal(formatClock(0), '00:00');
 });
 
+// 검증 목적: 서버 remaining_seconds는 초 미만을 버린 값이라 화면 마감이 서버보다 최대 1초 이를 수 있음
+// - 화면이 1초 늦게 마감해야 timeout·다음 단계 요청이 서버에서 "아직 시간이 남음"(409)으로 거부되지 않음(Review Focus 2)
+test('expires one second after the local deadline so the server deadline has passed', () => {
+  const deadline = 1_000_000;
+  assert.equal(expiredAt(deadline, deadline), false);
+  assert.equal(expiredAt(deadline, deadline + 999), false);
+  assert.equal(expiredAt(deadline, deadline + 1000), true);
+});
+
 // 검증 목적: 진행자가 같은 참가자 코드를 다시 만들면 덮어쓰지 않고 기존 세션 id를 받아 재개를 고르게 함(Review Focus 5)
 test('returns the existing session id when the participant already exists', async (t) => {
   const calls = mockFetch(t,
@@ -58,16 +68,19 @@ test('returns the existing session id when the participant already exists', asyn
     body: { participant: 'S4', grade: 2, dsa: 'taking', exclude: ['bfs'] } });
 });
 
-// 검증 목적: 마감 직후 도착한 timeout은 409여도 정상으로 보고, 다른 이벤트의 409는 오류로 올림(Review Focus 2)
-test('treats a late timeout conflict as recorded but rejects other late events', async (t) => {
+// 검증 목적: 마감 경계의 409는 사건 종류와 관계없이 오류로 올려 기록되지 않은 timeout을 보낸 것으로 착각하지 않음(Review Focus 2)
+// - 서버(PR #74)는 마감 뒤 timeout을 받고, 마감 전 timeout과 마감 뒤 다른 사건을 409로 거부함
+test('raises boundary conflicts for every event type and returns the server view', async (t) => {
+  const view = { id, participant: 'S1', stage: 'learn1', passage_part2: '2부', remaining_seconds: 30 };
   const calls = mockFetch(t,
-    Response.json({ message: '마감 전입니다' }, { status: 409 }),
-    Response.json({ message: '마감이 지났습니다' }, { status: 409 }),
-    Response.json({ passage_part2: '2부' }));
-  assert.deepEqual(await postEvent(id, 'timeout'), {});
+    Response.json({ message: '아직 학습 시간이 남아 있습니다.' }, { status: 409 }),
+    Response.json({ message: '학습 시간이 끝났습니다.' }, { status: 409 }),
+    Response.json(view));
+  await assert.rejects(postEvent(id, 'timeout'), (error) =>
+    error instanceof ExperimentError && error.status === 409 && error.message === '아직 학습 시간이 남아 있습니다.');
   await assert.rejects(postEvent(id, 'continue_reading'), (error) =>
-    error instanceof ExperimentError && error.status === 409 && error.message === '마감이 지났습니다');
-  assert.deepEqual(await postEvent(id, 'stuck_session', 'abc'), { passage_part2: '2부' });
+    error instanceof ExperimentError && error.status === 409 && error.message === '학습 시간이 끝났습니다.');
+  assert.deepEqual(await postEvent(id, 'stuck_session', 'abc'), view);
   assert.deepEqual(calls.map((call) => call.body), [{ type: 'timeout' }, { type: 'continue_reading' }, { type: 'stuck_session', ref: 'abc' }]);
   assert.equal(calls[0].url, `/api/experiments/${id}/events`);
 });
