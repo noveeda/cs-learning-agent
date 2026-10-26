@@ -184,7 +184,7 @@ def simulate_queue(req: QueueRequest) -> Animation:
             slot = (front + size) % req.capacity
             slots[slot] = op.value
             size += 1
-            where = f'rear가 끝을 지나 [{slot}]로 돌아와' if wrapped else f'rear 다음 칸 [{slot}]에'
+            where = f'rear가 끝을 지나 {slot}번 칸으로 돌아와' if wrapped else f'rear 다음 칸 [{slot}]에'
             frames.append(queue_frame(slots, front, size, f'enqueue {op.value}: {where} {op.value}{josa(op.value, "을", "를")} 넣습니다', new=slot))
         else:
             if not size:
