@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import { LoaderCircle, RotateCcw, X } from "lucide-react";
 import type { Concept } from "./roadmap";
+import { remediationParts } from "./animation";
+import { AnimationPlayer } from "./AnimationPlayer";
 import {
   canRetry,
   createSession,
@@ -502,7 +504,8 @@ export function StuckPanel({
             </div>
           </section>
         );
-      case "remediation":
+      case "remediation": {
+        const { text, animation } = remediationParts(view);
         return (
           <section>
             <span className="badge">
@@ -511,8 +514,15 @@ export function StuckPanel({
               {view.attempt > 1 ? ` · ${view.attempt}번째 설명` : ""}
             </span>
             <div className="message-content stuck-text">
-              <Markdown>{view.text}</Markdown>
+              <Markdown>{text}</Markdown>
             </div>
+            {/* 다시 설명(attempt)이나 다른 개념으로 넘어가면 첫 단계부터 보여 주도록 key를 바꿈 */}
+            {animation && (
+              <AnimationPlayer
+                key={`${view.concept.id}-${view.attempt}`}
+                animation={animation}
+              />
+            )}
             {view.item ? (
               <>
                 <h3>확인 문항</h3>
@@ -545,6 +555,7 @@ export function StuckPanel({
             )}
           </section>
         );
+      }
       case "result":
         return (
           <section>

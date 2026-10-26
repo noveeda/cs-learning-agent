@@ -111,6 +111,41 @@ const views = {
   },
 };
 
+// AI core 시뮬레이터(PR #44 simulate)가 만든 원소 8개 배열의 insert [2] 5 결과; 휴대폰 폭 축소 확인용 큰 장면
+const cell = (id: string, label: string, x: number, tone = "normal") => ({
+  id,
+  label,
+  x,
+  y: 0,
+  shape: "cell",
+  tone,
+});
+const arrayInsert = {
+  kind: "array",
+  title: "배열 연산",
+  frames: [
+    {
+      boxes: ["3", "8", "1", "9", "4", "7", "2", "6"].map((label, x) =>
+        cell(`a${x}`, label, x),
+      ),
+      arrows: [],
+      caption: "초기 배열 [3, 8, 1, 9, 4, 7, 2, 6]",
+    },
+    {
+      boxes: [
+        cell("a0", "3", 0),
+        cell("a1", "8", 1),
+        cell("a8", "5", 2, "new"),
+        ...["1", "9", "4", "7", "2", "6"].map((label, i) =>
+          cell(`a${i + 2}`, label, i + 3, "active"),
+        ),
+      ],
+      arrows: [],
+      caption: "insert [2] 5: 뒤 원소 6개를 한 칸씩 밀고 5를 넣습니다",
+    },
+  ],
+};
+
 type Reply =
   { stage: string; view: object } | { status: number; message: string };
 
@@ -230,6 +265,8 @@ test("E1 [막혔어요]: 진단→결과→보충→확인→서술→요약→�
     sheet.getByRole("heading", { name: "연결 리스트", level: 2 }),
   ).toBeVisible();
   await expect(sheet.locator("strong", { hasText: "노드" })).toBeVisible();
+  // animation 필드가 없는 보충 화면은 재생기 없이 텍스트만 보여 줌
+  await expect(sheet.locator(".animation-player")).toHaveCount(0);
   await sheet.getByRole("radio", { name: /A\. 새 노드의 next/ }).check();
   await sheet.getByRole("button", { name: "답 제출" }).click();
   await sheet
@@ -493,6 +530,72 @@ test("390px 모바일에서는 전체 화면 시트로 열리고 가로 스크�
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+});
+
+test("보충 애니메이션: 375px에서 가로 스크롤 없이 축소되고 다음·이전·키보드로 단계가 바뀜", async ({
+  page,
+}) => {
+  await mockStuck(
+    page,
+    {
+      stage: "check",
+      view: { ...views.remediation, animation: arrayInsert },
+    },
+    [],
+  );
+  await page.setViewportSize({ width: 375, height: 812 });
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  const player = panel(page).locator(".animation-player");
+  await expect(player).toContainText("초기 배열 [3, 8, 1, 9, 4, 7, 2, 6]");
+  await expect(player).toContainText("1 / 2");
+  await expect(
+    player.getByRole("button", { name: "이전 단계" }),
+  ).toBeDisabled();
+  // 원래 크기(9칸)보다 좁은 화면이라 SVG가 패널 폭 안으로 줄어듦
+  const canvas = await player.locator(".animation-canvas").boundingBox();
+  expect(canvas!.x).toBeGreaterThanOrEqual(0);
+  expect(canvas!.x + canvas!.width).toBeLessThanOrEqual(375);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= 375),
+  ).toBe(true);
+  // 검수용 화면 기록(test-results는 Git 제외)
+  await page.screenshot({ path: test.info().outputPath("animation-375.png") });
+  await player.getByRole("button", { name: "다음 단계" }).click();
+  await expect(player).toContainText("insert [2] 5: 뒤 원소 6개를");
+  await expect(player).toContainText("2 / 2");
+  await expect(
+    player.getByRole("button", { name: "다음 단계" }),
+  ).toBeDisabled();
+  // 새로 넣은 5는 new로 강조되고, 같은 id의 1(a2)은 2칸에서 3칸(64px × 3)으로 옮겨 그려짐
+  await expect(player.locator(".animation-box", { hasText: "5" })).toHaveClass(
+    /tone-new/,
+  );
+  await expect(
+    player.locator(".animation-box", { hasText: /^1$/ }),
+  ).toHaveAttribute("style", /translate\(192px, 0px\)/);
+  await player.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(player).toContainText("1 / 2");
+});
+
+test("움직임 줄이기 설정이면 상자 이동 transition을 끔", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockStuck(
+    page,
+    {
+      stage: "check",
+      view: { ...views.remediation, animation: arrayInsert },
+    },
+    [],
+  );
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  const box = panel(page).locator(".animation-box").first();
+  await expect(box).toBeVisible();
+  expect(
+    await box.evaluate((node) => getComputedStyle(node).transitionDuration),
+  ).toBe("0s");
 });
 
 test("처음부터 다시: 확인 뒤에만 진행 중 세션을 버리고 같은 진입으로 새 세션을 시작함", async ({
