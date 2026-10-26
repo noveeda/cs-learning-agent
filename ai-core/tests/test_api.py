@@ -5,6 +5,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from serving.api import app, BUSY
 from serving.concept_map import ConceptMap, load_concept_map
+from serving.item_bank import load_item_bank
+from serving.stuck import _Context
 
 
 class ApiTests(unittest.TestCase):
@@ -20,11 +22,29 @@ class ApiTests(unittest.TestCase):
     def test_rejects_invalid_artifact_id(self):
         self.assertEqual(self.client.get('/artifacts/not-an-id').status_code, 404)
 
-    # 검증 목적: 저장소의 검증된 개념 지도를 모델 서버 없이 그대로 반환하는지 확인
+    # 검증 목적: 저장소의 검증된 개념 지도를 모델 서버 없이 그대로 반환하는지 확인(막힘 지원 목록은 아래 테스트가 따로 확인)
     def test_returns_validated_concept_map(self):
         response = self.client.get('/concept-map')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), load_concept_map().model_dump())
+        body = response.json()
+        body.pop('stuck_supported')
+        self.assertEqual(body, load_concept_map().model_dump())
+
+    # 검증 목적: 막힘 지원 목록이 현재 문항 은행(선형 구조 11개)과 일치하고, 문항이 없는 개념은 빠지는지 확인
+    # - 문항 묶음이 추가되면 이 목록도 함께 늘어나야 함
+    def test_concept_map_lists_stuck_supported(self):
+        supported = self.client.get('/concept-map').json()['stuck_supported']
+        self.assertEqual(supported, ['memory-address', 'reference', 'logarithm', 'big-o', 'complexity-analysis', 'array',
+                                     'dynamic-array', 'linked-list', 'adt', 'stack', 'queue'])
+        self.assertNotIn('recursion', supported)
+
+    # 검증 목적: 화면이 지원한다고 보여 주는 개념은 엔진도 이해 확인(확인·서술 문항)을 할 수 있는지 확인
+    # - 어긋나면 [막혔어요]를 눌렀는데 엔진이 문항이 없어 확인을 건너뛰게 됨
+    def test_stuck_supported_matches_engine(self):
+        ctx = _Context(gateway=None, concept_map=load_concept_map(), items=tuple(load_item_bank()), input=None, now=0)
+        for concept in self.client.get('/concept-map').json()['stuck_supported']:
+            self.assertTrue(ctx.items_for(concept, 'check'), concept)
+            self.assertTrue(ctx.items_for(concept, 'explanation'), concept)
 
     # 검증 목적: 지도 파일이 없거나 규칙을 어기면 일부 내용·내부 경로 없이 실패하는지 확인
     def test_broken_concept_map_fails_without_details(self):
