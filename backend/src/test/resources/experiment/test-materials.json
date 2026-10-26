@@ -175,7 +175,7 @@
       "id": "exp-heap-A2",
       "format": "short_exact",
       "question": "힙 A형 단답 문항",
-      "answer": "1,2,3",
+      "answer": "fifo",
       "rationale": "KEY-RATIONALE heap A2"
      },
      {
@@ -207,7 +207,7 @@
       "id": "exp-heap-B2",
       "format": "short_exact",
       "question": "힙 B형 단답 문항",
-      "answer": "1,2,3",
+      "answer": "fifo",
       "rationale": "KEY-RATIONALE heap B2"
      },
      {

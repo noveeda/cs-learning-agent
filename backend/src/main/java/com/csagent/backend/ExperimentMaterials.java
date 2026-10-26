@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
@@ -100,13 +101,14 @@ public class ExperimentMaterials {
 
     // 역할: 자동 채점 문항 하나를 결정적으로 채점; 규칙은 AI core serving/grading.py와 같음
     // - 선택형: 앞뒤 공백·대소문자 무시 / 단답형: 모든 공백 제거, 소문자, 전각 쉼표를 반각으로
+    // - 대소문자 변환은 Locale.ROOT 고정: 서버 기본 로캘이 터키어면 I↔ı 변환으로 같은 답이 다르게 채점될 수 있음
     public boolean correct(String itemId, String answer) {
         var item = items.get(itemId);
         if (item == null || answer == null) return false;
         String key = item.path("answer").asString();
         return switch (item.path("format").asString()) {
-            case "multiple_choice" -> answer.strip().toUpperCase().equals(key);
-            case "short_exact" -> answer.replaceAll("(?U)\\s+", "").toLowerCase().replace('，', ',').equals(key);
+            case "multiple_choice" -> answer.strip().toUpperCase(Locale.ROOT).equals(key);
+            case "short_exact" -> answer.replaceAll("(?U)\\s+", "").toLowerCase(Locale.ROOT).replace('，', ',').equals(key);
             default -> false;
         };
     }
