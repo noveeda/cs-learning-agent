@@ -1,10 +1,12 @@
-# 파일 역할: 막힘 흐름의 진단 가지치기·상한·보충 순서·혼합형 확인·복귀와, 잘못된 입력·LLM 실패 시 상태 보존을 검증
+# 파일 역할: 막힘 흐름의 진단 가지치기·상한·보충 순서·혼합형 확인·보충 애니메이션·복귀와, 잘못된 입력·LLM 실패 시 상태 보존을 검증
 import json
 import unittest
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from serving.animation import CONCEPT_SCENES, SIMULATORS
+from serving.animation.model import AnimationRequestModel
 from serving.api import app
 from serving.concept_map import ConceptMap, load_concept_map
 from serving.item_bank import Item, load_item_bank
@@ -36,10 +38,15 @@ def small_items(concepts, without=()):
     return items
 
 
-# 역할: LLM 역할 가짜 구현; 호출을 기록해 요청당 1회 이하인지 확인하고, 서술 통과 여부를 조절
+STACK_SCENE = {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}, {'op': 'push', 'value': 2}, {'op': 'pop'}]}
+
+
+# 역할: LLM 역할 가짜 구현; 호출을 기록해 요청당 호출 수를 확인하고, 서술 통과 여부와 고를 장면을 조절
+# - scene: choose_animation이 돌려줄 장면 요청(dict), None(장면 없음), 또는 예외 객체(던짐)
 class FakeGateway:
-    def __init__(self, identified='top', rubric_pass=True, rubric_extra=0):
+    def __init__(self, identified='top', rubric_pass=True, rubric_extra=0, scene=STACK_SCENE):
         self.calls, self.identified, self.rubric_pass, self.rubric_extra = [], identified, rubric_pass, rubric_extra
+        self.scene = scene
 
     def identify(self, excerpt, concept_map):
         self.calls.append('identify')
@@ -57,6 +64,12 @@ class FakeGateway:
         self.calls.append('summarize')
         return '요약'
 
+    def choose_animation(self, concept, entry, kinds):
+        self.calls.append('animate')
+        if isinstance(self.scene, Exception):
+            raise self.scene
+        return None if self.scene is None else AnimationRequestModel.model_validate(self.scene).root
+
 
 ROADMAP = {'kind': 'roadmap', 'concept': 'top', 'return_to': '/learn?concept=top'}
 
@@ -70,10 +83,12 @@ class Session:
         self.items = items if items is not None else small_items([c.id for c in self.map.concepts])
         self.state = self.send({'type': 'start', 'entry': entry}, start=True)
 
+    # 보충(remediate) 요청만 설명 + 장면 선택으로 LLM을 2회까지 부르고, 나머지 요청은 1회 이하
     def send(self, data, start=False):
         before = len(self.gateway.calls)
+        limit = 2 if not start and self.state.stage == 'remediate' else 1
         new = step(None if start else self.state, StepInput.model_validate(data), self.gateway, self.map, self.items, 1000.0)
-        self.test.assertLessEqual(len(self.gateway.calls) - before, 1, '요청당 LLM 호출은 1회 이하')
+        self.test.assertLessEqual(len(self.gateway.calls) - before, limit, '요청당 LLM 호출 상한')
         self.state = new
         return new
 
@@ -223,6 +238,68 @@ class RemediationTests(unittest.TestCase):
         self.assertEqual(session.state.fixes[0].outcome, 'unchecked')
         self.assertEqual(session.state.stage, 'decide')
 
+
+
+# 역할: 실제 지도·문항 은행으로 concept에서 막힌 세션을 열고 진단을 건너뛴 뒤 첫 보충 화면까지 진행
+# - 진단할 선수 개념이 없는 개념(logarithm 등)은 시작하자마자 보충 단계라 opt_out을 보내지 않음
+def remediation_session(test, concept, gateway):
+    session = Session(test, gateway=gateway, concept_map=load_concept_map(), items=load_item_bank(),
+                      entry={'kind': 'roadmap', 'concept': concept, 'return_to': f'/learn?concept={concept}'})
+    if session.state.stage == 'diagnose':
+        session.send({'type': 'opt_out'})
+    session.send({'type': 'continue'})
+    test.assertEqual(session.state.view['kind'], 'remediation')
+    return session
+
+
+class AnimationTests(unittest.TestCase):
+    # 검증 목적: 장면이 정해진 개념(stack)의 보충 화면에 코드가 계산한 프레임이 붙고, 측정용 로그에 장면 종류가 남는지 확인
+    def test_remediation_view_has_animation_for_stack(self):
+        session = remediation_session(self, 'stack', FakeGateway())
+        animation = session.state.view['animation']
+        self.assertEqual((animation['kind'], len(animation['frames'])), ('stack', 4))
+        self.assertEqual(set(animation), {'kind', 'title', 'frames'})
+        self.assertTrue(session.state.view['text'])
+        remediated = [e for e in session.state.log if e.kind == 'remediated'][-1]
+        self.assertEqual(remediated.detail['animation_kind'], 'stack')
+
+    # 검증 목적: (Review Focus 1) 실행할 수 없는 장면(빈 스택 pop)·장면 선택 LLM 실패에도 503 없이 텍스트 보충만 보여 주고,
+    # 실패 이유를 로그에 남기는지 확인
+    def test_animation_failure_falls_back_to_text(self):
+        for scene in ({'kind': 'stack', 'ops': [{'op': 'pop'}]}, LLMUnavailable('모델 응답을 받지 못했습니다.')):
+            with self.subTest(scene=scene):
+                session = remediation_session(self, 'stack', FakeGateway(scene=scene))
+                self.assertTrue(session.state.view['text'])
+                self.assertNotIn('animation', session.state.view)
+                self.assertEqual(session.state.stage, 'check')
+                failed = [e for e in session.state.log if e.kind == 'animation_failed']
+                self.assertEqual(len(failed), 1)
+                self.assertTrue(failed[0].detail['reason'])
+                remediated = [e for e in session.state.log if e.kind == 'remediated'][-1]
+                self.assertIsNone(remediated.detail['animation_kind'])
+
+    # 검증 목적: 모델이 알맞은 장면이 없다고(null) 고르면 실패 로그 없이 텍스트만 보여 주는지 확인
+    def test_null_scene_shows_text_only(self):
+        session = remediation_session(self, 'stack', FakeGateway(scene=None))
+        self.assertNotIn('animation', session.state.view)
+        self.assertNotIn('animation_failed', [e.kind for e in session.state.log])
+
+    # 검증 목적: 장면 목록에 없는 개념(logarithm)은 장면 선택 LLM을 부르지 않아 보충 지연이 늘지 않는지 확인
+    def test_concept_without_scene_skips_choose(self):
+        gateway = FakeGateway()
+        session = remediation_session(self, 'logarithm', gateway)
+        self.assertEqual(gateway.calls.count('animate'), 0)
+        self.assertNotIn('animation', session.state.view)
+
+    # 검증 목적: 개념별 허용 장면 표가 실제 개념 지도 ID와 시뮬레이터 종류만 쓰는지 확인(오타로 장면이 조용히 빠지는 일 방지)
+    def test_concept_scenes_reference_map_and_simulators(self):
+        ids = {c.id for c in load_concept_map().concepts}
+        self.assertLessEqual(set(CONCEPT_SCENES), ids)
+        self.assertLessEqual({k for kinds in CONCEPT_SCENES.values() for k in kinds}, set(SIMULATORS))
+        self.assertEqual(CONCEPT_SCENES['stack'], ('stack',))
+        self.assertNotIn('logarithm', CONCEPT_SCENES)
+        # 순회 연산이 없는 bst 장면은 순회 개념과 맞지 않아 뺌(순회 장면은 MVP 3에서 다시 다룸)
+        self.assertNotIn('tree-traversal', CONCEPT_SCENES)
 
 class SafetyTests(unittest.TestCase):
     # 검증 목적: 진단부터 복귀까지 매 단계 저장 상태(view·log 포함)에 정답 키·근거·루브릭 문자열이 없는지 확인

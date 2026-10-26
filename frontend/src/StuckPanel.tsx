@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import { LoaderCircle, RotateCcw, X } from "lucide-react";
 import type { Concept } from "./roadmap";
+import { remediationParts } from "./animation";
+import { AnimationPlayer } from "./AnimationPlayer";
 import {
   canRetry,
   createSession,
@@ -13,7 +15,6 @@ import {
   rememberStuckSession,
   stepSession,
   StuckError,
-  supportedConcepts,
   type Entry,
   type ItemView,
   type StepInput,
@@ -44,7 +45,7 @@ const outcomeLabels: Record<string, string> = {
   pending: "진행 전",
 };
 
-// 역할: 개념 학습 화면·로드맵 상세의 [막혔어요]; MVP 밖 개념은 버튼 대신 안내 문구
+// 역할: 개념 학습 화면·로드맵 상세의 [막혔어요]; 확인·서술 문항이 아직 없는 개념은 버튼 대신 안내 문구
 export function StuckButton({
   concept,
   inProgress,
@@ -54,11 +55,11 @@ export function StuckButton({
   inProgress: boolean;
   onStuck: () => void;
 }) {
-  if (!supportedConcepts.has(concept.id))
+  if (!concept.stuckSupported)
     return (
       <p className="stuck-unsupported">
-        아직 [막혔어요]를 지원하지 않는 개념이에요. 지금은 메모리 주소부터
-        스택·큐까지 선형 구조 11개 개념에서 쓸 수 있어요.
+        아직 [막혔어요]를 지원하지 않는 개념이에요. 이해 확인 문항이 준비된
+        개념부터 차례로 열고 있어요.
       </p>
     );
   return (
@@ -502,7 +503,8 @@ export function StuckPanel({
             </div>
           </section>
         );
-      case "remediation":
+      case "remediation": {
+        const { text, animation } = remediationParts(view);
         return (
           <section>
             <span className="badge">
@@ -511,8 +513,15 @@ export function StuckPanel({
               {view.attempt > 1 ? ` · ${view.attempt}번째 설명` : ""}
             </span>
             <div className="message-content stuck-text">
-              <Markdown>{view.text}</Markdown>
+              <Markdown>{text}</Markdown>
             </div>
+            {/* 다시 설명(attempt)이나 다른 개념으로 넘어가면 첫 단계부터 보여 주도록 key를 바꿈 */}
+            {animation && (
+              <AnimationPlayer
+                key={`${view.concept.id}-${view.attempt}`}
+                animation={animation}
+              />
+            )}
             {view.item ? (
               <>
                 <h3>확인 문항</h3>
@@ -545,6 +554,7 @@ export function StuckPanel({
             )}
           </section>
         );
+      }
       case "result":
         return (
           <section>

@@ -8,11 +8,12 @@ import threading
 import time
 import httpx
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from openai import OpenAI
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from serving.concept_map import load_concept_map
 from serving.curriculum import JobState, ModelGateway, step
@@ -21,6 +22,7 @@ from serving.stuck import LLMUnavailable, StepInput, StuckState, step as stuck_s
 from serving.stuck_llm import StuckModelGateway
 from serving.agent import run_agent
 from serving.context import token_counter
+from serving.animation.model import AnimationRequest
 from serving.tools.diagram import Diagram
 
 app = FastAPI(title='CS learning agent')
@@ -29,9 +31,21 @@ BUSY = threading.Lock()
 
 
 # 역할: 대화 문맥에 다시 전달할 도식 ID와 그래프 구조
-class Artifact(BaseModel):
+class DiagramArtifact(BaseModel):
     artifact_id: str = Field(pattern=r'^[0-9a-f]{32}$')
     diagram: Diagram
+
+
+# 역할: 대화 문맥에 다시 전달할 애니메이션 ID와 장면 요청. 프레임은 요청에서 다시 계산되므로 받지 않음
+class AnimationArtifact(BaseModel):
+    artifact_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    kind: Literal['animation']
+    request: AnimationRequest
+
+
+# Spring은 artifact 이벤트를 그대로 저장해 이력·활성 artifact로 돌려보내므로 두 종류를 모두 받음
+# - kind가 없으면 도식, kind='animation'이면 애니메이션. 저장 이벤트의 나머지 필드(url, frames 등)는 무시
+Artifact = DiagramArtifact | AnimationArtifact
 
 
 # 역할: 완료 이력으로 전달되는 문답 한 항목
@@ -41,7 +55,7 @@ class Turn(BaseModel):
     artifacts: list[Artifact] = Field(default_factory=list)
 
 
-# 역할: 최신 질문·완료 이력·활성 도식을 묶는 요청 계약
+# 역할: 최신 질문·완료 이력·활성 도식(또는 애니메이션)을 묶는 요청 계약
 class Question(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     history: list[Turn] = Field(default_factory=list)
@@ -61,15 +75,21 @@ def health():
     return {'status': 'ok'}
 
 
-# 역할: 그래프 규칙 검증을 통과한 자료구조 개념 지도 반환; 진단 엔진과 로드맵 화면이 같은 지도를 쓰게 함
+# 역할: 그래프 규칙 검증을 통과한 자료구조 개념 지도와 막힘 지원 개념 목록 반환; 진단 엔진과 로드맵 화면이 같은 지도를 쓰게 함
+# - stuck_supported: 확인(check)·서술(explanation) 문항이 모두 있어 엔진이 이해 확인까지 할 수 있는 개념 ID(지도 순서)
+# - 화면이 목록을 따로 들고 있지 않고 문항 은행에서 계산하므로, 문항 묶음이 추가되면 [막혔어요]도 자동으로 따라옴
 @app.get('/concept-map')
 def concept_map():
     try:
-        return load_concept_map().model_dump()
-    except (OSError, ValidationError):
-        # 손상되거나 규칙을 어긴 지도는 진단 기준이 될 수 없으므로 일부라도 응답하지 않고, 경로·오류 내용은 로그에만 남김
+        concept_map = load_concept_map()
+        purposes = {(item.concept, item.purpose) for item in load_item_bank(concept_map=concept_map)}
+    except (OSError, ValueError):
+        # 손상되거나 규칙을 어긴 지도·문항은 진단 기준이 될 수 없으므로 일부라도 응답하지 않고, 경로·오류 내용은 로그에만 남김
+        # - pydantic ValidationError도 ValueError의 하위 클래스라 함께 잡힘
         logging.exception('Concept map failed to load')
         raise HTTPException(500, '개념 지도를 불러오지 못했습니다.') from None
+    supported = [c.id for c in concept_map.concepts if {(c.id, 'check'), (c.id, 'explanation')} <= purposes]
+    return {**concept_map.model_dump(), 'stuck_supported': supported}
 
 
 # 역할: 막힘 세션 단계 요청; state가 없으면 시작 입력으로 새 세션을 만듦
@@ -90,6 +110,10 @@ def stuck_session_step(body: StuckRequest):
         raise HTTPException(503, str(exc)) from None
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from None
+
+
+# 도구 실패 시 화면에 보여 줄 안내; 검증 오류 원문은 모델 재시도용이라 웹에 내보내지 않고 도구 이름에 맞는 문구만 전달
+TOOL_ERROR_MESSAGES = {'create_diagram': '도식 입력을 수정하고 있습니다.', 'show_animation': '애니메이션 입력을 수정하고 있습니다.'}
 
 
 # 역할: 질문을 받아 에이전트 이벤트를 NDJSON 스트림으로 반환
@@ -114,13 +138,15 @@ def chat(body: Question):
                                            active_artifact=body.active_artifact.model_dump() if body.active_artifact else None,
                                            count_tokens=token_counter(http, model), context_limit=int(limit)):
                         # 서버 파일 경로와 내부 도구 인자는 웹에 노출하지 않고 공개 URL·진행 상태만 전달
+                        # 애니메이션은 SVG 파일이 없으므로 주소를 붙이지 않고 프레임 데이터만 전달
                         if event['type'] == 'artifact':
                             event = {k: v for k, v in event.items() if k != 'path'}
-                            event['url'] = f"/api/artifacts/{event['artifact_id']}"
+                            if event.get('kind') != 'animation':
+                                event['url'] = f"/api/artifacts/{event['artifact_id']}"
                         elif event['type'] == 'tool_started':
                             event = {'type': 'tool_started', 'name': event['name']}
                         elif event['type'] == 'tool_error':
-                            event = {'type': 'tool_error', 'error': '도식 입력을 수정하고 있습니다.'}
+                            event = {'type': 'tool_error', 'error': TOOL_ERROR_MESSAGES.get(event.get('name'), '도구 입력을 수정하고 있습니다.')}
                         yield json.dumps(event, ensure_ascii=False) + '\n'
         except Exception:
             logging.exception('Agent request failed')
