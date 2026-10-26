@@ -175,7 +175,7 @@ def expected_answers(items):
         'topological-sort-d1': join(kahn(edges(q['topological-sort-d1']))[0]),
         'topological-sort-c1': join(kahn(edges(q['topological-sort-c1']))[0]),
         'topological-sort-c2': join([len(popped), len(left)]),
-        'shortest-path-d1': join(dijkstra(edges(q['shortest-path-d1']), 1)[v] for v in (2, 3, 4)),
+        'shortest-path-d1': join(dijkstra(edges(q['shortest-path-d1']), 1)[v] for v in (2, 4, 5)),
         'shortest-path-c1': join(-1 if table[v] == math.inf else table[v] for v in (4, 5, 6)),
         'shortest-path-c2': join([dijkstra(negative, 1)[2], bellman_ford(negative, 1)[2]]),
         'greedy-d1': len(earliest_end(meetings_in(q['greedy-d1']))),

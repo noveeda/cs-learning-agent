@@ -196,10 +196,11 @@ class LinearItemBankTests(unittest.TestCase):
             self.assertEqual(normalize_short_answer(str(value)), short[item_id].answer, item_id)
 
     # 검증 목적: 평가 전용 CS-300과 문장이 겹치는 문항이 없는지 확인; CS-300은 Git 밖 로컬 자료라 없으면 건너뜀
+    # - 선형 범위 필터와 상관없이 문항 은행 전체를 검사
     @unittest.skipUnless(CS300.exists(), 'CS-300 로컬 자료 없음')
     def test_no_overlap_with_cs300(self):
         cs300 = [json.loads(line)['question'] for line in CS300.read_text(encoding='utf-8').splitlines()]
-        for item in self.items:
+        for item in load_item_bank():
             closest = max(SequenceMatcher(None, item.question, other).ratio() for other in cs300)
             self.assertLess(closest, 0.6, item.id)
 
