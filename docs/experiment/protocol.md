@@ -45,10 +45,19 @@
   `curl -s http://127.0.0.1:8080/api/experiments/export > ai-core/outputs/experiment/export-<날짜>.json`
   - 화면 주소(5173)를 거쳐 받지 않는다. 참여자 브라우저에서 기록이 열리지 않게 프록시 경유 요청은 막혀 있다.
 - [ ] 사후 서술 답 채점 시트를 만들어 석사 과정생에게 전달한다:
-  `python ai-core/eval/experiment_report.py grading-sheet --export <파일> --out ai-core/outputs/experiment/grading-G1.csv`
+  `ai-core/.venv/bin/python ai-core/eval/experiment_report.py grading-sheet --export <파일> --materials backend/src/main/resources/experiment/materials.json --grader G1 --out ai-core/outputs/experiment/grading-G1.csv`
   - 채점자에게는 참여자, 조건, 개념 순서를 알리지 않는다.
-- [ ] 채점이 돌아오면 보고서를 만든다: `experiment_report.py report ...`
-- [ ] 보고서를 만든 뒤 `backend/data/experiments/`의 원문 기록과 내보낸 파일의 원문을 지운다. 익명화한 수치(`report.json`)만 남긴다.
+- [ ] 채점이 돌아오면 보고서를 만든다:
+  `ai-core/.venv/bin/python ai-core/eval/experiment_report.py report --export <파일> --materials backend/src/main/resources/experiment/materials.json --grades <채점 시트 CSV들> --out ai-core/outputs/experiment/report.json`
+- [ ] 보고서를 만든 뒤 원문을 모두 지우고 익명화한 수치(`report.json`)만 남긴다. 동의서 2절("분석이 끝나면 답과 대화 원문은 지우고")의 약속이다.
+  1. 실험 기록: `backend/data/experiments/`의 세션 파일
+  2. 학습 중 쓴 도구 기록: 실험 기록의 `stuck_session`·`chat_conversation` 사건이 가리키는 파일. 아래 명령으로 목록을 뽑아 확인한 뒤 지운다.
+     ```bash
+     jq -r '.. | objects | select(.type=="stuck_session") | .ref' <export 파일> | sort -u | sed 's|^|backend/data/stuck-sessions/|; s|$|.json|'
+     jq -r '.. | objects | select(.type=="chat_conversation") | .ref' <export 파일> | sort -u | sed 's|^|backend/data/conversations/|; s|$|.json|'
+     ```
+  3. 내보낸 파일(`export-<날짜>.json`)과 채점 시트 원문
+- [ ] 참여자가 중단하며 삭제를 원하면, 그 참여자의 세션 파일과 위 2번의 도구 기록 파일을 같은 방법으로 지운다.
 
 ## 6. 리허설
 
