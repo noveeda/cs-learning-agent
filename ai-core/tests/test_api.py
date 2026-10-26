@@ -30,13 +30,21 @@ class ApiTests(unittest.TestCase):
         body.pop('stuck_supported')
         self.assertEqual(body, load_concept_map().model_dump())
 
-    # 검증 목적: 막힘 지원 목록이 현재 문항 은행(선형 구조 11개)과 일치하고, 문항이 없는 개념은 빠지는지 확인
-    # - 문항 묶음이 추가되면 이 목록도 함께 늘어나야 함
+    # 검증 목적: 막힘 지원 목록이 문항 은행에서 확인·서술 문항이 모두 있는 개념(지도 순서)과 일치하는지 확인
+    # - 기대값을 문항 은행에서 계산해 문항 데이터 PR이 병합돼도 테스트를 고치지 않게 함
     def test_concept_map_lists_stuck_supported(self):
-        supported = self.client.get('/concept-map').json()['stuck_supported']
-        self.assertEqual(supported, ['memory-address', 'reference', 'logarithm', 'big-o', 'complexity-analysis', 'array',
-                                     'dynamic-array', 'linked-list', 'adt', 'stack', 'queue'])
-        self.assertNotIn('recursion', supported)
+        items = load_item_bank()
+        has = lambda concept, purpose: any(i.concept == concept and i.purpose == purpose for i in items)
+        expected = [c.id for c in load_concept_map().concepts if has(c.id, 'check') and has(c.id, 'explanation')]
+        self.assertTrue(expected)
+        self.assertEqual(self.client.get('/concept-map').json()['stuck_supported'], expected)
+
+    # 검증 목적: 문항이 없거나 확인·서술 중 하나만 있는 개념은 지원 목록에서 빠지는지, 주입한 문항으로 확인
+    def test_stuck_supported_excludes_concepts_without_items(self):
+        items = [SimpleNamespace(concept='stack', purpose='check'), SimpleNamespace(concept='stack', purpose='explanation'),
+                 SimpleNamespace(concept='queue', purpose='check'), SimpleNamespace(concept='array', purpose='explanation')]
+        with patch('serving.api.load_item_bank', return_value=items):
+            self.assertEqual(self.client.get('/concept-map').json()['stuck_supported'], ['stack'])
 
     # 검증 목적: 화면이 지원한다고 보여 주는 개념은 엔진도 이해 확인(확인·서술 문항)을 할 수 있는지 확인
     # - 어긋나면 [막혔어요]를 눌렀는데 엔진이 문항이 없어 확인을 건너뛰게 됨
