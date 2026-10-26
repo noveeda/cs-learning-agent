@@ -9,6 +9,8 @@ import java.net.InetAddress;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -31,6 +33,11 @@ public class ExperimentController {
     static final Duration LEARN_LIMIT = Duration.ofMinutes(15);
     // 답 하나의 최대 길이: 서술 답이 기록 파일을 비정상적으로 키우지 않게 하는 저장 보호 장치(서술 3문항 분량으로 충분)
     static final int MAX_ANSWER_LENGTH = 2000;
+    // 기록 시각 형식: 밀리초까지 고정 자릿수 UTC; Instant.toString은 밀리초가 0이면 생략해 문자열 정렬 순서가 같은 초 안에서 어긋남
+    private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
+    // 프록시 경유 표시 헤더: 같은 컴퓨터의 프록시가 중계하면 원격 주소가 127.0.0.1로 보여 주소만으로는 외부 요청을 가려낼 수 없음
+    // - 이 헤더를 붙이는 프록시(nginx, xfwd를 켠 vite 등)만 걸러짐; 헤더를 붙이지 않는 중계(현재 vite 설정, SSH 터널)는 막지 못함
+    private static final String[] FORWARD_HEADERS = {"X-Forwarded-For", "Forwarded", "X-Real-IP"};
     private static final Set<String> EVENT_TYPES = Set.of("help_open", "stuck_session", "chat_conversation", "continue_reading", "timeout");
 
     private final ExperimentMaterials materials;
@@ -84,7 +91,7 @@ public class ExperimentController {
         session.put("id", UUID.randomUUID().toString().replace("-", "")).put("participant", body.participant())
                 .put("grade", body.grade()).put("dsa", body.dsa());
         exclude.forEach(session.putArray("exclude")::add);
-        session.put("created_at", now().toString()).put("stage", "pretest")
+        session.put("created_at", iso(now())).put("stage", "pretest")
                 .put("pretest_form", pretestForm).put("posttest_form", pretestForm.equals("A") ? "B" : "A");
         candidates.forEach(session.putArray("candidates")::add);
         store.save(session);
@@ -127,13 +134,14 @@ public class ExperimentController {
         boolean systemFirst = (session.path("participant").asString().charAt(1) - '0') % 2 == 1;
 
         var pretest = session.putObject("pretest");
-        pretest.put("submitted_at", now().toString());
+        pretest.put("submitted_at", iso(now()));
         pretest.set("answers", answers);
         pretest.set("scores", scores);
         session.put("pretest_high", high);
         var learn = session.putArray("learn");
-        var first = learn.addObject().put("concept", chosen.get(0)).put("condition", systemFirst ? "system" : "chat");
-        learn.addObject().put("concept", chosen.get(1)).put("condition", systemFirst ? "chat" : "system");
+        // slot: 학습 순서(1 = 개념 1, 2 = 개념 2); 결과 계산 도구가 배열 위치 대신 이 값으로 순서를 읽음
+        var first = learn.addObject().put("slot", 1).put("concept", chosen.get(0)).put("condition", systemFirst ? "system" : "chat");
+        learn.addObject().put("slot", 2).put("concept", chosen.get(1)).put("condition", systemFirst ? "chat" : "system");
         startLearning(first);
         session.put("stage", "learn1");
         store.save(session);
@@ -162,8 +170,8 @@ public class ExperimentController {
         if (body.type().equals("continue_reading") && learn.has("continued_at")) return ok(session);
         var event = events.addObject().put("type", body.type());
         if (body.ref() != null) event.put("ref", body.ref());
-        event.put("at", now.toString());
-        if (body.type().equals("continue_reading")) learn.put("continued_at", now.toString());
+        event.put("at", iso(now));
+        if (body.type().equals("continue_reading")) learn.put("continued_at", iso(now));
         store.save(session);
         return ok(session);
     }
@@ -179,7 +187,7 @@ public class ExperimentController {
         Instant now = now();
         if (!learn.has("continued_at") && now.isBefore(Instant.parse(learn.path("deadline").asString())))
             return error(409, "글의 2부를 읽거나 학습 시간이 끝나야 다음 단계로 넘어갈 수 있습니다.");
-        learn.put("ended_at", now.toString());
+        learn.put("ended_at", iso(now));
         if (session.path("stage").asString().equals("learn1")) {
             startLearning((ObjectNode) session.path("learn").get(1));
             session.put("stage", "learn2");
@@ -206,7 +214,7 @@ public class ExperimentController {
             scores.put(concept, score(concept, form, answers));
         }
         var posttest = session.putObject("posttest");
-        posttest.put("submitted_at", now().toString());
+        posttest.put("submitted_at", iso(now()));
         posttest.set("answers", answers);
         posttest.set("scores", scores);
         session.put("stage", "survey");
@@ -223,9 +231,9 @@ public class ExperimentController {
         var answers = answers(body, materials.surveyIds());
         if (answers == null) return error(422, "답 형식이 올바르지 않습니다.");
         var survey = session.putObject("survey");
-        survey.put("submitted_at", now().toString());
+        survey.put("submitted_at", iso(now()));
         survey.set("answers", answers);
-        session.put("stage", "done").put("completed_at", now().toString());
+        session.put("stage", "done").put("completed_at", iso(now()));
         store.save(session);
         return ok(session);
     }
@@ -233,9 +241,9 @@ public class ExperimentController {
     @GetMapping("/export")
     // 역할: 모든 세션 기록을 결과 계산용 JSON으로 반환; 답 원문이 있어 이 서버 컴퓨터(loopback)에서 온 요청만 허용
     public ResponseEntity<?> export(HttpServletRequest request) throws IOException {
-        if (!loopback(request.getRemoteAddr())) return error(403, "실험 기록 내보내기는 서버 컴퓨터에서만 할 수 있습니다.");
+        if (!loopback(request.getRemoteAddr()) || forwarded(request)) return error(403, "실험 기록 내보내기는 서버 컴퓨터에서만 할 수 있습니다.");
         var body = ConversationStore.JSON.createObjectNode();
-        body.put("exported_at", now().toString()).put("materials_version", materials.version());
+        body.put("exported_at", iso(now())).put("materials_version", materials.version());
         store.all().forEach(body.putArray("sessions")::add);
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(body);
     }
@@ -243,7 +251,7 @@ public class ExperimentController {
     // 역할: 학습 단계 시작 시각과 마감 시각을 서버 시계로 기록; 화면은 이 마감에서 남은 시간을 받아 새로고침해도 늘어나지 않음
     private void startLearning(ObjectNode learn) {
         Instant now = now();
-        learn.put("started_at", now.toString()).put("deadline", now.plus(LEARN_LIMIT).toString());
+        learn.put("started_at", iso(now)).put("deadline", iso(now.plus(LEARN_LIMIT)));
         learn.putArray("events");
     }
 
@@ -297,7 +305,7 @@ public class ExperimentController {
                 if (learn.has("continued_at")) body.put("passage_part2", concept.part2());
                 else body.putNull("passage_part2");
                 Instant deadline = Instant.parse(learn.path("deadline").asString());
-                body.put("deadline", deadline.toString())
+                body.put("deadline", iso(deadline))
                         .put("remaining_seconds", Math.max(0, Duration.between(now(), deadline).getSeconds()));
             }
             case "posttest" -> {
@@ -314,6 +322,9 @@ public class ExperimentController {
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(body);
     }
 
+    // 역할: 시각을 기록 형식(예: 2026-10-27T03:04:05.000Z) 문자열로 바꿈; Instant.parse로 다시 읽을 수 있음
+    private static String iso(Instant instant) { return TIME.format(instant); }
+
     // 역할: 기록용 서버 시각; 밀리초까지만 남겨 내보낸 JSON을 읽기 쉽게 함
     private Instant now() { return clock.instant().truncatedTo(ChronoUnit.MILLIS); }
 
@@ -321,6 +332,11 @@ public class ExperimentController {
     private static boolean loopback(String address) {
         try { return address != null && InetAddress.getByName(address).isLoopbackAddress(); }
         catch (java.net.UnknownHostException e) { return false; }
+    }
+    // 역할: 프록시·터널을 거친 요청인지 확인; 이런 헤더가 하나라도 있으면 원래 요청자가 이 컴퓨터라고 보장할 수 없음
+    private static boolean forwarded(HttpServletRequest request) {
+        for (String header : FORWARD_HEADERS) if (request.getHeader(header) != null) return true;
+        return false;
     }
     // 역할: 없는 세션과 형식이 틀린 ID를 같은 404로 응답해 저장 경로 정보를 드러내지 않음
     private static ResponseEntity<?> notFound() { return error(404, "실험 세션을 찾을 수 없습니다. 진행자 화면에서 다시 시작해 주세요."); }

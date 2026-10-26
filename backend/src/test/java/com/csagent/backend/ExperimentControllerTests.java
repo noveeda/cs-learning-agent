@@ -12,6 +12,7 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
@@ -166,7 +167,7 @@ class ExperimentControllerTests {
         var id = create("S1", List.of()).path("id").asString();
         var learn = submitPretest(id, Map.of());
         assertEquals(900, learn.path("remaining_seconds").asInt());
-        assertEquals("2026-11-20T01:15:00Z", learn.path("deadline").asString());
+        assertEquals("2026-11-20T01:15:00.000Z", learn.path("deadline").asString());
         clock.advance(Duration.ofMinutes(5));
         assertEquals(600, get(id).path("remaining_seconds").asInt());
         // 같은 저장 폴더로 컨트롤러를 새로 만들어도(서버 재시작) 같은 남은 시간
@@ -179,7 +180,7 @@ class ExperimentControllerTests {
         clock.advance(Duration.ofMinutes(2));
         var learn2 = body(controller.next(id));
         assertEquals(900, learn2.path("remaining_seconds").asInt());
-        assertEquals("2026-11-20T01:22:00Z", learn2.path("deadline").asString());
+        assertEquals("2026-11-20T01:22:00.000Z", learn2.path("deadline").asString());
     }
 
     @Test
@@ -200,10 +201,34 @@ class ExperimentControllerTests {
         var learn1 = store.load(id).path("learn").get(0);
         assertEquals(List.of("help_open", "timeout"), learn1.path("events").valueStream().map(e -> e.path("type").asString()).toList());
         assertFalse(learn1.has("continued_at"));
-        assertEquals("2026-11-20T01:00:00Z", learn1.path("events").get(0).path("at").asString());
+        assertEquals("2026-11-20T01:00:00.000Z", learn1.path("events").get(0).path("at").asString());
         // 마감 뒤에는 2부를 읽지 않았어도 다음 단계로 넘어감
         assertEquals("learn2", body(controller.next(id)).path("stage").asString());
         assertEquals(422, event(id, "unknown").getStatusCode().value());
+    }
+
+    @Test
+    // 역할: 계속 읽기로 연 2부가 새로고침(GET)·서버 재시작 뒤에도 그대로 보이는지 검증(Review Focus 1)
+    // - 복구 화면에서 2부가 사라지면 학생이 계속 읽기를 다시 눌러야 하고 O3 끝 시각이 흐려짐
+    void continueReadingSurvivesReload() throws Exception {
+        var id = create("S1", List.of()).path("id").asString();
+        submitPretest(id, Map.of());
+        assertTrue(get(id).path("passage_part2").isNull());
+        event(id, "continue_reading");
+        assertEquals("해시 테이블 2부 글", get(id).path("passage_part2").asString());
+        var restarted = new ExperimentController(new ExperimentMaterials(MATERIALS), new ExperimentStore(directory.toString()), clock);
+        assertEquals("해시 테이블 2부 글", body(restarted.get(id)).path("passage_part2").asString());
+    }
+
+    @Test
+    // 역할: 단답 채점이 서버 기본 로캘과 무관한지 검증; 터키어 로캘에서는 "I".toLowerCase()가 점 없는 ı가 되어 정답을 틀리게 셀 수 있음
+    void gradingIgnoresDefaultLocale() {
+        var original = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            assertTrue(materials.correct("exp-heap-A2", "FIFO"));
+            assertTrue(materials.correct("exp-heap-A1", "c"));
+        } finally { Locale.setDefault(original); }
     }
 
     @Test
@@ -278,6 +303,13 @@ class ExperimentControllerTests {
         assertEquals(403, controller.export(remote).getStatusCode().value());
         var local = new MockHttpServletRequest();
         local.setRemoteAddr("127.0.0.1");
+        // 로컬 주소라도 프록시·터널 경유 표시 헤더가 있으면 원격 요청으로 보고 거부(vite 프록시는 127.0.0.1에서 중계함)
+        for (String header : new String[]{"X-Forwarded-For", "Forwarded", "X-Real-IP"}) {
+            var proxied = new MockHttpServletRequest();
+            proxied.setRemoteAddr("127.0.0.1");
+            proxied.addHeader(header, "for=10.0.0.5");
+            assertEquals(403, controller.export(proxied).getStatusCode().value(), header);
+        }
         var response = controller.export(local);
         assertEquals(200, response.getStatusCode().value());
         assertEquals("no-store", response.getHeaders().getCacheControl());
@@ -288,6 +320,10 @@ class ExperimentControllerTests {
         Set<String> keys = new HashSet<>(session.propertyNames());
         assertEquals(Set.of("id", "participant", "grade", "dsa", "exclude", "created_at", "stage", "pretest_form",
                 "posttest_form", "candidates", "pretest", "pretest_high", "learn"), keys);
+        // 결과 계산 도구가 학습 순서를 slot으로 읽고, 시각을 문자열로 정렬해도 순서가 맞도록 밀리초 고정 자릿수 사용
+        assertEquals(List.of(1, 2), session.path("learn").valueStream().map(l -> l.path("slot").asInt()).toList());
+        assertEquals("2026-11-20T01:00:00.000Z", session.path("created_at").asString());
+        assertEquals("2026-11-20T01:00:00.000Z", exported.path("exported_at").asString());
         var text = exported.toString().toLowerCase();
         for (String field : new String[]{"\"name\"", "\"email\"", "\"phone\"", "\"student_id\""}) assertFalse(text.contains(field), field);
     }
