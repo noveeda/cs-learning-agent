@@ -11,6 +11,7 @@ from .graph import simulate_graph_traversal, simulate_tree_traversal
 from .hierarchical import simulate_bst, simulate_hash_table, simulate_heap
 from .linear import simulate_array, simulate_linked_list, simulate_queue, simulate_stack
 from .model import Animation, AnimationRequest, AnimationRequestModel
+from .scheduling import simulate_cpu_schedule
 from .sorting import simulate_sort
 
 # 장면 종류(kind) → 시뮬레이터. 요청 스키마의 kind 목록과 같아야 함
@@ -25,6 +26,7 @@ SIMULATORS = {
     'graph_traversal': simulate_graph_traversal,
     'sort': simulate_sort,
     'tree_traversal': simulate_tree_traversal,
+    'cpu_schedule': simulate_cpu_schedule,
 }
 
 
@@ -71,6 +73,10 @@ SCENE_FORMATS = {
                         'directed': False, 'start': 'A', 'order': 'bfs'},
     'sort': {'kind': 'sort', 'algorithm': 'insertion', 'values': [3, 1, 2]},
     'tree_traversal': {'kind': 'tree_traversal', 'values': [2, 1, 3], 'order': 'inorder'},
+    # quantum·priority를 함께 넣어 둠: 개념별 제한으로 algorithm을 rr·priority로 바꿔도 예시가 그대로 유효하게 하기 위함
+    'cpu_schedule': {'kind': 'cpu_schedule', 'algorithm': 'fcfs', 'quantum': 2,
+                     'processes': [{'name': 'P1', 'arrival': 0, 'burst': 3, 'priority': 2},
+                                   {'name': 'P2', 'arrival': 1, 'burst': 2, 'priority': 1}]},
 }
 
 
@@ -164,7 +170,7 @@ INTEGER = {'type': 'integer', 'description': 'Integer from -99 to 999.'}
 # - 연산 개수 상한은 한 장면을 학생이 따라갈 수 있는 교육적 분량 제한(model.py와 같은 값)
 ANIMATION_TOOL = {'type': 'function', 'function': {
     'name': 'show_animation',
-    'description': ('Show a step-by-step animation of data structure operations. The server runs the '
+    'description': ('Show a step-by-step animation of data structure operations or CPU scheduling. The server runs the '
                     'operations and draws every step, so choose only the scene kind and its inputs. '
                     'Omit fields that do not belong to the chosen kind.'),
     'parameters': {
@@ -180,7 +186,9 @@ ANIMATION_TOOL = {'type': 'function', 'function': {
                 'heap: order + ops insert{value}, extract (1-10). '
                 'graph_traversal: nodes, edges, directed, start, order bfs|dfs (no ops). '
                 'sort: algorithm + values (no ops). '
-                'tree_traversal: values inserted into a BST, order preorder|inorder|postorder (no ops).')},
+                'tree_traversal: values inserted into a BST, order preorder|inorder|postorder (no ops). '
+                'cpu_schedule: algorithm fcfs|sjf|rr|priority + processes, quantum for rr (no ops); '
+                'non-preemptive sjf/priority, total time with idle gaps at most 12.')},
             'values': {'type': 'array', 'items': INTEGER,
                        'description': ('Initial values. array: 1-8 items, linked_list: 0-6 items, sort: 2-8 items, '
                                        'tree_traversal: 1-9 distinct items. Other kinds: omit.')},
@@ -195,7 +203,19 @@ ANIMATION_TOOL = {'type': 'function', 'function': {
                       'description': 'graph_traversal only. At most 12 [from, to] pairs of names in nodes.'},
             'directed': {'type': 'boolean', 'description': 'graph_traversal only.'},
             'start': {'type': 'string', 'description': 'graph_traversal only. A name in nodes.'},
-            'algorithm': {'type': 'string', 'enum': ['insertion', 'merge', 'quick'], 'description': 'sort only.'},
+            'algorithm': {'type': 'string', 'enum': ['insertion', 'merge', 'quick', 'fcfs', 'sjf', 'rr', 'priority'],
+                          'description': 'sort: insertion|merge|quick. cpu_schedule: fcfs|sjf|rr|priority.'},
+            'processes': {'type': 'array', 'description': 'cpu_schedule only. 1-5 processes with unique names.', 'items': {
+                'type': 'object',
+                'properties': {
+                    'name': {'type': 'string', 'enum': ['P1', 'P2', 'P3', 'P4', 'P5']},
+                    'arrival': {'type': 'integer', 'description': 'Arrival time from 0 to 9.'},
+                    'burst': {'type': 'integer', 'description': 'CPU time from 1 to 6.'},
+                    'priority': {'type': 'integer', 'description': 'priority only. 1 to 5, smaller runs first.'},
+                },
+                'required': ['name', 'arrival', 'burst'],
+            }},
+            'quantum': {'type': 'integer', 'description': 'cpu_schedule rr only. Time slice from 1 to 4.'},
             'ops': {'type': 'array', 'description': 'Operations run in order from the starting state.', 'items': {
                 'type': 'object',
                 'properties': {
