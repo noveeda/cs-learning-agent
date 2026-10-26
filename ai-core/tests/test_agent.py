@@ -157,7 +157,8 @@ class AnimationToolTests(unittest.TestCase):
     def test_show_animation_invalid_returns_tool_error(self):
         client = tool_then_text('show_animation', json.dumps({'kind': 'stack', 'ops': [{'op': 'pop'}]}))
         events = list(run_agent(client, 'test', 'test', Path('/tmp/unused')))
-        self.assertIn('tool_error', [e['type'] for e in events])
+        error = next(e for e in events if e['type'] == 'tool_error')
+        self.assertEqual(error['name'], 'show_animation')
         self.assertNotIn('artifact', [e['type'] for e in events])
         tool_message = json.loads(client.chat.completions.create.call_args.kwargs['messages'][-1]['content'])
         self.assertIs(tool_message['ok'], False)

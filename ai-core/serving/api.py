@@ -106,6 +106,10 @@ def stuck_session_step(body: StuckRequest):
         raise HTTPException(409, str(exc)) from None
 
 
+# 도구 실패 시 화면에 보여 줄 안내; 검증 오류 원문은 모델 재시도용이라 웹에 내보내지 않고 도구 이름에 맞는 문구만 전달
+TOOL_ERROR_MESSAGES = {'create_diagram': '도식 입력을 수정하고 있습니다.', 'show_animation': '애니메이션 입력을 수정하고 있습니다.'}
+
+
 # 역할: 질문을 받아 에이전트 이벤트를 NDJSON 스트림으로 반환
 @app.post('/chat')
 def chat(body: Question):
@@ -136,7 +140,7 @@ def chat(body: Question):
                         elif event['type'] == 'tool_started':
                             event = {'type': 'tool_started', 'name': event['name']}
                         elif event['type'] == 'tool_error':
-                            event = {'type': 'tool_error', 'error': '도식 입력을 수정하고 있습니다.'}
+                            event = {'type': 'tool_error', 'error': TOOL_ERROR_MESSAGES.get(event.get('name'), '도구 입력을 수정하고 있습니다.')}
                         yield json.dumps(event, ensure_ascii=False) + '\n'
         except Exception:
             logging.exception('Agent request failed')

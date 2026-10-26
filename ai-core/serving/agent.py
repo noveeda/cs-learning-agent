@@ -120,7 +120,7 @@ def run_agent(client: OpenAI, model: str, question: str, output_dir: Path,
             if result['ok']:
                 yield {'type': 'artifact', **result}
             else:
-                yield {'type': 'tool_error', 'error': result['error']}
+                yield {'type': 'tool_error', 'name': name, 'error': result['error']}
             current.append({'role': 'tool', 'tool_call_id': call['id'],
                              'content': json.dumps(model_view(result), ensure_ascii=False)})
     raise RuntimeError('에이전트가 종료되지 않았습니다.')

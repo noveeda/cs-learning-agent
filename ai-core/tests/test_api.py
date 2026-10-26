@@ -1,4 +1,5 @@
 # 파일 역할: 요청 검증·동시 실행 거부·내부 파일 경로 비공개·애니메이션 artifact 왕복·개념 지도 응답을 검증
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -75,6 +76,22 @@ class ApiTests(unittest.TestCase):
         response = self.client.post('/chat', json={'question': 'test'})
         self.assertIn('"kind": "animation"', response.text)
         self.assertNotIn('/api/artifacts/', response.text)
+
+    # 검증 목적: 도구 오류 안내가 실패한 도구에 맞는 문구로 나가고, 내부 오류 원문(검증 메시지)은 웹에 노출되지 않는지 확인
+    # - 애니메이션 도구 실패에 "도식 입력"이라고 안내하던 문제 방지
+    @patch('serving.api.OpenAI')
+    @patch('serving.api.run_agent')
+    def test_tool_error_message_matches_tool(self, run, client):
+        self.fake_model(client)
+        expected = {'create_diagram': '도식 입력을 수정하고 있습니다.', 'show_animation': '애니메이션 입력을 수정하고 있습니다.',
+                    'run_shell': '도구 입력을 수정하고 있습니다.'}
+        for name, message in expected.items():
+            with self.subTest(name=name):
+                run.return_value = iter([{'type': 'tool_error', 'name': name, 'error': 'pop: 스택이 비어 internal'},
+                                         {'type': 'done'}])
+                events = [json.loads(line) for line in self.client.post('/chat', json={'question': 'test'}).text.splitlines()]
+                self.assertIn({'type': 'tool_error', 'error': message}, events)
+                self.assertNotIn('internal', json.dumps(events, ensure_ascii=False))
 
     # 검증 목적: 모델이 사용 중이면 재시도 가능한 오류로 안내하는지 확인
     def test_busy_request_returns_recoverable_error(self):
