@@ -20,6 +20,20 @@ SIMULATORS = {
 }
 
 
+# 막힘 보충(S4)에서 개념마다 보여 줄 수 있는 장면 종류(개념 지도 ID → kind)
+# - 여기 없는 개념은 장면 선택 LLM을 부르지 않음: 알맞은 장면이 없는 개념에 보충 지연만 늘지 않게 하기 위함
+CONCEPT_SCENES: dict[str, tuple[str, ...]] = {
+    'array': ('array',), 'dynamic-array': ('array',), 'memory-address': ('array',),
+    'reference': ('linked_list',), 'linked-list': ('linked_list',),
+    'stack': ('stack',),
+    'queue': ('queue',),
+    'hash-function': ('hash_table',), 'hash-table': ('hash_table',),
+    # tree-traversal은 넣지 않음: bst 장면에 순회 연산이 없어 순회 과정을 보여 주지 못함(순회 장면은 MVP 3에서 다룸)
+    'binary-tree': ('bst',), 'bst': ('bst',),
+    'heap': ('heap',), 'priority-queue': ('heap',), 'heap-sort': ('heap',),
+}
+
+
 # 역할: 검증된 요청을 실행해 프레임을 계산. 실행할 수 없는 연산이면 한국어 ValueError
 def simulate(request: AnimationRequest) -> Animation:
     return SIMULATORS[request.kind](request)
