@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { loadConceptMap, newConversation } from "./api";
 import { ChatSession } from "./ChatSession";
 import { CurriculumDraft } from "./CurriculumDraft";
+import { ExperimentRunner } from "./ExperimentRunner";
 import { LearningShell } from "./LearningShell";
 import { ConceptMapStatus, Roadmap } from "./Roadmap";
 import { StuckPanel, type StuckRequest } from "./StuckPanel";
@@ -326,8 +327,20 @@ function App() {
   );
 }
 
+// 역할: #/experiment이면 학습 앱(메뉴·로드맵) 대신 실험 화면만 그림; 실험 중 다른 도구가 보이지 않게 하기 위함
+function Root() {
+  const isExperiment = () => window.location.hash.startsWith("#/experiment");
+  const [experiment, setExperiment] = useState(isExperiment);
+  useEffect(() => {
+    const onRoute = () => setExperiment(isExperiment());
+    window.addEventListener("hashchange", onRoute);
+    return () => window.removeEventListener("hashchange", onRoute);
+  }, []);
+  return experiment ? <ExperimentRunner /> : <App />;
+}
+
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <Root />
   </React.StrictMode>,
 );
