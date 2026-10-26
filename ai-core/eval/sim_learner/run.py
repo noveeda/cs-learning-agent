@@ -25,7 +25,7 @@ from eval.sim_learner.profiles import (Profile, generate_profiles, recall_ceilin
                                        true_gaps)
 from serving.concept_map import ConceptMap, load_concept_map  # noqa: E402
 from serving.item_bank import Item, load_item_bank  # noqa: E402
-from serving.stuck import MAX_DIAGNOSIS_ITEMS, Entry, StepInput, UnavailableGateway, step  # noqa: E402
+from serving.stuck import MAX_DEPTH, Entry, StepInput, UnavailableGateway, step  # noqa: E402
 
 # git-ignored 폴더; 결과 원본은 이 아래에만 씀
 EVAL_ROOT = AI_CORE / 'outputs' / 'eval' / 'sim'
@@ -34,6 +34,9 @@ SEED = 7
 # 한 세션 요청 수 상한: 진단 5 + 보충 대상마다 (보충·확인·서술·결과) × 최대 3회 시도를 넉넉히 넘는 값. 엔진이 끝나지 않는 버그를 막는 보호 장치
 MAX_STEPS = 150
 END_STAGES = ('complete', 'out_of_scope')
+# 놓친 빈틈 이유 → 보고용 묶음. 상한 탓(budget)과 찍기 탓(guess: 직접 찍음 + 찍기로 가지치기)을 나눠 엔진 개선 방향을 정하기 위함
+# - 여기 없는 이유(answered_correct·no_items·not_probed_pruned)는 other
+MISS_CAUSES = {'not_probed_budget': 'budget', 'guessed': 'guess', 'not_probed_guessed': 'guess'}
 
 
 # 역할: 완벽한 응답자(slip·guess 0)가 같은 프로필로 진단만 받았을 때 엔진이 찾는 빈틈(엔진 오라클)
@@ -96,18 +99,43 @@ def run_profile(profile: Profile, api, learner: Learner, concept_map: ConceptMap
     except Exception as exc:  # noqa: BLE001 - API·학습자 모델·엔진 오류 모두 이 프로필의 실패로 기록하고 다음 프로필을 계속 진행
         record['error'] = f'{type(exc).__name__}: {exc}'[:300]
     record['seconds'] = round(time.perf_counter() - started, 3)
-    record.update(_session_metrics(record, profile, truth))
+    record.update(_session_metrics(record, profile, truth, concept_map, items))
     return record
+
+
+# 역할: 진단 문항 상한이 없을 때 엔진이 같은 판정으로 빈틈을 찾게 되는 개념 집합
+# - 엔진(_next_probe·_diagnose)과 같은 규칙: 직접 선수 개념(깊이 1)부터 내려가고, 빈틈 판정이면서 깊이가 MAX_DEPTH 미만일 때만
+#   그 개념의 선수 개념으로 더 내려감. 진단 문항이 없는 개념은 판정하지 않고 내려가지도 않음
+# - 상한이 없으면 묻는 순서는 찾는 집합을 바꾸지 않음. 너비 우선으로 돌아 개념마다 가장 얕은 깊이로 판단함
+# - is_gap(개념): 그 개념을 물었다면 빈틈으로 판정되는지
+def _uncapped_gaps(target: str, is_gap, concept_map: ConceptMap, diagnosable: set[str]) -> set[str]:
+    prerequisites = {c.id: [p.id for p in c.prerequisites] for c in concept_map.concepts}
+    found, seen, frontier = set(), set(), [(p, 1) for p in prerequisites[target]]
+    while frontier:
+        concept, depth = frontier.pop(0)
+        if concept in seen:
+            continue
+        seen.add(concept)
+        if concept not in diagnosable or not is_gap(concept):
+            continue
+        found.add(concept)
+        if depth < MAX_DEPTH:
+            frontier += [(p, depth + 1) for p in prerequisites[concept]]
+    return found
 
 
 # 역할: 기록 한 줄의 M1·M2 값과 실패 사례 이유를 계산(진단 결과 화면을 받지 못했으면 M1은 None)
 # - 놓친 빈틈 이유
 #   - no_items: 진단 문항이 없어 확인하지 못함
 #   - answered_correct·guessed: 진단 문항을 맞힘(guessed는 학습자가 찍어서 맞힘)
-#   - not_probed_budget: 묻지 않았고 진단 문항 5개를 모두 씀(상한 탓일 가능성)
-#   - not_probed_pruned: 묻지 않았고 문항이 남음(위 개념을 맞혀 가지치기됨)
+#   - not_probed_budget: 묻지 않음. 상한이 없었다면 같은 판정으로 찾았음(상한에 걸릴 때 대기열에 남았거나 그보다 더 깊음)
+#   - not_probed_guessed: 묻지 않음. 위 개념을 찍어 맞혀 가지치기됨(찍은 문항을 틀렸다면 찾았음)
+#   - not_probed_pruned: 묻지 않음. 위 개념을 정말 알아 가지치기됐거나 깊이 상한 밖(엔진 가정과 어긋난 프로필에서 생김)
+# - 묻지 않은 개념은 학습자가 지식 상태대로 답한다고 보고 판단함(정답 빈틈이면 빈틈 판정)
+#   예전에는 "문항 5개를 다 씀"만 보고 상한 탓으로 셌음. 2026-10-26 기록을 다시 재생하니 찍기 탓이 섞여 있어 나눔
 # - 틀린 빈틈 이유: slip(아는 개념을 실수로 틀림) 또는 other
-def _session_metrics(record: dict, profile: Profile, truth: set[str]) -> dict:
+def _session_metrics(record: dict, profile: Profile, truth: set[str], concept_map: ConceptMap,
+                     items: list[Item]) -> dict:
     over = [c for c in record['remediated'] if c in profile.known]
     if record['gaps'] is None:
         return {'recall': None, 'precision': None, 'over_remediated': over, 'miss_reasons': {}, 'false_gap_reasons': {}}
@@ -115,7 +143,15 @@ def _session_metrics(record: dict, profile: Profile, truth: set[str]) -> dict:
     recall, precision = recall_precision(predicted, truth)
     results = {e['concept']: e['result'] for e in record['evidence']}
     notes = {a['concept']: a['note'] for a in record['answers'] if a['stage'] == 'diagnose'}
-    asked = sum(1 for result in results.values() if result in ('known', 'gap'))
+    guesses = {c for c, result in results.items() if result == 'known' and notes.get(c) == 'guess'}
+    diagnosable = {item.concept for item in items if item.purpose == 'diagnosis'}
+
+    # 물은 개념은 기록된 판정(flipped에 든 찍기는 틀렸다고 봄), 묻지 않은 개념은 정답 빈틈 여부로 판정
+    def is_gap(flipped):
+        return lambda c: (results[c] == 'gap' or c in flipped) if c in results else c in truth
+
+    reachable = _uncapped_gaps(record['target'], is_gap(set()), concept_map, diagnosable)
+    without_guesses = _uncapped_gaps(record['target'], is_gap(guesses), concept_map, diagnosable)
     misses = Counter()
     for concept in truth - predicted:
         result = results.get(concept)
@@ -123,8 +159,12 @@ def _session_metrics(record: dict, profile: Profile, truth: set[str]) -> dict:
             misses['no_items'] += 1
         elif result is not None:
             misses['guessed' if notes.get(concept) == 'guess' else 'answered_correct'] += 1
+        elif concept in reachable:
+            misses['not_probed_budget'] += 1
+        elif concept in without_guesses:
+            misses['not_probed_guessed'] += 1
         else:
-            misses['not_probed_budget' if asked >= MAX_DIAGNOSIS_ITEMS else 'not_probed_pruned'] += 1
+            misses['not_probed_pruned'] += 1
     false_gaps = Counter('slip' if notes.get(c) == 'slip' else 'other' for c in predicted - truth)
     return {'recall': recall, 'precision': precision, 'over_remediated': over,
             'miss_reasons': dict(misses), 'false_gap_reasons': dict(false_gaps)}
@@ -140,6 +180,7 @@ def summarize(results: list[dict]) -> dict:
 # 역할: 한 묶음의 집계
 # - M1: 세션별 recall·precision 평균과 분포, 문항 상한(ceiling) 대비 비율(Review Focus 2), 엔진 오라클 recall
 # - M2: 과잉 보충률 = 모든 세션의 (이미 아는데 보충한 개념 수) / (보충한 개념 수). 대상 개념 포함·제외 두 값과 Wilson 95% 구간
+# - 놓친 빈틈: 이유별 개수(miss_reasons)와 상한·찍기·나머지 묶음(miss_causes, MISS_CAUSES)
 def _group(records: list[dict]) -> dict:
     measured = [r for r in records if r.get('recall') is not None]
     remediated = [r for r in measured if r.get('remediated')]
@@ -148,13 +189,16 @@ def _group(records: list[dict]) -> dict:
     prereq_over = sum(len([c for c in r['over_remediated'] if c != r['target']]) for r in remediated)
     prereq_total = sum(len([c for c in r['remediated'] if c != r['target']]) for r in remediated)
     recalls = [r['recall'] for r in measured]
+    misses = sum((Counter(r.get('miss_reasons', {})) for r in records), Counter())
     summary = {
         'sessions': len(records),
         'completed': sum(1 for r in records if r.get('stage') == 'complete' and r.get('error') is None),
         'failed': sum(1 for r in records if r.get('error') is not None),
         'failures': [{'profile': r.get('profile'), 'stage': r.get('stage'), 'error': r['error']} for r in records if r.get('error')],
         'm1': None, 'm2': None,
-        'miss_reasons': dict(sum((Counter(r.get('miss_reasons', {})) for r in records), Counter())),
+        'miss_reasons': dict(misses),
+        'miss_causes': {cause: sum(n for reason, n in misses.items() if MISS_CAUSES.get(reason, 'other') == cause)
+                        for cause in ('budget', 'guess', 'other')},
         'false_gap_reasons': dict(sum((Counter(r.get('false_gap_reasons', {})) for r in records), Counter())),
     }
     if measured:
