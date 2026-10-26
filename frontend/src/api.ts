@@ -16,8 +16,16 @@ export type AgentEvent =
 // 응답에서 화면이 쓰는 필드만 꺼내기 위한 최소 형태; 그래프 규칙 검증은 AI core가 담당
 type ConceptMapResponse = {
   title: string;
-  concepts: Omit<Concept, 'domain'>[];
+  concepts: Omit<Concept, 'domain' | 'stuckSupported'>[];
+  stuck_supported?: string[];
 };
+
+// 역할: 개념 지도 응답의 stuck_supported(확인·서술 문항이 모두 있는 개념)로 [막혔어요] 지원 여부 판단
+// - 목록은 AI core가 문항 은행에서 계산하므로 화면과 엔진의 판단이 어긋나지 않고, 문항이 추가되면 자동으로 따라옴
+// - 필드가 없는 옛 응답이면 엔진이 이해 확인을 할 수 있는지 모르므로 지원하지 않는 것으로 봄
+export function isStuckSupported(map: { stuck_supported?: string[] }, conceptId: string): boolean {
+  return Array.isArray(map.stuck_supported) && map.stuck_supported.includes(conceptId);
+}
 
 // 역할: /api/concept-map을 받아 로드맵용 개념 목록으로 변환; 실패 시 화면에 보여 줄 한국어 안내를 담아 예외
 export async function loadConceptMap(): Promise<Concept[]> {
@@ -38,6 +46,7 @@ export async function loadConceptMap(): Promise<Concept[]> {
   const map = body as ConceptMapResponse;
   return map.concepts.map(({ id, title, description, objectives, prerequisites }) => ({
     id, title, description, objectives, prerequisites, domain: map.title,
+    stuckSupported: isStuckSupported(map, id),
   }));
 }
 
