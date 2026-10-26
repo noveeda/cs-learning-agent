@@ -65,6 +65,17 @@ class SplitTest(unittest.TestCase):
             for first, second in mohler.SAME_MEANING:
                 self.assertEqual(first in dev, second in dev, (seed, first, second))
 
+    # 검증: PR #70 검수에서 찾은, 질문 표현은 달라도 모범 답 핵심이 같은 문항들이 한 묶음으로 같은 분할에 들어감
+    # - 스택 연산 묶음은 쌍 두 개(E08.Q02·E12.Q07, E08.Q02·E09.Q06)가 이어져 세 문항이 한 묶음이 됨
+    def test_review_groups_stay_together(self):
+        groups = [('E05.Q02', 'E12.Q04'), ('E04.Q02', 'E11.Q08'), ('E04.Q03', 'E07.Q04'),
+                  ('E08.Q02', 'E12.Q07', 'E09.Q06')]
+        rows = [row(q, 0, 4.0) for group in groups for q in group] + [row(f'E01.Q{q:02d}', 0, 4.0) for q in range(1, 9)]
+        for seed in range(40):
+            dev, _ = mohler.split_questions(rows, seed=seed)
+            for group in groups:
+                self.assertEqual(len({q in dev for q in group}), 1, (seed, group))
+
 
 # 역할: 평가 시험용 데이터; dev 문항 2개·report 문항 2개, 답마다 사람 점수와 AI 충족 목록을 둠
 def evaluation_data(report_cases):
