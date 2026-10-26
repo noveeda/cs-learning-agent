@@ -16,7 +16,8 @@ from serving.stuck import Entry, LLMUnavailable, StuckState
 
 # 역할: LLM 역할 하나의 호출 설정
 # - model: None이면 VLLM_MODEL 환경변수, 그것도 없으면 서버가 서빙 중인 첫 모델
-# - thinking: Qwen 계열 chat template의 추론 모드(enable_thinking) 사용 여부
+# - top_p·top_k: None이면 보내지 않음(서버 기본값); top_k는 OpenAI 표준 인자가 아니라 vLLM 확장 인자로 extra_body에 넣음
+# - thinking: chat template의 추론 모드(enable_thinking) 사용 여부
 # - max_tokens: 출력 분량 상한(운영 보호 장치, 교육적 분량 기준은 프롬프트로 지시)
 # - timeout·attempts: 한 번 호출의 대기 시간과 시도 횟수(첫 시도 + 재시도)
 @dataclass(frozen=True)
@@ -27,18 +28,24 @@ class RoleSettings:
     max_tokens: int
     timeout: float
     attempts: int
+    top_p: float | None = None
+    top_k: int | None = None
 
 
 # 운영 보호: Spring의 AI core 호출 대기(320초) 안에 한 단계가 끝나도록 역할마다 시도 횟수 × 대기 시간 + 모델 조회 시간을 이 값 이하로 둠
 STEP_BUDGET_SECONDS = 300
 MODEL_LIST_TIMEOUT = 10
 
-# 역할별 설정 표; 모델 선택 결과는 이 표만 바꿔 적용(지금은 기존 기본값: 환경변수 모델, 추론 끔)
+# 역할별 설정 표; 모델 선택 결과(docs/model-selection.md 7절, gemma-4-26B-A4B-it AWQ, 추론 끔)를 적용
+# - 판정 역할(identify·grade_explanation)은 같은 입력에 같은 판정이 나오도록 temperature 0
+# - 생성 역할(explain·summarize)은 Gemma 4 권장 샘플링(temperature 1.0, top_p 0.95, top_k 64)
+# - explain만 temperature 0.7: 1.0에서 즉석 수치 예시·정의 반전 같은 사실 오류가 나와(PR #38 검수 4/66) 프롬프트 보강과 함께 낮춤(재측정 2/99)
+# - max_tokens는 시험에서 정상 출력이 잘리지 않은 상한, timeout은 측정 지연(①0.2·②2.8·③0.5·④0.9초)에 여유를 둔 값
 ROLE_SETTINGS = {
-    'identify': RoleSettings(model=None, temperature=0.0, thinking=False, max_tokens=64, timeout=60, attempts=2),
-    'explain': RoleSettings(model=None, temperature=0.4, thinking=False, max_tokens=1200, timeout=140, attempts=2),
-    'grade_explanation': RoleSettings(model=None, temperature=0.0, thinking=False, max_tokens=800, timeout=90, attempts=2),
-    'summarize': RoleSettings(model=None, temperature=0.3, thinking=False, max_tokens=500, timeout=90, attempts=2),
+    'identify': RoleSettings(model=None, temperature=0.0, thinking=False, max_tokens=64, timeout=30, attempts=2),
+    'explain': RoleSettings(model=None, temperature=0.7, top_p=0.95, top_k=64, thinking=False, max_tokens=1536, timeout=60, attempts=2),
+    'grade_explanation': RoleSettings(model=None, temperature=0.0, thinking=False, max_tokens=1024, timeout=30, attempts=2),
+    'summarize': RoleSettings(model=None, temperature=1.0, top_p=0.95, top_k=64, thinking=False, max_tokens=512, timeout=30, attempts=2),
 }
 
 COMMON = ('CS 자료구조 학습을 돕는 튜터다. 한국어로 쓰고, 정확한 번역이 없는 용어는 영어 원어를 함께 쓴다. '
@@ -46,18 +53,25 @@ COMMON = ('CS 자료구조 학습을 돕는 튜터다. 한국어로 쓰고, 정�
 
 PROMPTS = {
     'identify': COMMON + ' 작업: 학습자가 막힌 문장이 개념 지도의 어느 개념을 이해하지 못해 막힌 것인지 하나만 고른다. '
-                '문장이 직접 다루는 개념을 고르고, 지도에 맞는 개념이 없거나 자료구조와 무관하면 "none"을 고른다. JSON schema에 맞게 응답한다.',
+                '문장의 선수 개념이 아니라 문장이 직접 다루는 주제 개념을 고르고, 지도에 맞는 개념이 없거나 자료구조와 무관하면 "none"을 고른다. JSON schema에 맞게 응답한다.',
     'explain': COMMON + ' 작업: 학습자가 이해하지 못한 개념 하나를 짧게 보충 설명한다. '
-               '마크다운 본문만 쓰고 300~600자 정도로, 학습 목표를 확인할 수 있게 핵심부터 설명한다. '
+               '300~600자 정도로 쓰고, 마크다운 제목(#)은 쓰지 않고 짧은 문단이나 목록으로 쓴다. 학습 목표를 확인할 수 있게 핵심부터 설명한다. '
                '선수 개념에 기대는 부분은 그 연결을 먼저 짚고, 구체적인 예시를 하나 이상 넣는다. '
+               '사실의 근거는 입력의 concept.description과 concept.objectives다. 그 내용을 뒤집거나 어긋나는 문장을 쓰지 않고, '
+               '비유나 다른 말로 바꿔 설명할 때도 정의와 맞는지 확인한다. 정의를 말할 때는 concept.description 문장을 거의 그대로 쓴다. '
+               '예시는 상황과 순서로 보여 주고, 새 수치를 만들어 계산하는 예시는 쓰지 않는다. '
+               '학습 목표에 계산이 들어 있어 수치가 꼭 필요하면 작은 수로 한 번만 쓰고, 계산식을 모두 적은 뒤 결과를 다시 확인한다. '
                '연습 문제를 내거나 풀지 않고, 도식·코드 실행은 쓰지 않는다.',
     'grade_explanation': COMMON + ' 작업: 학습자의 서술 답이 채점 기준 각 항목의 핵심 내용을 담았는지 항목별로 판정한다. '
                          '길이·말솜씨·맞춤법이 아니라 핵심 요소가 맞게 들어 있는지만 본다. 표현이 달라도 뜻이 같으면 충족이다. '
-                         '틀린 내용으로 설명했거나 언급이 없으면 미충족이다. 빈 답이나 질문과 무관한 답은 모든 항목이 미충족이다. '
-                         '각 항목마다 답에서 근거가 된 부분을 짧게 적은 뒤 판정한다. JSON schema에 맞게 응답한다.',
+                         '틀린 내용으로 설명했거나 언급이 없으면 미충족이다. 키워드만 나열하거나 질문을 되풀이한 것도 미충족이다. '
+                         '빈 답이나 질문과 무관한 답은 모든 항목이 미충족이다. 판단이 애매하면 미충족으로 판정한다. '
+                         'reference는 채점자만 보는 모범 근거다. criteria는 rubric과 같은 순서·같은 개수로 쓰고, '
+                         '각 항목마다 답에서 근거가 된 부분을 evidence에 짧게 옮긴 뒤(없으면 빈 문자열) met를 정한다. JSON schema에 맞게 응답한다.',
     'summarize': COMMON + ' 작업: 막힘 세션을 마친 학습자에게 복귀 요약을 쓴다. '
-                 '보충한 선수 개념이 원래 막힌 지점을 이해하는 데 어떻게 이어지는지 3~5문장으로 정리한다. '
-                 '아직 이해 확인을 통과하지 못한 개념이 있으면 다시 볼 것을 한 문장으로 권한다. 마크다운 본문만 쓴다.',
+                 '보충한 선수 개념이 원래 막힌 지점을 이해하는 데 어떻게 이어지는지 2~4문장, 300자 이내로 정리한다. '
+                 '새 개념이나 원리를 새로 설명하지 않는다: stuck_at과 filled 목록에 있는 개념만 언급해 연결을 말하고, 확신할 수 없는 이유는 쓰지 않는다. '
+                 '아직 이해 확인을 통과하지 못한 개념이 있으면 사실대로 짧게 말하고 다시 볼 것을 권하며, 이해했다고 쓰지 않는다. 마크다운 제목은 쓰지 않는다.',
 }
 
 # 복귀 요약에 넘길 보충 결과 표기; 내부 코드 대신 학습자에게 보여 줄 말로 바꿔 모델이 그대로 옮겨 쓰게 함
@@ -65,10 +79,15 @@ OUTCOME_LABELS = {'passed': '이해 확인 통과', 'unresolved': '아직 이해
                   'unchecked': '확인 문항이 없어 확인하지 않음', 'pending': '진행 전'}
 
 # 재보충 때 같은 설명을 반복하지 않도록 시도 횟수마다 설명 방식을 바꿈(MAX_RETRIES 2 → 최대 3번째 시도)
+# - 2차 문구: 단계별 예시에서 이동 횟수·원소 수를 잘못 세는 오류가 있어(재측정) 원소 수를 작게 두고 단계마다 상태를 적은 뒤 다시 세게 함
+# - 3차 문구: '비유와 오해 바로잡기'만 지시하면 오해를 사실처럼 쓰거나 정의를 뒤집는 오류가 몰려(PR #38 검수 3/22) 정의 재진술·오해와 사실 구분·수치 예시 금지를 명시
 EXPLAIN_APPROACHES = {
     1: '정의와 핵심 원리를 먼저 말하고 예시 하나로 확인한다.',
-    2: '앞선 설명으로 이해하지 못했다. 이번에는 구체적인 작은 예시를 한 단계씩 따라가며 설명하고 정의는 마지막에 정리한다.',
-    3: '두 번의 설명으로도 이해하지 못했다. 일상적인 비유와 학습자가 흔히 하는 오해를 바로잡는 방식으로 설명한다.',
+    2: ('앞선 설명으로 이해하지 못했다. 이번에는 원소 두세 개짜리 작은 예시 하나를 한 단계씩 따라가며 설명하고, 각 단계 뒤의 상태를 직접 적는다. '
+        '몇 개·몇 번이라고 말할 때는 적어 둔 상태를 다시 세어 맞는지 확인한다. 정의는 마지막에 정리한다.'),
+    3: ('두 번의 설명으로도 이해하지 못했다. 이번에는 정의를 한 문장으로 다시 정확히 말한 뒤, 일상적인 비유 하나로 설명한다. '
+        "학습자가 흔히 하는 오해를 다룰 때는 '~라고 생각하기 쉽지만 실제로는 ~이다'처럼 틀린 생각과 맞는 사실을 분명히 나눠 쓴다. "
+        '새 수치 계산 예시는 넣지 않는다.'),
 }
 
 
@@ -106,11 +125,16 @@ class StuckModelGateway:
                 except (OpenAIError, IndexError) as exc:
                     logging.warning('Stuck %s: model lookup failed: %s', role, exc)
                     raise LLMUnavailable('모델 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.') from None
+                extra_body = {'chat_template_kwargs': {'enable_thinking': settings.thinking}}
                 kwargs = dict(model=model, temperature=settings.temperature, max_tokens=settings.max_tokens,
                               timeout=settings.timeout,
                               messages=[{'role': 'system', 'content': PROMPTS[role]},
                                         {'role': 'user', 'content': json.dumps(user, ensure_ascii=False)}],
-                              extra_body={'chat_template_kwargs': {'enable_thinking': settings.thinking}})
+                              extra_body=extra_body)
+                if settings.top_p is not None:
+                    kwargs['top_p'] = settings.top_p
+                if settings.top_k is not None:
+                    extra_body['top_k'] = settings.top_k
                 if response_format:
                     kwargs['response_format'] = response_format
                 for attempt in range(1, settings.attempts + 1):
@@ -155,25 +179,27 @@ class StuckModelGateway:
         return self._call('explain', user, lambda content: content)
 
     # 역할: S5·S6 서술 채점; 루브릭 항목마다 충족 여부를 같은 순서의 list[bool]로 반환
-    # - 항목 수만큼 고정 키(criterion_1…)를 둔 schema로 받아 항목 누락·추가를 형식 단계에서 막음
+    # - criteria 배열 길이를 루브릭 항목 수로 고정(minItems·maxItems)해 항목 누락·추가를 형식 단계에서 막고, 응답 후에도 다시 확인
+    # - evidence는 200자 이내: 답안을 길게 옮겨 적다 출력 상한에 걸리지 않게 하기 위함
+    # - 모범 근거(rationale)는 채점 정확도를 위해 모델에만 넘김; 응답·세션 상태에는 담지 않음
     # - 빈 답은 모델을 부르지 않고 모두 미충족: 결과가 분명한 경우에 모델 시간을 쓰지 않기 위함
     def grade_explanation(self, item: Item, answer: str) -> list[bool]:
         rubric = item.rubric or []
         if not answer.strip():
             return [False] * len(rubric)
-        keys = [f'criterion_{i}' for i in range(1, len(rubric) + 1)]
         judgment = {'type': 'object', 'additionalProperties': False, 'required': ['evidence', 'met'],
-                    'properties': {'evidence': {'type': 'string'}, 'met': {'type': 'boolean'}}}
-        schema = {'type': 'object', 'additionalProperties': False, 'required': keys,
-                  'properties': {k: judgment for k in keys}}
+                    'properties': {'evidence': {'type': 'string', 'maxLength': 200}, 'met': {'type': 'boolean'}}}
+        schema = {'type': 'object', 'additionalProperties': False, 'required': ['criteria'],
+                  'properties': {'criteria': {'type': 'array', 'minItems': len(rubric), 'maxItems': len(rubric),
+                                              'items': judgment}}}
 
         def parse(content):
-            data = json.loads(content)
-            if set(data) != set(keys) or not all(isinstance(data[k].get('met'), bool) for k in keys):
+            criteria = json.loads(content)['criteria']
+            if len(criteria) != len(rubric) or not all(isinstance(c.get('met'), bool) for c in criteria):
                 raise ValueError('채점 결과가 루브릭 항목과 맞지 않습니다.')
-            return [data[k]['met'] for k in keys]
+            return [c['met'] for c in criteria]
 
-        user = {'question': item.question, 'rubric': dict(zip(keys, rubric)), 'answer': answer}
+        user = {'question': item.question, 'reference': item.rationale, 'rubric': rubric, 'answer': answer}
         return self._call('grade_explanation', user, parse, _schema('grade', schema))
 
     # 역할: S7 복귀 요약; 보충한 개념별 결과와 원래 막힌 지점을 주고 연결 요약을 받음

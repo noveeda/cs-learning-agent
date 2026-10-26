@@ -57,7 +57,7 @@ def happy_client(identified='stack'):
     return FakeClient(
         identify=lambda user, kw: json.dumps({'concept': identified}),
         explain=lambda user, kw: f"**{user['concept']['title']}** 보충 설명",
-        grade_explanation=lambda user, kw: json.dumps({k: {'evidence': '근거 부분', 'met': True} for k in user['rubric']}),
+        grade_explanation=lambda user, kw: json.dumps({'criteria': [{'evidence': '근거 부분', 'met': True} for _ in user['rubric']]}),
         summarize=lambda user, kw: '복귀 요약',
     )
 
@@ -83,7 +83,25 @@ class RequestShapeTests(unittest.TestCase):
         self.assertEqual((kw['model'], kw['temperature'], kw['max_tokens'], kw['timeout']),
                          ('env-model', settings.temperature, settings.max_tokens, settings.timeout))
         self.assertEqual(kw['extra_body'], {'chat_template_kwargs': {'enable_thinking': False}})
+        self.assertNotIn('top_p', kw)
         self.assertEqual(client.list_calls, 0)
+
+    # 검증 목적: 모델 선택 결과(docs/model-selection.md 7절)의 역할별 샘플링·분량·시간이 실제 요청 인자로 나가는지 확인
+    # - 판정 역할(①③)은 결정적으로 temperature 0, 생성 역할(②④)은 Gemma 4 권장 샘플링(top_k는 vLLM 확장 인자라 extra_body)
+    # - ② explain은 사실 오류를 줄이려고 temperature만 0.7로 낮춤(docs/model-selection.md 7절)
+    def test_role_requests_follow_model_selection(self):
+        expected = {'identify': (0.0, None, None, 64, 30), 'explain': (0.7, 0.95, 64, 1536, 60),
+                    'grade_explanation': (0.0, None, None, 1024, 30), 'summarize': (1.0, 0.95, 64, 512, 30)}
+        client = happy_client()
+        state = run_session(self, {'kind': 'excerpt', 'excerpt': '스택의 pop이 이해가 안 돼요', 'return_to': '/x'}, client)
+        self.assertEqual(state.stage, 'complete')
+        sent = {role: kw for role, kw in client.requests}
+        self.assertEqual(set(sent), set(expected))
+        for role, (temperature, top_p, top_k, max_tokens, timeout) in expected.items():
+            kw = sent[role]
+            self.assertEqual((kw['temperature'], kw.get('top_p'), kw['extra_body'].get('top_k'), kw['max_tokens'], kw['timeout']),
+                             (temperature, top_p, top_k, max_tokens, timeout), role)
+            self.assertEqual(kw['extra_body']['chat_template_kwargs'], {'enable_thinking': False}, role)
 
     # 검증 목적: 지도에 맞는 개념이 없다는 "none"은 None(범위 밖)으로 바뀌고, 모델 이름이 없으면 서버의 첫 모델을 쓰는지 확인
     def test_identify_none_and_served_model_fallback(self):
@@ -110,16 +128,32 @@ class RequestShapeTests(unittest.TestCase):
             if i.concept == 'adt':
                 self.assertNotIn(i.rationale, sent)
 
-    # 검증 목적: 서술 채점이 루브릭 항목 수만큼 고정 키 schema를 걸고, 결과를 루브릭 순서의 list[bool]로 돌려주는지 확인
+    # 검증 목적: 보충 설명 사실 오류(PR #38 검수: 모델이 즉석에서 만든 수치 예시 오류, 3차 '오해 바로잡기'에서 정의 반전)를 막는 지시가 빠지지 않는지 확인
+    # - 모든 차수: 개념 설명·학습 목표를 사실 근거로 삼고, 새 수치 계산 예시를 만들지 않음
+    # - 2차: 단계별 예시는 원소를 작게 두고 단계마다 상태를 적은 뒤 다시 셈(재측정에서 이동 횟수 오류)
+    # - 3차: 정의를 먼저 정확히 다시 말하고, 오해와 사실을 분명히 나눠 씀
+    def test_explain_prompt_guards_against_factual_errors(self):
+        prompt = PROMPTS['explain']
+        self.assertIn('concept.description과 concept.objectives', prompt)
+        self.assertIn('새 수치를 만들어 계산하는 예시는 쓰지 않는다', prompt)
+        self.assertIn('정의를 한 문장으로 다시 정확히 말한 뒤', EXPLAIN_APPROACHES[3])
+        self.assertIn("'~라고 생각하기 쉽지만 실제로는 ~이다'", EXPLAIN_APPROACHES[3])
+        self.assertIn('새 수치 계산 예시는 넣지 않는다', EXPLAIN_APPROACHES[3])
+        self.assertIn('정의를 말할 때는 concept.description 문장을 거의 그대로 쓴다', prompt)
+        self.assertIn('적어 둔 상태를 다시 세어 맞는지 확인한다', EXPLAIN_APPROACHES[2])
+
+    # 검증 목적: 서술 채점이 루브릭 항목 수로 길이를 고정한 criteria 배열 schema를 걸고, 결과를 루브릭 순서의 list[bool]로 돌려주는지 확인
     def test_grade_explanation_keeps_rubric_order(self):
         target = item('stack-e1')
         client = FakeClient(grade_explanation=lambda user, kw: json.dumps(
-            {k: {'evidence': '', 'met': k != 'criterion_2'} for k in user['rubric']}))
+            {'criteria': [{'evidence': '', 'met': i != 1} for i, _ in enumerate(user['rubric'])]}))
         self.assertEqual(gateway(client).grade_explanation(target, '나중에 호출한 함수가 먼저 끝난다'), [True, False, True])
         _, kw = client.requests[0]
-        schema = kw['response_format']['json_schema']['schema']
-        self.assertEqual(schema['required'], ['criterion_1', 'criterion_2', 'criterion_3'])
-        self.assertEqual(json.loads(kw['messages'][1]['content'])['rubric']['criterion_1'], target.rubric[0])
+        criteria = kw['response_format']['json_schema']['schema']['properties']['criteria']
+        self.assertEqual((criteria['minItems'], criteria['maxItems']), (3, 3))
+        self.assertEqual(criteria['items']['properties']['evidence'], {'type': 'string', 'maxLength': 200})
+        user = json.loads(kw['messages'][1]['content'])
+        self.assertEqual((user['rubric'], user['reference']), (target.rubric, target.rationale))
 
     # 검증 목적: 빈 답은 모델을 부르지 않고 모든 항목 미충족으로 판정하는지 확인
     def test_blank_explanation_fails_without_model_call(self):
@@ -156,8 +190,10 @@ class FailureTests(unittest.TestCase):
             ('identify', lambda user, kw: '{"concept": '),
             ('identify', lambda user, kw: '{"concept": "not-in-map"}'),
             ('identify', lambda user, kw: '["stack"]'),
-            ('grade_explanation', lambda user, kw: json.dumps({'criterion_1': {'evidence': '', 'met': True}})),
-            ('grade_explanation', lambda user, kw: json.dumps({k: {'met': 'yes'} for k in user['rubric']})),
+            ('grade_explanation', lambda user, kw: json.dumps({'criteria': [{'evidence': '', 'met': True}]})),
+            ('grade_explanation', lambda user, kw: json.dumps({'criteria': [{'met': 'yes'} for _ in user['rubric']]})),
+            ('grade_explanation', lambda user, kw: json.dumps([{'evidence': '', 'met': True}] * 3)),
+            ('grade_explanation', lambda user, kw: reply('{"criteria": [{"evidence": "', finish='length')),
         ]
         for role, responder in cases:
             g = gateway(FakeClient(**{role: responder}))
