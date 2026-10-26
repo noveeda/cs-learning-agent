@@ -31,11 +31,11 @@ def kids(tree, node):
     return tree.get(node, (None, None))
 
 
-def preorder(tree, node):
+def inorder(tree, node):
     if node is None:
         return []
     left, right = kids(tree, node)
-    return [node] + preorder(tree, left) + preorder(tree, right)
+    return inorder(tree, left) + [node] + inorder(tree, right)
 
 
 def postorder(tree, node):
@@ -203,7 +203,7 @@ def expected_answers(items):
         'binary-tree-d1': perfect(3),
         'binary-tree-c1': level.count(max(level)),
         'binary-tree-c2': min_height,
-        'tree-traversal-d1': join(preorder(*binary(q['tree-traversal-d1']))),
+        'tree-traversal-d1': join(inorder(*binary(q['tree-traversal-d1']))),
         'tree-traversal-c1': join(postorder(*binary(q['tree-traversal-c1']))),
         'tree-traversal-c2': join(queue),
         'bst-d1': join(search_path(bst_build([50, 30, 70, 20, 40, 60, 80, 35]), 35)),
