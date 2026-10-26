@@ -1,7 +1,7 @@
 // 파일 역할: 네트워크 조각 경계와 중단·도식 이벤트 및 대화 복구를 UI 없이 검증
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { requestChat, loadConversation } from '../src/api.ts';
+import { artifactTitle, isAnimationArtifact, requestChat, loadConversation } from '../src/api.ts';
 
 // 역할: 일부러 응답을 조각내 한글 바이트와 JSON 줄 경계 처리 검증
 function stream(text) {
@@ -93,4 +93,40 @@ test('sends the selected artifact and session ID, without client history', async
     return stream('{"type":"answer","text":"완료"}\n{"type":"done"}\n');
   });
   await requestChat('바꿔줘', 'session', () => {}, 'diagram');
+});
+
+// AI core create_animation 결과와 같은 모양의 애니메이션 artifact; 도식과 달리 SVG 경로(path·url)가 없음
+const animationArtifact = {
+  ok: true, artifact_id: 'b'.repeat(32), kind: 'animation',
+  animation: { kind: 'stack', title: '스택 push·pop', frames: [
+    { boxes: [], arrows: [], caption: '빈 스택에서 시작합니다' },
+    { boxes: [{ id: 's0', label: '1', x: 0, y: 0, shape: 'cell', tone: 'new' }], arrows: [], caption: 'push 1: 1을 top 위에 올립니다' },
+  ] },
+  request: { kind: 'stack', ops: [{ op: 'push', value: 1 }] },
+};
+
+// 검증 목적: 스트림 파서가 kind:'animation' artifact를 프레임까지 그대로 보존하고, SVG 경로가 없어도 오류로 처리하지 않는지 확인
+test('keeps animation artifacts without an SVG path', async (t) => {
+  const events = [{ type: 'artifact', ...animationArtifact }, { type: 'answer', text: '스택 과정' }, { type: 'done' }];
+  t.mock.method(globalThis, 'fetch', async () => stream(events.map(e => JSON.stringify(e)).join('\n')));
+  const observed = [];
+  const result = await requestChat('스택 보여줘', 'session', e => observed.push(e));
+  assert.equal(result.artifact.kind, 'animation');
+  assert.deepEqual(result.artifact.animation, animationArtifact.animation);
+  assert.equal(result.artifact.url, undefined);
+  assert.deepEqual(observed, events);
+});
+
+// 검증 목적: 저장된 대화의 애니메이션 artifact도 복구되고, 화면이 종류에 맞는 제목·패널을 고를 수 있는지 확인
+test('restores animation artifacts and tells them apart from diagrams', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ messages: [
+    { role: 'user', content: '스택 보여줘', status: 'complete' },
+    { role: 'assistant', content: '스택 과정', status: 'complete', artifacts: [{ type: 'artifact', ...animationArtifact }] },
+  ] }));
+  const [, answer] = await loadConversation('session');
+  assert.equal(isAnimationArtifact(answer.artifact), true);
+  assert.equal(artifactTitle(answer.artifact), '스택 push·pop');
+  const diagram = { artifact_id: 'diagram', url: '/api/artifacts/diagram', diagram: { title: '도식' } };
+  assert.equal(isAnimationArtifact(diagram), false);
+  assert.equal(artifactTitle(diagram), '도식');
 });
