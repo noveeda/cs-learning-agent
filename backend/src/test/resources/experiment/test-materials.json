@@ -1,0 +1,227 @@
+{
+ "version": "test-1",
+ "concepts": [
+  {
+   "id": "hash-table",
+   "title": "해시 테이블",
+   "passage": {
+    "part1": "해시 테이블 1부 글",
+    "part2": "해시 테이블 2부 글"
+   },
+   "pre_post": {
+    "A": [
+     {
+      "id": "exp-hash-table-A1",
+      "format": "multiple_choice",
+      "question": "해시 테이블 A형 선택 문항",
+      "options": {
+       "A": "보기 가",
+       "B": "보기 나",
+       "C": "보기 다",
+       "D": "보기 라"
+      },
+      "answer": "C",
+      "rationale": "KEY-RATIONALE hash-table A1"
+     },
+     {
+      "id": "exp-hash-table-A2",
+      "format": "short_exact",
+      "question": "해시 테이블 A형 단답 문항",
+      "answer": "1,2,3",
+      "rationale": "KEY-RATIONALE hash-table A2"
+     },
+     {
+      "id": "exp-hash-table-A3",
+      "format": "explanation",
+      "question": "해시 테이블 A형 서술 문항",
+      "rationale": "KEY-RATIONALE hash-table A3",
+      "rubric": [
+       "KEY-RUBRIC hash-table A 1",
+       "KEY-RUBRIC hash-table A 2"
+      ]
+     }
+    ],
+    "B": [
+     {
+      "id": "exp-hash-table-B1",
+      "format": "multiple_choice",
+      "question": "해시 테이블 B형 선택 문항",
+      "options": {
+       "A": "보기 가",
+       "B": "보기 나",
+       "C": "보기 다",
+       "D": "보기 라"
+      },
+      "answer": "C",
+      "rationale": "KEY-RATIONALE hash-table B1"
+     },
+     {
+      "id": "exp-hash-table-B2",
+      "format": "short_exact",
+      "question": "해시 테이블 B형 단답 문항",
+      "answer": "1,2,3",
+      "rationale": "KEY-RATIONALE hash-table B2"
+     },
+     {
+      "id": "exp-hash-table-B3",
+      "format": "explanation",
+      "question": "해시 테이블 B형 서술 문항",
+      "rationale": "KEY-RATIONALE hash-table B3",
+      "rubric": [
+       "KEY-RUBRIC hash-table B 1",
+       "KEY-RUBRIC hash-table B 2"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "bst",
+   "title": "이진 탐색 트리",
+   "passage": {
+    "part1": "이진 탐색 트리 1부 글",
+    "part2": "이진 탐색 트리 2부 글"
+   },
+   "pre_post": {
+    "A": [
+     {
+      "id": "exp-bst-A1",
+      "format": "multiple_choice",
+      "question": "이진 탐색 트리 A형 선택 문항",
+      "options": {
+       "A": "보기 가",
+       "B": "보기 나",
+       "C": "보기 다",
+       "D": "보기 라"
+      },
+      "answer": "C",
+      "rationale": "KEY-RATIONALE bst A1"
+     },
+     {
+      "id": "exp-bst-A2",
+      "format": "short_exact",
+      "question": "이진 탐색 트리 A형 단답 문항",
+      "answer": "1,2,3",
+      "rationale": "KEY-RATIONALE bst A2"
+     },
+     {
+      "id": "exp-bst-A3",
+      "format": "explanation",
+      "question": "이진 탐색 트리 A형 서술 문항",
+      "rationale": "KEY-RATIONALE bst A3",
+      "rubric": [
+       "KEY-RUBRIC bst A 1",
+       "KEY-RUBRIC bst A 2"
+      ]
+     }
+    ],
+    "B": [
+     {
+      "id": "exp-bst-B1",
+      "format": "multiple_choice",
+      "question": "이진 탐색 트리 B형 선택 문항",
+      "options": {
+       "A": "보기 가",
+       "B": "보기 나",
+       "C": "보기 다",
+       "D": "보기 라"
+      },
+      "answer": "C",
+      "rationale": "KEY-RATIONALE bst B1"
+     },
+     {
+      "id": "exp-bst-B2",
+      "format": "short_exact",
+      "question": "이진 탐색 트리 B형 단답 문항",
+      "answer": "1,2,3",
+      "rationale": "KEY-RATIONALE bst B2"
+     },
+     {
+      "id": "exp-bst-B3",
+      "format": "explanation",
+      "question": "이진 탐색 트리 B형 서술 문항",
+      "rationale": "KEY-RATIONALE bst B3",
+      "rubric": [
+       "KEY-RUBRIC bst B 1",
+       "KEY-RUBRIC bst B 2"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "heap",
+   "title": "힙",
+   "passage": {
+    "part1": "힙 1부 글",
+    "part2": "힙 2부 글"
+   },
+   "pre_post": {
+    "A": [
+     {
+      "id": "exp-heap-A1",
+      "format": "multiple_choice",
+      "question": "힙 A형 선택 문항",
+      "options": {
+       "A": "보기 가",
+       "B": "보기 나",
+       "C": "보기 다",
+       "D": "보기 라"
+      },
+      "answer": "C",
+      "rationale": "KEY-RATIONALE heap A1"
+     },
+     {
+      "id": "exp-heap-A2",
+      "format": "short_exact",
+      "question": "힙 A형 단답 문항",
+      "answer": "1,2,3",
+      "rationale": "KEY-RATIONALE heap A2"
+     },
+     {
+      "id": "exp-heap-A3",
+      "format": "explanation",
+      "question": "힙 A형 서술 문항",
+      "rationale": "KEY-RATIONALE heap A3",
+      "rubric": [
+       "KEY-RUBRIC heap A 1",
+       "KEY-RUBRIC heap A 2"
+      ]
+     }
+    ],
+    "B": [
+     {
+      "id": "exp-heap-B1",
+      "format": "multiple_choice",
+      "question": "힙 B형 선택 문항",
+      "options": {
+       "A": "보기 가",
+       "B": "보기 나",
+       "C": "보기 다",
+       "D": "보기 라"
+      },
+      "answer": "C",
+      "rationale": "KEY-RATIONALE heap B1"
+     },
+     {
+      "id": "exp-heap-B2",
+      "format": "short_exact",
+      "question": "힙 B형 단답 문항",
+      "answer": "1,2,3",
+      "rationale": "KEY-RATIONALE heap B2"
+     },
+     {
+      "id": "exp-heap-B3",
+      "format": "explanation",
+      "question": "힙 B형 서술 문항",
+      "rationale": "KEY-RATIONALE heap B3",
+      "rubric": [
+       "KEY-RUBRIC heap B 1",
+       "KEY-RUBRIC heap B 2"
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}
