@@ -8,6 +8,7 @@ import threading
 import time
 import httpx
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -21,6 +22,7 @@ from serving.stuck import LLMUnavailable, StepInput, StuckState, step as stuck_s
 from serving.stuck_llm import StuckModelGateway
 from serving.agent import run_agent
 from serving.context import token_counter
+from serving.animation.model import AnimationRequest
 from serving.tools.diagram import Diagram
 
 app = FastAPI(title='CS learning agent')
@@ -29,9 +31,21 @@ BUSY = threading.Lock()
 
 
 # 역할: 대화 문맥에 다시 전달할 도식 ID와 그래프 구조
-class Artifact(BaseModel):
+class DiagramArtifact(BaseModel):
     artifact_id: str = Field(pattern=r'^[0-9a-f]{32}$')
     diagram: Diagram
+
+
+# 역할: 대화 문맥에 다시 전달할 애니메이션 ID와 장면 요청. 프레임은 요청에서 다시 계산되므로 받지 않음
+class AnimationArtifact(BaseModel):
+    artifact_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    kind: Literal['animation']
+    request: AnimationRequest
+
+
+# Spring은 artifact 이벤트를 그대로 저장해 이력·활성 artifact로 돌려보내므로 두 종류를 모두 받음
+# - kind가 없으면 도식, kind='animation'이면 애니메이션. 저장 이벤트의 나머지 필드(url, frames 등)는 무시
+Artifact = DiagramArtifact | AnimationArtifact
 
 
 # 역할: 완료 이력으로 전달되는 문답 한 항목
@@ -41,7 +55,7 @@ class Turn(BaseModel):
     artifacts: list[Artifact] = Field(default_factory=list)
 
 
-# 역할: 최신 질문·완료 이력·활성 도식을 묶는 요청 계약
+# 역할: 최신 질문·완료 이력·활성 도식(또는 애니메이션)을 묶는 요청 계약
 class Question(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     history: list[Turn] = Field(default_factory=list)
@@ -114,9 +128,11 @@ def chat(body: Question):
                                            active_artifact=body.active_artifact.model_dump() if body.active_artifact else None,
                                            count_tokens=token_counter(http, model), context_limit=int(limit)):
                         # 서버 파일 경로와 내부 도구 인자는 웹에 노출하지 않고 공개 URL·진행 상태만 전달
+                        # 애니메이션은 SVG 파일이 없으므로 주소를 붙이지 않고 프레임 데이터만 전달
                         if event['type'] == 'artifact':
                             event = {k: v for k, v in event.items() if k != 'path'}
-                            event['url'] = f"/api/artifacts/{event['artifact_id']}"
+                            if event.get('kind') != 'animation':
+                                event['url'] = f"/api/artifacts/{event['artifact_id']}"
                         elif event['type'] == 'tool_started':
                             event = {'type': 'tool_started', 'name': event['name']}
                         elif event['type'] == 'tool_error':

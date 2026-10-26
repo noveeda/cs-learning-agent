@@ -1,4 +1,4 @@
-# 파일 역할: 모델 응답을 모사해 도구 결과 전달·스트리밍 순서·잘린 호출 실행 방지를 검증
+# 파일 역할: 모델 응답을 모사해 도구 결과 전달·스트리밍 순서·잘린 호출 실행 방지·애니메이션 도구 분기를 검증
 import json
 import tempfile
 import unittest
@@ -7,7 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, MagicMock, patch
 
 from openai.types.chat import ChatCompletionMessage
-from serving.agent import run_agent
+from serving.agent import TOOLS, run_agent
+from serving.animation import ANIMATION_TOOL, SIMULATORS
+from serving.animation.model import AnimationRequestModel
+from serving.context import token_counter
 
 
 # 역할: 모델 스트림의 텍스트·도구·종료 사유 조각 구성
@@ -121,3 +124,90 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(next(events)['type'], 'text_delta')
         with self.assertRaisesRegex(RuntimeError, '토큰 제한'):
             list(events)
+
+
+# 역할: 가짜 모델이 지정 도구를 한 번 부르고, 다음 턴에 텍스트로 끝내는 클라이언트 구성
+def tool_then_text(name, arguments):
+    call = ChatCompletionMessage(role='assistant', tool_calls=[{
+        'id': 'call_1', 'type': 'function', 'function': {'name': name, 'arguments': arguments}}])
+    client = Mock()
+    client.chat.completions.create.side_effect = [response(call), response(
+        ChatCompletionMessage(role='assistant', content='완료'))]
+    return client
+
+
+STACK = {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}, {'op': 'push', 'value': 2}, {'op': 'pop'}]}
+
+
+class AnimationToolTests(unittest.TestCase):
+    # 검증 목적: show_animation 성공 시 도식과 같은 artifact 이벤트로 프레임이 나가고,
+    # 모델에는 프레임 전체 대신 단계 설명만 돌려줘 문맥 토큰을 아끼는지 확인
+    def test_show_animation_tool_emits_artifact(self):
+        client = tool_then_text('show_animation', json.dumps(STACK))
+        events = list(run_agent(client, 'test', '스택 보여줘', Path('/tmp/unused')))
+        artifact = next(e for e in events if e['type'] == 'artifact')
+        self.assertEqual(artifact['kind'], 'animation')
+        self.assertEqual(len(artifact['animation']['frames']), 4)
+        tool_message = json.loads(client.chat.completions.create.call_args.kwargs['messages'][-1]['content'])
+        self.assertTrue(tool_message['ok'])
+        self.assertNotIn('animation', tool_message)
+        self.assertIn('pop: top의 2를 꺼냅니다', tool_message['steps'])
+
+    # 검증 목적: 실행할 수 없는 장면(빈 스택 pop)은 tool_error로 알리고, 모델이 고칠 수 있게 실패 결과를 돌려주는지 확인
+    def test_show_animation_invalid_returns_tool_error(self):
+        client = tool_then_text('show_animation', json.dumps({'kind': 'stack', 'ops': [{'op': 'pop'}]}))
+        events = list(run_agent(client, 'test', 'test', Path('/tmp/unused')))
+        self.assertIn('tool_error', [e['type'] for e in events])
+        self.assertNotIn('artifact', [e['type'] for e in events])
+        tool_message = json.loads(client.chat.completions.create.call_args.kwargs['messages'][-1]['content'])
+        self.assertIs(tool_message['ok'], False)
+        self.assertIn('비어', tool_message['error'])
+
+    # 검증 목적: 평평한 도구 스키마를 본 모델이 다른 kind 전용 필드를 null로 채워도 실행되는지 확인.
+    # null이 아닌 엉뚱한 필드는 strict 검증대로 tool_error여야 함
+    def test_show_animation_drops_null_fields(self):
+        nulls = {**STACK, 'values': None, 'capacity': None,
+                 'ops': [{**op, 'index': None, 'key': None} for op in STACK['ops']]}
+        events = list(run_agent(tool_then_text('show_animation', json.dumps(nulls)), 'test', 'test', Path('/tmp/unused')))
+        self.assertIn('artifact', [e['type'] for e in events])
+        wrong = {**STACK, 'capacity': 3}
+        events = list(run_agent(tool_then_text('show_animation', json.dumps(wrong)), 'test', 'test', Path('/tmp/unused')))
+        self.assertIn('tool_error', [e['type'] for e in events])
+
+    # 검증 목적: (Review Focus 3) 활성 artifact가 애니메이션이어도 diagram 키를 찾다 죽지 않고, 장면 요청을 질문에 붙이는지 확인
+    def test_active_animation_artifact_does_not_require_diagram(self):
+        client = Mock()
+        client.chat.completions.create.return_value = stream([chunk('답'), chunk(finish='stop')])
+        active = {'artifact_id': 'a' * 32, 'kind': 'animation', 'request': STACK}
+        history = [{'role': 'user', 'content': '스택'},
+                   {'role': 'assistant', 'content': '완료', 'artifacts': [active]}]
+        list(run_agent(client, 'test', '바꿔줘', Path('/tmp/unused'), history=history, active_artifact=active))
+        messages = client.chat.completions.create.call_args.kwargs['messages']
+        self.assertIn('animation_request', messages[-1]['content'])
+        self.assertIn('"op": "pop"', messages[-1]['content'])
+        self.assertIn('animation_request', messages[-2]['content'])
+
+    # 검증 목적: 실제 입력 토큰 계산에도 채팅에 보내는 도구 두 개가 모두 들어가 예산 계산이 어긋나지 않는지 확인
+    def test_token_counter_includes_both_tools(self):
+        http = Mock()
+        http.post.return_value.json.return_value = {'count': 10}
+        self.assertEqual(token_counter(http, 'test')([{'role': 'user', 'content': 'x'}]), 10)
+        tools = http.post.call_args.kwargs['json']['tools']
+        self.assertEqual([t['function']['name'] for t in tools], ['create_diagram', 'show_animation'])
+        self.assertIs(tools, TOOLS)
+
+    # 검증 목적: 운영 모델 채팅 템플릿은 parameters의 최상위 properties만 렌더링하므로,
+    # 도구 스키마가 평평한 object이고 kind·op 목록이 실제 요청 스키마와 같은지 확인
+    def test_animation_tool_schema_is_flat_and_matches_models(self):
+        parameters = ANIMATION_TOOL['function']['parameters']
+        self.assertEqual(parameters['type'], 'object')
+        self.assertNotIn('oneOf', parameters)
+        properties = parameters['properties']
+        self.assertEqual(set(properties['kind']['enum']), set(SIMULATORS))
+        defs = AnimationRequestModel.model_json_schema()['$defs'].values()
+        ops = {value for d in defs if 'op' in d.get('properties', {})
+               for value in d['properties']['op'].get('enum', [d['properties']['op'].get('const')])}
+        self.assertEqual(set(properties['ops']['items']['properties']['op']['enum']), ops)
+        fields = {name for d in defs for name in d.get('properties', {})} - {'kind', 'op'}
+        item_fields = set(properties['ops']['items']['properties'])
+        self.assertLessEqual(fields, set(properties) | item_fields)

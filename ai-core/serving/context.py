@@ -1,18 +1,31 @@
-# 파일 역할: 완료된 문답과 도식을 모델 메시지로 바꾸고 실제 입력 토큰 예산에 맞춰 최근 대화 선택
+# 파일 역할: 완료된 문답과 도식·애니메이션을 모델 메시지로 바꾸고 실제 입력 토큰 예산에 맞춰 최근 대화 선택
 """Fit complete recent exchanges to the actual vLLM chat-template token budget."""
 import json
 
+from serving.animation import ANIMATION_TOOL
 from serving.tools.diagram import TOOL
 
+# 채팅 요청(agent.run_agent)과 /tokenize 토큰 계산(token_counter)이 함께 쓰는 도구 목록
+# - agent가 이 모듈을 import하므로 순환 import를 피하려고 여기에 두고 agent.TOOLS로 다시 내보냄
+TOOLS = [TOOL, ANIMATION_TOOL]
 
-# 역할: 문답에 생성 도식 데이터를 붙이고 user/assistant 쌍 순서를 검증
+
+# 역할: 저장된 artifact를 모델에 다시 보여 줄 최소 데이터로 바꿈
+# - 애니메이션은 프레임 전체 대신 장면 요청만 넘김. 프레임은 요청에서 다시 계산되고 문맥 토큰만 차지하기 때문
+# - 도식은 지금처럼 그래프 구조를 넘겨 수정 요청에 쓰게 함
+def artifact_data(artifact):
+    if artifact.get('kind') == 'animation':
+        return {'artifact_id': artifact['artifact_id'], 'animation_request': artifact['request']}
+    return {'artifact_id': artifact['artifact_id'], 'diagram': artifact['diagram']}
+
+
+# 역할: 문답에 생성 도식·애니메이션 데이터를 붙이고 user/assistant 쌍 순서를 검증
 def history_messages(history):
     messages = []
     for turn in history:
         content = turn['content']
         if turn.get('artifacts'):
-            data = [{'artifact_id': a['artifact_id'], 'diagram': a['diagram']}
-                    for a in turn['artifacts']]
+            data = [artifact_data(a) for a in turn['artifacts']]
             content += '\n\n[생성한 도식 데이터]\n' + json.dumps(data, ensure_ascii=False)
         messages.append({'role': turn['role'], 'content': content})
     if len(messages) % 2 or any(m['role'] != ('user' if i % 2 == 0 else 'assistant')
@@ -48,7 +61,7 @@ def token_counter(http, model):
     # 역할: 도구 스키마까지 포함해 /tokenize에 전달하고 입력 토큰 수 반환
     def count(messages):
         response = http.post('/tokenize', json={
-            'model': model, 'messages': messages, 'tools': [TOOL],
+            'model': model, 'messages': messages, 'tools': TOOLS,
             'add_generation_prompt': True,
             'chat_template_kwargs': {'enable_thinking': False},
         })
