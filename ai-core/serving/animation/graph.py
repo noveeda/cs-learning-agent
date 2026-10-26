@@ -1,17 +1,28 @@
 # 파일 역할: 그래프 탐색(BFS·DFS)과 트리 순회(전위·중위·후위) 장면 요청을 실제로 실행하며 단계별 프레임을 만드는 시뮬레이터
 # - 방문 하나마다 프레임 하나. 이번 단계에 방문한 정점은 new, 이미 방문한 정점은 active, 아직 안 간 정점은 normal
 # - 화면 아래 두 줄에 방문 순서(y=6 또는 7)와 큐·스택 상태(y=7)를 함께 그려, 순서가 왜 그렇게 정해지는지 보이게 함
-# - 프런트엔드 재생기는 화살표만 그리므로 무방향 간선은 양쪽 화살표 2개로 그림(재생기 수정 없이 양방향으로 읽히게 하기 위함)
+# - 방향 간선은 화살표, 무방향 간선은 화살촉 없는 선(Arrow.head=False) 하나로 그림
 """Graph traversal and binary tree traversal simulators."""
 from itertools import count
 
 from .hierarchical import TreeNode, bst_frame, descend
 from .model import GRID_HEIGHT, Animation, Arrow, Box, Frame, GraphTraversalRequest, TreeTraversalRequest, build_animation
 
-# 정점 자리: 볼록 팔각형의 꼭짓점(x 1..9, y 0..5)
+# 정점 수별 자리: 볼록 다각형의 꼭짓점을 위쪽부터 시계 방향으로(x 0..8, y 0..5)
 # - 볼록 다각형 위에 두면 두 정점을 잇는 선이 다른 정점을 지나지 않음
+# - 화면 픽셀(칸 64×56)로 정점 중심끼리 120px 이상, 간선과 다른 정점 중심 사이 35px 이상 떨어지도록 고른 자리
+#   (정점은 폭 44·높이 40이라 사이 선이 보이고 간선이 정점 테두리를 지나지 않음)
+# - 가로를 9칸(x 0..8)으로 묶어 막힘 패널 폭에서도 정점·이름표 글자를 읽을 수 있게 함. 방문 줄도 최대 9칸(이름표+정점 8개)
 # - 아래 두 줄(y 6·7)은 방문 순서와 큐·스택 칸으로 비워 둠
-RING = [(3, 0), (7, 0), (9, 2), (9, 3), (7, 5), (3, 5), (1, 3), (1, 2)]
+SLOTS = {
+    2: [(2, 2), (6, 2)],
+    3: [(4, 0), (7, 5), (1, 5)],
+    4: [(1, 0), (7, 0), (7, 5), (1, 5)],
+    5: [(4, 0), (8, 2), (6, 5), (2, 5), (0, 2)],
+    6: [(2, 0), (6, 0), (8, 2), (6, 5), (2, 5), (0, 2)],
+    7: [(3, 0), (7, 0), (8, 2), (7, 4), (4, 5), (1, 4), (0, 2)],
+    8: [(2, 0), (6, 0), (8, 1), (8, 4), (6, 5), (2, 5), (0, 4), (0, 1)],
+}
 VISIT_ROW, WAIT_ROW = GRID_HEIGHT - 2, GRID_HEIGHT - 1
 # 캡션 상한(Frame.caption max_length)
 CAPTION_MAX = 80
@@ -32,7 +43,7 @@ def adjacency(req: GraphTraversalRequest, directed: bool) -> dict[str, list[str]
     return {node: sorted(adj[node]) for node in req.nodes}
 
 
-# 역할: 정점을 팔각형 자리에 배치. 시작 정점부터 깊이 우선 순서로 돌며 자리를 주고, 닿지 않는 정점은 그 뒤에 둠
+# 역할: 정점을 정점 수에 맞는 다각형 자리에 배치. 시작 정점부터 깊이 우선 순서로 돌며 자리를 주고, 닿지 않는 정점은 그 뒤에 둠
 # - 경로를 따라 이웃한 자리에 놓여 선이 덜 엇갈림. 방향과 탐색 방식에 관계없이 같은 배치라 BFS·DFS를 같은 그림으로 비교할 수 있음
 def layout(req: GraphTraversalRequest) -> dict[str, tuple[int, int]]:
     adj, order = adjacency(req, directed=False), []
@@ -45,9 +56,7 @@ def layout(req: GraphTraversalRequest) -> dict[str, tuple[int, int]]:
     for node in [req.start] + req.nodes:
         if node not in order:
             visit(node)
-    # 정점이 8개보다 적으면 팔각형 자리를 고르게 건너뛰며 씀
-    slots = [RING[round(i * len(RING) / len(order))] for i in range(len(order))]
-    return dict(zip(order, slots))
+    return dict(zip(order, SLOTS[len(order)]))
 
 
 # 역할: 한 단계 화면. 정점·간선 + 방문 순서 줄 + 큐(BFS)·스택(DFS) 줄
@@ -59,9 +68,7 @@ def graph_frame(req, places, visited, current, waiting, caption) -> Frame:
         boxes.append(Box(id=ids[node], label=node, x=places[node][0], y=places[node][1], shape='node', tone=tone))
     arrows = []
     for a, b in req.edges:
-        arrows.append(Arrow(source=ids[a], target=ids[b]))
-        if not req.directed:
-            arrows.append(Arrow(source=ids[b], target=ids[a]))
+        arrows.append(Arrow(source=ids[a], target=ids[b], head=req.directed))
     boxes.append(Box(id='lv', label='방문', x=0, y=VISIT_ROW, shape='label'))
     boxes += [Box(id=f'v{i}', label=node, x=i + 1, y=VISIT_ROW, shape='cell', tone='new' if node == current else 'normal')
               for i, node in enumerate(visited)]
