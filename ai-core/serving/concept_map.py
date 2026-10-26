@@ -1,11 +1,14 @@
 # 파일 역할: 진단의 기준인 개념 지도(개념·직접 선수 관계)를 불러오고 구조 규칙을 검증
+# - 과목마다 content/<과목>/concept-map.json을 두고, 로더가 하나의 연결 지도로 합쳐 과목 사이 선수 관계를 허용
 """Concept map schema and loader; the reviewed map is the ground truth for prerequisite diagnosis."""
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-DSA_MAP_PATH = Path(__file__).resolve().parents[1] / 'content' / 'dsa' / 'concept-map.json'
+CONTENT_DIR = Path(__file__).resolve().parents[1] / 'content'
+# 과목 폴더 이름과 합칠 때의 순서; 존재하는 폴더만 읽어 아직 내용이 없는 과목은 건너뜀
+SUBJECT_ORDER = ('dsa', 'os')
 
 
 # 역할: 한 개념이 직접 의존하는 선수 개념과 그 근거; 근거는 검수자가 관계의 타당성을 판단하는 자료
@@ -24,6 +27,8 @@ class Concept(BaseModel):
     # 1~3개로 제한: 개념마다 확인 문항을 붙일 수 있는 분량을 유지
     objectives: list[str] = Field(min_length=1, max_length=3)
     prerequisites: list[Prerequisite] = Field(default_factory=list)
+    # 과목 ID; 지도 파일에는 쓰지 않고 로더가 폴더 이름으로 채움(화면의 과목 구분용)
+    subject: str | None = None
 
     # 학습 목표를 "~할 수 있다."로 강제: 설명·구분·적용처럼 확인 가능한 행동으로 쓰게 하기 위함
     @model_validator(mode='after')
@@ -39,7 +44,24 @@ class Concept(BaseModel):
         return self
 
 
-# 역할: 영역 하나의 개념 지도; status는 사람이 검수를 마쳤는지 표시
+# 역할: 합친 지도에 들어 있는 과목 하나; 화면이 과목 이름을 표시할 때 사용
+class Subject(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    id: str
+    title: str
+
+
+# 역할: 과목 지도 파일 하나의 형태; 그래프 규칙은 과목 사이 관계 때문에 합친 지도에서만 검증
+class _SubjectFile(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    id: str
+    title: str
+    version: int = Field(ge=1)
+    status: Literal['draft', 'reviewed']
+    concepts: list[Concept] = Field(min_length=1)
+
+
+# 역할: 개념 지도(과목 하나 또는 여러 과목을 합친 것); status는 사람이 검수를 마쳤는지 표시
 class ConceptMap(BaseModel):
     model_config = ConfigDict(extra='forbid')
     id: str
@@ -47,6 +69,7 @@ class ConceptMap(BaseModel):
     version: int = Field(ge=1)
     status: Literal['draft', 'reviewed']
     concepts: list[Concept] = Field(min_length=1)
+    subjects: list[Subject] = Field(default_factory=list)
 
     # 역할: 진단 탐색이 의존하는 그래프 규칙을 한 번에 검증
     @model_validator(mode='after')
@@ -108,6 +131,39 @@ def _reject_redundant_edges(direct):
                 raise ValueError(f'{concept} → {prerequisite}는 다른 선수 개념을 거쳐 이미 이어지는 간접 관계입니다.')
 
 
-# 역할: JSON 파일을 읽어 검증된 개념 지도를 반환; 규칙을 어기면 ValidationError
-def load_concept_map(path: Path = DSA_MAP_PATH) -> ConceptMap:
-    return ConceptMap.model_validate_json(path.read_text(encoding='utf-8'))
+# 역할: 존재하는 과목 폴더를 SUBJECT_ORDER 순서로 반환; 개념 지도와 문항 은행 로더가 같은 과목 목록을 쓰게 함
+def subject_dirs() -> list[Path]:
+    return [CONTENT_DIR / subject for subject in SUBJECT_ORDER if (CONTENT_DIR / subject).is_dir()]
+
+
+# 역할: 과목은 폴더 이름 하나에서만 정해지도록, 파일에 subject가 적힌 개념을 거부
+def _reject_written_subject(concepts, path):
+    written = [c.id for c in concepts if c.subject is not None]
+    if written:
+        raise ValueError(f'{path}: 개념 지도 파일에는 subject를 쓰지 않습니다(로더가 채움): {written}')
+
+
+# 역할: 검증된 개념 지도를 반환; 규칙을 어기면 ValueError(pydantic ValidationError 포함)
+# - path가 있으면: 지도 파일 하나만 읽음(기존 단일 지도 테스트 호환)
+# - path가 없으면: 모든 과목 지도를 읽어 개념마다 subject를 채우고 하나의 지도로 합침
+#   - 고립·간접 관계·없는 선수 개념 규칙은 합친 지도에 적용해, 과목 사이 선수 관계로 이어지는 개념을 허용
+#   - version은 과목 version의 합이라 어느 과목이 바뀌어도 값이 달라짐
+#   - status는 모든 과목이 reviewed일 때만 reviewed(막힘 엔진이 검수 전 지도를 쓰지 않게 함)
+def load_concept_map(path: Path | None = None) -> ConceptMap:
+    if path is not None:
+        concept_map = ConceptMap.model_validate_json(path.read_text(encoding='utf-8'))
+        _reject_written_subject(concept_map.concepts, path)
+        return concept_map
+    files, concepts = [], []
+    for folder in subject_dirs():
+        path = folder / 'concept-map.json'
+        subject = _SubjectFile.model_validate_json(path.read_text(encoding='utf-8'))
+        _reject_written_subject(subject.concepts, path)
+        if subject.id != folder.name:
+            raise ValueError(f'{path}: 지도 id {subject.id}가 과목 폴더 이름 {folder.name}과 다릅니다.')
+        files.append(subject)
+        concepts += [c.model_copy(update={'subject': folder.name}) for c in subject.concepts]
+    return ConceptMap(
+        id='cs', title='CS 전공', version=sum(f.version for f in files),
+        status='reviewed' if all(f.status == 'reviewed' for f in files) else 'draft',
+        concepts=concepts, subjects=[Subject(id=f.id, title=f.title) for f in files])

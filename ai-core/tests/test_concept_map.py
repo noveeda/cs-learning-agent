@@ -3,7 +3,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from serving.concept_map import ConceptMap, load_concept_map
+from serving.concept_map import CONTENT_DIR, ConceptMap, load_concept_map
 
 
 # 역할: 규칙 검사용 최소 지도 생성; edges는 {개념: [선수 개념]}
@@ -16,8 +16,9 @@ def build(edges, objective='예시를 설명할 수 있다.'):
 
 class DsaConceptMapTests(unittest.TestCase):
     # 검증 목적: 저장소의 자료구조 지도가 모든 규칙을 통과하고 합의한 규모(25~40개)인지 확인
+    # - 인자 없이 읽으면 모든 과목을 합친 지도가 되므로, 자료구조 지도 파일만 지정해 읽음
     def test_dsa_map_is_valid_and_in_agreed_size(self):
-        concept_map = load_concept_map()
+        concept_map = load_concept_map(CONTENT_DIR / 'dsa' / 'concept-map.json')
         self.assertEqual(concept_map.id, 'dsa')
         self.assertTrue(25 <= len(concept_map.concepts) <= 40)
 

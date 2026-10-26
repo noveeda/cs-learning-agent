@@ -6,9 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from serving.concept_map import ConceptMap, load_concept_map
+from serving.concept_map import ConceptMap, load_concept_map, subject_dirs
 
-DSA_ITEM_DIR = Path(__file__).resolve().parents[1] / 'content' / 'dsa'
 CHOICE_LABELS = ('A', 'B', 'C', 'D')
 
 
@@ -77,9 +76,11 @@ def validate_against_map(items: list[Item], concept_map: ConceptMap) -> None:
 
 
 # 역할: 개념 묶음별 JSONL 파일(items-*.jsonl)을 모두 읽어 검증된 문항 목록 반환
-def load_item_bank(directory: Path = DSA_ITEM_DIR, concept_map: ConceptMap | None = None) -> list[Item]:
+# - directory가 없으면 모든 과목 폴더를 읽고, 기본 지도(모든 과목을 합친 지도)와 맞물리는지 검증
+def load_item_bank(directory: Path | None = None, concept_map: ConceptMap | None = None) -> list[Item]:
     items = []
-    for path in sorted(directory.glob('items-*.jsonl')):
+    folders = [directory] if directory is not None else subject_dirs()
+    for path in (p for folder in folders for p in sorted(folder.glob('items-*.jsonl'))):
         for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
             if line.strip():
                 try:

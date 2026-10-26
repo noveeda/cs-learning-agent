@@ -31,6 +31,15 @@ class ApiTests(unittest.TestCase):
         body.pop('stuck_supported')
         self.assertEqual(body, load_concept_map().model_dump())
 
+    # 검증 목적: 화면이 과목을 구분할 수 있게 응답에 과목 목록과 개념별 과목이 함께 오는지 확인
+    # - 과목 목록에 없는 과목을 가리키는 개념이 없어야 화면의 과목 이름 조회가 비지 않음
+    def test_concept_map_includes_subjects(self):
+        body = self.client.get('/concept-map').json()
+        subject_ids = [s['id'] for s in body['subjects']]
+        self.assertIn('dsa', subject_ids)
+        self.assertTrue(all(s['title'] for s in body['subjects']))
+        self.assertTrue(all(c['subject'] in subject_ids for c in body['concepts']))
+
     # 검증 목적: 막힘 지원 목록이 문항 은행에서 확인·서술 문항이 모두 있는 개념(지도 순서)과 일치하는지 확인
     # - 기대값을 문항 은행에서 계산해 문항 데이터 PR이 병합돼도 테스트를 고치지 않게 함
     def test_concept_map_lists_stuck_supported(self):
