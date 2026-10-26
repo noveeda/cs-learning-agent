@@ -53,12 +53,19 @@
   1. 실험 기록: `backend/data/experiments/`의 세션 파일
   2. 학습 중 쓴 도구 기록: 실험 기록의 `stuck_session`·`chat_conversation` 사건이 가리키는 파일. 아래 명령으로 목록을 뽑아 확인한 뒤 지운다.
      ```bash
-     jq -r '.. | objects | select(.type=="stuck_session") | .ref' <export 파일> | sort -u | sed 's|^|backend/data/stuck-sessions/|; s|$|.json|'
-     jq -r '.. | objects | select(.type=="chat_conversation") | .ref' <export 파일> | sort -u | sed 's|^|backend/data/conversations/|; s|$|.json|'
+     jq -r '.. | objects | select(.type=="stuck_session" and .ref != null) | .ref' <export 파일> | sort -u | sed 's|^|backend/data/stuck-sessions/|; s|$|.json|'
+     jq -r '.. | objects | select(.type=="chat_conversation" and .ref != null) | .ref' <export 파일> | sort -u | sed 's|^|backend/data/conversations/|; s|$|.json|'
      ```
+     - `.ref != null`: 대상 ID가 없는 사건이 `null.json` 같은 잘못된 경로로 나오지 않게 거른다.
   3. 내보낸 파일(`export-<날짜>.json`)과 채점 시트 원문
-- [ ] 참여자가 중단하며 삭제를 원하면, 그 참여자의 세션 파일과 위 2번의 도구 기록 파일을 같은 방법으로 지운다.
+- [ ] 참여자 한 명의 기록만 지울 때(중단하며 삭제를 원하는 경우, 리허설 S9)는 다음 순서로 한다.
+  1. 위 jq 명령 앞에 참여자 필터를 붙여 그 참여자의 도구 기록만 뽑는다. 예: S3
+     ```bash
+     jq -r '.sessions[] | select(.participant=="S3") | .. | objects | select(.type=="stuck_session" and .ref != null) | .ref' <export 파일>
+     jq -r '.sessions[] | select(.participant=="S3") | .. | objects | select(.type=="chat_conversation" and .ref != null) | .ref' <export 파일>
+     ```
+  2. 그 참여자의 세션 파일(`backend/data/experiments/`)과 뽑은 도구 기록 파일을 지운다. 다른 참여자의 파일은 건드리지 않는다.
 
 ## 6. 리허설
 
-- 실제 실험 전에 사용자가 직접 참여자 역할로 한 번 진행한다(참여자 코드 `S9`). 시간 배분, 글 난이도, 화면 흐름을 확인하고 리허설이 끝나면 코디네이터가 S9 기록을 지운다(실험 API는 S1~S9만 받는다).
+- 실제 실험 전에 사용자가 직접 참여자 역할로 한 번 진행한다(참여자 코드 `S9`). 시간 배분, 글 난이도, 화면 흐름을 확인하고 리허설이 끝나면 코디네이터가 S9 기록을 지운다(실험 API는 S1~S9만 받는다). 세션 파일뿐 아니라 리허설 중 쓴 막힘 세션·대화 기록도 5절의 "참여자 한 명의 기록만 지울 때" 방법으로 함께 지운다.
