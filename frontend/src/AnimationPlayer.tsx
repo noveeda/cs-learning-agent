@@ -7,6 +7,7 @@ import {
   CELL_WIDTH,
   clampStep,
   fitViewBox,
+  squeezesLabel,
   type AnimationData,
   type Box,
 } from "./animation";
@@ -154,7 +155,7 @@ export function AnimationPlayer({ animation }: { animation: AnimationData }) {
               x={CELL_WIDTH / 2}
               y={CELL_HEIGHT / 2}
               // 라벨은 16자까지 올 수 있어 상자보다 길면 상자 폭에 맞춰 글자 간격·폭을 줄임
-              {...(box.label.length > 3 && {
+              {...(squeezesLabel(box) && {
                 textLength: half(box).w * 2 - 6,
                 lengthAdjust: "spacingAndGlyphs",
               })}

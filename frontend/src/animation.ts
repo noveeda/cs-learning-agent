@@ -42,6 +42,14 @@ export function fitViewBox(frames: Frame[]): { width: number; height: number } {
   return { width: (maxX + 1) * CELL_WIDTH, height: (maxY + 1) * CELL_HEIGHT };
 }
 
+// 역할: 라벨이 상자 폭(글자 26 viewBox 단위 기준)을 넘어 글자 폭을 줄여야 하는지 판단
+// - cell·slot은 세 자리 숫자(-99..999)까지 들어가고, 더 좁은 node는 두 자리까지 들어감
+// - label(head·front·rear)은 테두리 없이 칸 폭 전체를 쓸 수 있어 줄이지 않음
+export function squeezesLabel(box: Box): boolean {
+  if (box.shape === "label") return false;
+  return box.label.length > (box.shape === "node" ? 2 : 3);
+}
+
 // 역할: 이전·다음·키보드 이동 결과를 0..total-1 안으로 제한
 export function clampStep(step: number, total: number): number {
   return Math.min(Math.max(step, 0), Math.max(total - 1, 0));
