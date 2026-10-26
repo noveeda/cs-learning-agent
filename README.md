@@ -98,7 +98,7 @@ CS를 공부하다 막힌 학습자에게, 막힌 개념을 이해하는 데 부
 | 커리큘럼 실행 | LangGraph 1.2.16 | 요청당 한 단계 실행, 기존 Spring JSON 체크포인트 유지 |
 | AI core | OpenAI Python SDK, HTTPX | vLLM의 OpenAI 호환 API 호출, 모델 정보·토큰 수 조회 |
 | AI core | Pydantic 2, fontTools(woff 지원) | 요청·도식 구조 검증, SVG에 포함할 한글 폰트 부분 집합 생성 |
-| 모델 추론 | vLLM 0.32.0, Qwen3.5-27B AWQ 4bit | 별도 GPU 환경에서 언어 모델 추론과 도구 호출 제공 |
+| 모델 추론 | vLLM 0.32.0, gemma-4-26B-A4B-it AWQ 4bit | 별도 GPU 환경에서 언어 모델 추론과 도구 호출 제공([모델 선택 근거](docs/model-selection.md)) |
 | 저장·시각화 | 로컬 JSON 파일, SVG, 브라우저 localStorage | 대화·도식 구조 저장, 도식 표시, 자유 학습·개념별 대화 ID와 로드맵 상태 유지 |
 | 테스트 | Python unittest·unittest.mock, FastAPI TestClient | AI core의 모델 호출·문맥·도식·API 테스트 |
 | 테스트 | JUnit Jupiter, Mockito, Spring Boot Test | 백엔드 API·저장소·스트리밍 테스트 |
@@ -125,8 +125,8 @@ LangChain4j는 현재 `/api/chat` 요청 경로에서 사용하지 않으며, �
 | Backend | JDK 21, 저장소에 포함된 Gradle Wrapper |
 | Frontend | Node.js 24 및 npm(CI 기준) |
 | 모델 서버 | 도구 호출과 `/tokenize`를 지원하는 vLLM |
-| 현재 모델 구성 | `cyankiwi/Qwen3.5-27B-AWQ-4bit`, 컨텍스트 32,768토큰 |
-| 기존 모델 실행 환경 | RTX 3090 24GB × 2, vLLM 0.32.0 |
+| 현재 모델 구성 | `cyankiwi/gemma-4-26B-A4B-it-AWQ-4bit`, 컨텍스트 65,536토큰, GPU 1장 |
+| 기존 모델 실행 환경 | RTX 3090 24GB × 2(모델 서버는 0번만 사용), vLLM 0.32.0 |
 
 웹·백엔드·AI core 자체는 GPU를 요구하지 않지만, 실제 답변에는 별도로 실행 중인 모델 서버가 필요합니다.
 모델의 가중치와 실행용 vLLM 환경은 저장소에 포함하지 않습니다.
@@ -157,26 +157,31 @@ curl --fail http://127.0.0.1:8000/v1/models
 `max_model_len`과 실제 입력 토큰 수를 사용하므로 일반적인 OpenAI 호환 서버만으로는 충분하지 않습니다.
 
 **처음 준비하는 경우:** GPU 서버에서 모델용 환경을 별도로 준비합니다.
-다음은 기존 2-GPU·32K 구성에 맞춘 실행 예시이며, 다른 GPU에서의 메모리·CUDA 호환성을 보장하는 설정은 아닙니다.
+다음은 RTX 3090 24GB 한 장(0번)·64K 문맥 구성에 맞춘 실행 예시이며, 다른 GPU에서의 메모리·CUDA 호환성을 보장하는 설정은 아닙니다.
+모델 선택 근거, 각 인자의 이유, AI core의 역할별 호출 설정은 [모델 선택 문서](docs/model-selection.md)에 있습니다.
 
 ```bash
 python3.12 -m venv "$HOME/.venvs/cs-vllm"
 "$HOME/.venvs/cs-vllm"/bin/python -m pip install 'vllm==0.32.0'
-"$HOME/.venvs/cs-vllm"/bin/vllm serve cyankiwi/Qwen3.5-27B-AWQ-4bit \
+CUDA_VISIBLE_DEVICES=0 "$HOME/.venvs/cs-vllm"/bin/vllm serve cyankiwi/gemma-4-26B-A4B-it-AWQ-4bit \
+  --revision 0ef577a5710035bd2d3a3f27e4f5cb2e86a9a9ba \
+  --served-model-name gemma-4-26b-a4b-it-awq \
   --host 127.0.0.1 --port 8000 \
-  --tensor-parallel-size 2 \
-  --max-model-len 32768 \
+  --max-model-len 65536 \
   --max-num-seqs 1 \
   --gpu-memory-utilization 0.9 \
-  --disable-custom-all-reduce \
   --enable-auto-tool-choice \
-  --tool-call-parser qwen3_xml
+  --tool-call-parser gemma4 \
+  --reasoning-parser gemma4 \
+  --limit-mm-per-prompt '{"image":0,"audio":0,"video":0}' \
+  --structured-outputs-config '{"backend":"xgrammar","disable_any_whitespace":true}'
 ```
 
 첫 실행은 모델 다운로드와 초기화에 시간이 걸립니다. 기본 모델 캐시는 `~/.cache/huggingface/hub/`입니다.
 위 명령은 포그라운드에서 실행하므로 해당 터미널을 유지합니다. 모델 목록 요청이 성공한 뒤 앱을 실행합니다.
-`--disable-custom-all-reduce`는 기존 GPU 간 P2P 미지원 환경을 고려한 옵션입니다.
-기존 구성에서는 CUDA graph를 사용하기 위해 `--enforce-eager`를 넣지 않습니다.
+GPU 1번은 시뮬레이션 학습자·실험용으로 비워 둡니다. CUDA graph를 사용하기 위해 `--enforce-eager`를 넣지 않습니다.
+Gemma 4 채팅 템플릿은 도구 스키마의 `$defs`·`$ref`와 `pattern`·`maximum` 같은 제약을 모델에 보여 주지 않습니다.
+도식 도구 스키마는 이를 펼쳐서 보내야 하며, 그 전에는 도식 요청이 텍스트 답변으로 끝날 수 있습니다.
 새 환경에서의 모델 설치·기동은 GPU 드라이버와 CUDA 조합을 별도로 확인해야 합니다.
 
 ### 3. 앱 실행
@@ -244,7 +249,7 @@ cd ai-core
 브라우저 / React :5173
   → Spring Boot :8080       대화 저장·복구, 요청 및 스트림 중계
     → FastAPI AI core :8001 문맥 구성, 모델 호출, 도식 도구 실행
-      → vLLM :8000          Qwen 추론
+      → vLLM :8000          gemma-4-26B-A4B 추론(GPU 0번)
 ```
 
 프런트엔드는 React·TypeScript·Vite, 백엔드는 Java 21·Spring Boot,
@@ -299,7 +304,9 @@ SVG 파일은 `ai-core/outputs/diagrams/`에 저장되므로 둘 다 보존해�
 과거 대화 목록 UI는 없으므로 브라우저의 ID를 잃으면 화면에서 이전 대화를 바로 다시 선택할 수 없습니다.
 
 AI core는 `/tokenize`로 시스템 지시·도구 정의·문답·도식 정보를 포함해 토큰 수를 셉니다.
-32,768토큰 중 출력 4,096토큰과 여유 256토큰을 빼면 입력 예산은 28,416토큰입니다.
+문맥 한도는 모델 서버 `/v1/models`의 `max_model_len`을 그대로 씁니다.
+현재 서빙 설정(65,536토큰)에서 출력 4,096토큰과 여유 256토큰을 빼면 입력 예산은 61,184토큰입니다.
+모델 서버의 `--max-model-len`을 바꾸면 이 예산도 함께 바뀝니다.
 오래된 문답 쌍부터 제외하되 현재 질문·선택한 도식·현재 도구 실행 문맥은 유지합니다.
 필수 내용만으로도 예산을 넘으면 오류를 반환합니다. 중단된 문답은 저장하되 후속 모델 문맥에서 제외합니다.
 
