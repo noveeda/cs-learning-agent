@@ -75,6 +75,16 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(pointer['front'], 'slot1')
         self.assertEqual(pointer['rear'], 'slot0')
 
+    # 검증 목적: "끝을 지나 돌아온다"는 캡션이 rear가 실제로 0번 칸으로 넘어가는 enqueue에만 붙고,
+    # 이미 한 바퀴 돈 뒤의 enqueue에는 다시 붙지 않는지 확인(검수 재현 사례)
+    def test_circular_queue_caption_wraps_once(self):
+        ops = ([{'op': 'enqueue', 'value': v} for v in (1, 2, 3)] + [{'op': 'dequeue'}] * 2
+               + [{'op': 'enqueue', 'value': v} for v in (4, 5)])
+        captions = [f.caption for f in run({'kind': 'queue', 'capacity': 3, 'circular': True, 'ops': ops}).frames]
+        self.assertIn('0번 칸으로 돌아와', captions[-2])
+        self.assertNotIn('돌아와', captions[-1])
+        self.assertIn('[1]', captions[-1])
+
     # 검증 목적: 용량을 넘는 enqueue를 원형·선형 큐 모두 거부하는지 확인
     def test_queue_full_rejected(self):
         for circular in (True, False):

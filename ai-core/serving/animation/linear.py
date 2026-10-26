@@ -180,7 +180,8 @@ def simulate_queue(req: QueueRequest) -> Animation:
                 raise ValueError(f'enqueue {op.value}: 큐가 가득 차 넣을 수 없습니다(용량 {req.capacity})')
             if not req.circular and front + size == req.capacity:
                 raise ValueError(f'enqueue {op.value}: 선형 큐는 rear가 배열 끝에 닿아 앞쪽 빈칸을 다시 쓰지 못합니다')
-            wrapped = front + size >= req.capacity
+            # 0번 칸으로 넘어가는 그 enqueue만 "돌아온다". 이미 한 바퀴 돈 뒤(front + size > capacity)는 평범한 다음 칸
+            wrapped = front + size == req.capacity
             slot = (front + size) % req.capacity
             slots[slot] = op.value
             size += 1
