@@ -1,21 +1,47 @@
-// 파일 역할: 자료구조·알고리즘 개념 지도의 화면용 타입, 선수 관계 단계 배치, 브라우저 학습 상태 저장 규칙
+// 파일 역할: 여러 과목을 합친 개념 지도의 화면용 타입, 과목 목록·필터, 선수 관계 단계 배치, 브라우저 학습 상태 저장 규칙
 export type LearningStatus = "not-started" | "in-progress" | "completed";
 
 // 역할: 직접 선수 개념과 그 근거; 상세 패널에서 "왜 먼저 봐야 하는지"를 보여 주는 데 사용
 export type Prerequisite = { id: string; reason: string };
 
 // 역할: /api/concept-map에서 받은 개념 하나; 로드맵·상세·개념별 대화 화면이 공통으로 사용
-// - domain은 지도 제목(예: 자료구조·알고리즘)을 채워 학습 화면의 영역 표시에 재사용
+// - subject는 과목 ID(예: dsa, os), domain은 그 과목 이름(예: 자료구조·알고리즘); 학습 화면의 영역 표시에 재사용
 // - stuckSupported는 응답의 stuck_supported에서 계산한 [막혔어요] 지원 여부
 export type Concept = {
   id: string;
   title: string;
+  subject: string;
   domain: string;
   description: string;
   objectives: string[];
   prerequisites: Prerequisite[];
   stuckSupported: boolean;
 };
+
+// 역할: 지도에 든 과목 하나; 로드맵의 과목 필터와 범례에 사용
+export type Subject = { id: string; title: string };
+
+// 역할: 개념 목록에서 과목을 처음 나온 순서대로 한 번씩 모아 반환
+// - 개념이 과목 순서대로 오므로(AI core가 과목별로 이어 붙임) 이 순서가 곧 과목 순서
+export function listSubjects(concepts: Concept[]): Subject[] {
+  const subjects = new Map<string, string>();
+  for (const { subject, domain } of concepts)
+    if (!subjects.has(subject)) subjects.set(subject, domain);
+  return [...subjects].map(([id, title]) => ({ id, title }));
+}
+
+// 역할: 한 과목의 개념만 남기고, 숨겨진 다른 과목 개념을 가리키는 선수 관계는 뺀 사본 반환("all"이면 원본 그대로)
+// - 지도 배치·선은 남은 관계만 쓰므로 끝이 없는 선이 그려지지 않음
+// - 원본 개념은 바꾸지 않아 상세 패널은 과목 사이 선수 관계(예: 운영체제 → 큐)를 계속 보여 줌
+export function filterBySubject(concepts: Concept[], subject: string): Concept[] {
+  if (subject === "all") return concepts;
+  const visible = concepts.filter((concept) => concept.subject === subject);
+  const ids = new Set(visible.map((concept) => concept.id));
+  return visible.map((concept) => ({
+    ...concept,
+    prerequisites: concept.prerequisites.filter((p) => ids.has(p.id)),
+  }));
+}
 
 // 역할: 단계(layer)와 같은 줄 안의 가로 위치(x, 줄 가운데가 0)
 export type ConceptLayout = {

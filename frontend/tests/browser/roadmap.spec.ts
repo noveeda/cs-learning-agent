@@ -475,3 +475,70 @@ test("옛 9개 개념 저장값과 개념 주소는 무시하되 지우지 않�
     old,
   );
 });
+
+// 역할: 여러 과목을 합친 지도 응답(MVP 4 형식)의 목업; 자료구조 지도 뒤에 운영체제 개념 2개를 붙임
+// - process-state → queue는 과목 사이 선수 관계라 운영체제만 걸렀을 때 선이 사라져야 함
+const mixedMap = {
+  ...conceptMap,
+  id: "cs",
+  title: "CS 전공",
+  subjects: [
+    { id: "dsa", title: "자료구조·알고리즘" },
+    { id: "os", title: "운영체제" },
+  ],
+  concepts: [
+    ...conceptMap.concepts.map((concept: object) => ({
+      ...concept,
+      subject: "dsa",
+    })),
+    {
+      id: "process-state",
+      title: "프로세스와 상태",
+      description: "실행 중인 프로그램과 그 상태 변화",
+      objectives: ["프로세스 상태 전이를 설명할 수 있다."],
+      prerequisites: [{ id: "queue", reason: "준비 큐가 큐다." }],
+      subject: "os",
+    },
+    {
+      id: "fcfs",
+      title: "FCFS 스케줄링",
+      description: "도착 순서대로 CPU를 배정",
+      objectives: ["FCFS 대기 시간을 계산할 수 있다."],
+      prerequisites: [{ id: "process-state", reason: "상태를 알아야 함" }],
+      subject: "os",
+    },
+  ],
+};
+
+test("여러 과목 지도는 과목 표식·필터를 보여 주고 과목 사이 선수 개념으로 이동함", async ({
+  page,
+}) => {
+  await page.route("**/api/concept-map", (route) =>
+    route.fulfill({ json: mixedMap }),
+  );
+  await page.goto("/#/roadmap");
+  await expect(page.locator(".roadmap-node")).toHaveCount(38);
+  await expect(page.locator('.roadmap-node[data-subject="os"]')).toHaveCount(2);
+  const filter = page.getByRole("group", { name: "과목" });
+  await filter.getByRole("button", { name: "운영체제" }).click();
+  // 숨긴 자료구조 개념(queue)을 가리키던 선은 그리지 않음
+  await expect(page.locator(".roadmap-node")).toHaveCount(2);
+  await expect(page.locator(".prerequisite-edge")).toHaveCount(1);
+  await expect(
+    page.locator('.prerequisite-edge[data-source="queue"]'),
+  ).toHaveCount(0);
+  await node(page, "프로세스와 상태 · 운영체제").click();
+  const detail = page.getByRole("region", { name: "선택한 개념" });
+  await expect(detail).toContainText("운영체제 · 1단계");
+  // 상세 패널은 과목 사이 선수 개념을 그대로 보여 주고, 누르면 필터를 풀어 그 개념을 지도에 보여 줌
+  await detail.getByRole("button", { name: "큐", exact: true }).click();
+  await expect(filter.getByRole("button", { name: "전체" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.locator(".roadmap-node")).toHaveCount(38);
+  await expect(node(page, "큐 · 자료구조·알고리즘")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
