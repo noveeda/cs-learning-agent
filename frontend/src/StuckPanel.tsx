@@ -13,7 +13,6 @@ import {
   rememberStuckSession,
   stepSession,
   StuckError,
-  supportedConcepts,
   type Entry,
   type ItemView,
   type StepInput,
@@ -44,7 +43,7 @@ const outcomeLabels: Record<string, string> = {
   pending: "진행 전",
 };
 
-// 역할: 개념 학습 화면·로드맵 상세의 [막혔어요]; MVP 밖 개념은 버튼 대신 안내 문구
+// 역할: 개념 학습 화면·로드맵 상세의 [막혔어요]; 확인·서술 문항이 아직 없는 개념은 버튼 대신 안내 문구
 export function StuckButton({
   concept,
   inProgress,
@@ -54,11 +53,11 @@ export function StuckButton({
   inProgress: boolean;
   onStuck: () => void;
 }) {
-  if (!supportedConcepts.has(concept.id))
+  if (!concept.stuckSupported)
     return (
       <p className="stuck-unsupported">
-        아직 [막혔어요]를 지원하지 않는 개념이에요. 지금은 메모리 주소부터
-        스택·큐까지 선형 구조 11개 개념에서 쓸 수 있어요.
+        아직 [막혔어요]를 지원하지 않는 개념이에요. 이해 확인 문항이 준비된
+        개념부터 차례로 열고 있어요.
       </p>
     );
   return (

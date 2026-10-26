@@ -6,6 +6,7 @@ export type Prerequisite = { id: string; reason: string };
 
 // 역할: /api/concept-map에서 받은 개념 하나; 로드맵·상세·개념별 대화 화면이 공통으로 사용
 // - domain은 지도 제목(예: 자료구조·알고리즘)을 채워 학습 화면의 영역 표시에 재사용
+// - stuckSupported는 응답의 stuck_supported에서 계산한 [막혔어요] 지원 여부
 export type Concept = {
   id: string;
   title: string;
@@ -13,6 +14,7 @@ export type Concept = {
   description: string;
   objectives: string[];
   prerequisites: Prerequisite[];
+  stuckSupported: boolean;
 };
 
 // 역할: 단계(layer)와 같은 줄 안의 가로 위치(x, 줄 가운데가 0)

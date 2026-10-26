@@ -1,21 +1,6 @@
 // 파일 역할: 막힘 세션 API 호출·오류 분류와 진행 중 세션 ID의 브라우저 저장; 패널 화면과 통신·저장 처리를 분리
 // - 화면 내용(view)은 AI core 엔진이 만들고 Spring이 저장한 체크포인트를 그대로 받음; 정답 키는 오지 않음
 
-// MVP 지원 개념: 문항 은행이 있는 선형 구조 11개만 [막혔어요]를 켬(나머지는 안내 문구)
-export const supportedConcepts = new Set([
-  "memory-address",
-  "reference",
-  "logarithm",
-  "big-o",
-  "complexity-analysis",
-  "array",
-  "dynamic-array",
-  "linked-list",
-  "adt",
-  "stack",
-  "queue",
-]);
-
 // 역할: 막힘이 시작된 곳; return_to는 복귀할 해시 경로(예: #/learn?concept=stack)
 export type Entry =
   | { kind: "roadmap"; concept: string; return_to: string }

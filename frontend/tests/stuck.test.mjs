@@ -12,8 +12,8 @@ import {
   rememberStuckSession,
   saveStuckStore,
   stepSession,
-  supportedConcepts,
 } from '../src/stuck.ts';
+import { isStuckSupported, loadConceptMap } from '../src/api.ts';
 
 const id = '0123456789abcdef0123456789abcdef';
 const entry = { kind: 'roadmap', concept: 'stack', return_to: '#/learn?concept=stack' };
@@ -89,9 +89,20 @@ test('keys sessions by entry and recognizes finished stages', () => {
   assert.equal(isFinished('complete'), true);
   assert.equal(isFinished('out_of_scope'), true);
   assert.equal(isFinished('check'), false);
-  // MVP는 문항 은행이 있는 선형 구조 11개 개념만 [막혔어요]를 지원
-  assert.equal(supportedConcepts.size, 11);
-  assert.ok(supportedConcepts.has('stack') && !supportedConcepts.has('bfs'));
+});
+
+// 검증 목적: [막혔어요] 지원 여부가 하드코딩 목록이 아니라 개념 지도 응답의 stuck_supported를 따르는지 확인
+// - 필드가 없는 옛 응답에서는 엔진이 확인 문항을 낼 수 있는지 모르므로 어떤 개념도 지원한다고 보지 않음
+test('follows stuck_supported from the concept map response', async (t) => {
+  const map = { stuck_supported: ['stack', 'bfs'] };
+  assert.equal(isStuckSupported(map, 'stack'), true);
+  assert.equal(isStuckSupported(map, 'bfs'), true);
+  assert.equal(isStuckSupported(map, 'queue'), false);
+  assert.equal(isStuckSupported({}, 'stack'), false);
+  // 로드맵·학습 화면의 [막혔어요]가 읽는 Concept.stuckSupported도 같은 판단을 따름
+  const concept = (id) => ({ id, title: id, description: '', objectives: [], prerequisites: [] });
+  mockFetch(t, Response.json({ title: '자료구조', concepts: [concept('stack'), concept('queue')], stuck_supported: ['stack'] }));
+  assert.deepEqual((await loadConceptMap()).map((c) => c.stuckSupported), [true, false]);
 });
 
 test('remembers in-progress sessions per entry, reopens the active one and drops finished ones', () => {
