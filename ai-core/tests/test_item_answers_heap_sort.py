@@ -142,6 +142,7 @@ def expected_answers(items):
     heapq.heappush(tasks, (0, 5))
     order += [heapq.heappop(tasks)[1] for _ in range(len(tasks))]
     worst = list(range(1, 1001)) + [0]  # 모든 원소보다 작은 값을 넣어 루트까지 올라가는 최악의 경우
+    split = [38, 27, 43, 3, 9, 82, 10]  # 가운데 = 길이 // 2로 나눈 뒷부분이 마지막 병합에 들어감
     merge_t = lambda n: 0 if n == 1 else 2 * merge_t(n // 2) + (n - 1)
     partitioned = [7, 2, 9, 4, 3, 8, 5]
     lomuto(partitioned, 0, len(partitioned) - 1)
@@ -156,7 +157,7 @@ def expected_answers(items):
         'sorting-basics-c1': join(insertion([7, 3, 5, 8, 2, 6], steps=3)),
         'sorting-basics-c2': join(mark for _, mark in selection([(4, 1), (4, 2), (3, 3)], key=lambda v: v[0])),
         'merge-sort-d1': merge([3, 8, 12], [1, 9, 10, 15])[1],
-        'merge-sort-c1': join(merge_sort([38, 27, 43, 3, 9, 82, 10][3:])),
+        'merge-sort-c1': join(merge_sort(split[len(split) // 2:])),
         'merge-sort-c2': merge_t(8),
         'quick-sort-d1': join(partitioned),
         'quick-sort-c1': join(quick_sort([4, 1, 3, 9, 7])['pivots']),
