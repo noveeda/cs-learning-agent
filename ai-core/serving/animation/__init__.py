@@ -1,12 +1,17 @@
 # 파일 역할: 애니메이션 패키지 진입점. 검증된 장면 요청을 종류별 시뮬레이터로 보내고, 채팅 artifact 형식의 결과를 만듦
 # - 채팅 도구(show_animation)와 막힘 보충(S4)이 함께 쓰는 단일 경로
+# - 막힘 보충의 장면 선택에 쓰는 개념별 장면 표·제한표·형식 예시·응답 schema도 여기서 만듦(장면 정의와 한곳에서 맞추기 위함)
 """Deterministic step-by-step data structure animations."""
 import json
 from uuid import uuid4
 
+from serving.tools.diagram import inline_schema
+
+from .graph import simulate_graph_traversal, simulate_tree_traversal
 from .hierarchical import simulate_bst, simulate_hash_table, simulate_heap
 from .linear import simulate_array, simulate_linked_list, simulate_queue, simulate_stack
 from .model import Animation, AnimationRequest, AnimationRequestModel
+from .sorting import simulate_sort
 
 # 장면 종류(kind) → 시뮬레이터. 요청 스키마의 kind 목록과 같아야 함
 SIMULATORS = {
@@ -17,6 +22,9 @@ SIMULATORS = {
     'hash_table': simulate_hash_table,
     'bst': simulate_bst,
     'heap': simulate_heap,
+    'graph_traversal': simulate_graph_traversal,
+    'sort': simulate_sort,
+    'tree_traversal': simulate_tree_traversal,
 }
 
 
@@ -28,10 +36,87 @@ CONCEPT_SCENES: dict[str, tuple[str, ...]] = {
     'stack': ('stack',),
     'queue': ('queue',),
     'hash-function': ('hash_table',), 'hash-table': ('hash_table',),
-    # tree-traversal은 넣지 않음: bst 장면에 순회 연산이 없어 순회 과정을 보여 주지 못함(순회 장면은 MVP 3에서 다룸)
-    'binary-tree': ('bst',), 'bst': ('bst',),
+    'binary-tree': ('bst',), 'bst': ('bst',), 'tree-traversal': ('tree_traversal',),
     'heap': ('heap',), 'priority-queue': ('heap',), 'heap-sort': ('heap',),
+    'graph': ('graph_traversal',), 'bfs': ('graph_traversal',), 'dfs': ('graph_traversal',),
+    'sorting-basics': ('sort',), 'merge-sort': ('sort',), 'quick-sort': ('sort',),
 }
+
+# 개념별로 장면 필드의 허용 값을 좁히는 표(개념 지도 ID → {필드: 허용 값})
+# - 같은 장면 종류라도 개념에 맞는 알고리즘만 보여 주기 위함. 예: 병합 정렬 보충에 삽입 정렬 장면이 나오지 않게 함
+# - graph(그래프 기초)는 BFS로 둠: 시작점에서 가까운 정점부터 퍼지는 모습이 경로·연결 요소를 보여 주기에 알맞음
+# - sorting-basics는 선택·삽입·버블 중 장면이 있는 삽입 정렬만. tree-traversal은 전위·중위·후위 모두 허용
+# - 장면 선택 schema·형식 예시·응답 검증에 모두 적용(scene_schema, scene_formats, check_limits)
+CONCEPT_SCENE_LIMITS: dict[str, dict[str, tuple[str, ...]]] = {
+    'graph': {'order': ('bfs',)}, 'bfs': {'order': ('bfs',)}, 'dfs': {'order': ('dfs',)},
+    'sorting-basics': {'algorithm': ('insertion',)}, 'merge-sort': {'algorithm': ('merge',)}, 'quick-sort': {'algorithm': ('quick',)},
+}
+
+# 장면 종류별 입력 형식 예시; 장면 선택 요청에 허용 종류의 예시만 넣음
+# - json_schema(가이드 디코딩)는 모델 입력에 보이지 않아, 예시가 없으면 모델이 연산 형식을 몰라 null로 쏠림
+#   (실측 2026-10-26: 예시 없이 90건 중 null 81건 → 예시를 넣자 null 31건 → schema에서 null 분기도 뺌)
+# - 값은 일부러 짧고 평범하게 둠: 모델이 예시를 그대로 베끼지 않고 학습 목표에 맞게 새로 고르게 하기 위함
+SCENE_FORMATS = {
+    'array': {'kind': 'array', 'values': [2, 4, 6], 'ops': [{'op': 'access', 'index': 1}, {'op': 'insert', 'index': 0, 'value': 1},
+                                                             {'op': 'delete', 'index': 2}]},
+    'linked_list': {'kind': 'linked_list', 'values': [2, 4], 'ops': [{'op': 'insert_head', 'value': 1},
+                                                                      {'op': 'insert_after', 'target': 2, 'value': 3},
+                                                                      {'op': 'delete', 'value': 4}]},
+    'stack': {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}, {'op': 'push', 'value': 2}, {'op': 'pop'}]},
+    'queue': {'kind': 'queue', 'capacity': 4, 'circular': False, 'ops': [{'op': 'enqueue', 'value': 1}, {'op': 'dequeue'}]},
+    'hash_table': {'kind': 'hash_table', 'buckets': 5, 'ops': [{'op': 'insert', 'key': 3}, {'op': 'search', 'key': 3}]},
+    'bst': {'kind': 'bst', 'ops': [{'op': 'insert', 'value': 5}, {'op': 'insert', 'value': 2}, {'op': 'delete', 'value': 5}]},
+    'heap': {'kind': 'heap', 'order': 'max', 'ops': [{'op': 'insert', 'value': 4}, {'op': 'extract'}]},
+    'graph_traversal': {'kind': 'graph_traversal', 'nodes': ['A', 'B', 'C'], 'edges': [['A', 'B'], ['B', 'C']],
+                        'directed': False, 'start': 'A', 'order': 'bfs'},
+    'sort': {'kind': 'sort', 'algorithm': 'insertion', 'values': [3, 1, 2]},
+    'tree_traversal': {'kind': 'tree_traversal', 'values': [2, 1, 3], 'order': 'inorder'},
+}
+
+
+# 역할: 허용 종류(kinds)의 형식 예시를 반환. 제한표에 걸린 필드는 허용 값의 첫 번째로 바꿈
+# - 예시가 schema와 어긋나면(merge-sort인데 예시는 insertion) 모델이 헷갈리기 때문
+def scene_formats(kinds, limits=None) -> dict:
+    formats = {}
+    for kind in kinds:
+        example = dict(SCENE_FORMATS[kind])
+        for field, allowed in (limits or {}).items():
+            if field in example:
+                example[field] = allowed[0]
+        formats[kind] = example
+    return formats
+
+
+# 역할: 막힘 보충의 장면 선택 응답 schema {"scene": kinds에 든 장면 요청 중 하나}를 만듦(가이드 디코딩용)
+# - null 분기를 두지 않음: 장면 목록(CONCEPT_SCENES)이 이미 장면이 맞는 개념만 고르고,
+#   null을 열어 두면 모델이 장면이 분명한 개념(heap·hash-table)에서도 null로 쏠렸기 때문(실측 2026-10-26)
+# - $ref를 펼치고(inline_schema), discriminator 키워드를 빼고 oneOf를 anyOf로 바꿈
+#   가이드 디코딩 엔진이 $ref·discriminator를 다루지 못해도 같은 제약을 걸 수 있게 하기 위함(kind const로 구분되므로 뜻은 같음)
+# - kinds 순서를 유지하고, 제한표(limits)의 필드는 enum을 허용 값으로 좁힘
+def scene_schema(kinds, limits=None) -> dict:
+    def clean(node):
+        if isinstance(node, list):
+            return [clean(value) for value in node]
+        if not isinstance(node, dict):
+            return node
+        return {('anyOf' if key == 'oneOf' else key): clean(value) for key, value in node.items() if key != 'discriminator'}
+
+    options = clean(inline_schema(AnimationRequestModel.model_json_schema()))['anyOf']
+    allowed = [next(o for o in options if o['properties']['kind']['const'] == kind) for kind in kinds]
+    for option in allowed:
+        for field, values in (limits or {}).items():
+            if field in option['properties']:
+                option['properties'][field] = {'type': 'string', 'enum': list(values)}
+    return {'type': 'object', 'additionalProperties': False, 'required': ['scene'],
+            'properties': {'scene': {'anyOf': allowed}}}
+
+
+# 역할: 검증된 장면 요청이 제한표를 지키는지 확인. 어기면 ValueError(가이드 디코딩이 꺼진 서버에서 온 응답도 막기 위함)
+def check_limits(request: AnimationRequest, limits=None) -> None:
+    for field, values in (limits or {}).items():
+        value = getattr(request, field, None)
+        if value is not None and value not in values:
+            raise ValueError(f'허용하지 않은 {field}: {value}')
 
 
 # 역할: 검증된 요청을 실행해 프레임을 계산. 실행할 수 없는 연산이면 한국어 ValueError
@@ -92,13 +177,25 @@ ANIMATION_TOOL = {'type': 'function', 'function': {
                 'queue: capacity, circular + ops enqueue{value}, dequeue (1-10). '
                 'hash_table: buckets + ops insert{key}, search{key} (1-8), h(k) = k mod buckets with chaining. '
                 'bst: ops insert{value}, delete{value} (1-10, at most 9 nodes, no duplicates). '
-                'heap: order + ops insert{value}, extract (1-10).')},
+                'heap: order + ops insert{value}, extract (1-10). '
+                'graph_traversal: nodes, edges, directed, start, order bfs|dfs (no ops). '
+                'sort: algorithm + values (no ops). '
+                'tree_traversal: values inserted into a BST, order preorder|inorder|postorder (no ops).')},
             'values': {'type': 'array', 'items': INTEGER,
-                       'description': 'Initial values. array: 1-8 items, linked_list: 0-6 items. Other kinds: omit.'},
+                       'description': ('Initial values. array: 1-8 items, linked_list: 0-6 items, sort: 2-8 items, '
+                                       'tree_traversal: 1-9 distinct items. Other kinds: omit.')},
             'capacity': {'type': 'integer', 'description': 'queue only. Array size from 2 to 8.'},
             'circular': {'type': 'boolean', 'description': 'queue only. true for a circular queue.'},
             'buckets': {'type': 'integer', 'description': 'hash_table only. Bucket count from 3 to 11.'},
-            'order': {'type': 'string', 'enum': ['min', 'max'], 'description': 'heap only.'},
+            'order': {'type': 'string', 'enum': ['min', 'max', 'bfs', 'dfs', 'preorder', 'inorder', 'postorder'],
+                      'description': 'heap: min|max. graph_traversal: bfs|dfs. tree_traversal: preorder|inorder|postorder.'},
+            'nodes': {'type': 'array', 'items': {'type': 'string'},
+                      'description': 'graph_traversal only. 2-8 unique vertex names of at most 3 characters.'},
+            'edges': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'string'}},
+                      'description': 'graph_traversal only. At most 12 [from, to] pairs of names in nodes.'},
+            'directed': {'type': 'boolean', 'description': 'graph_traversal only.'},
+            'start': {'type': 'string', 'description': 'graph_traversal only. A name in nodes.'},
+            'algorithm': {'type': 'string', 'enum': ['insertion', 'merge', 'quick'], 'description': 'sort only.'},
             'ops': {'type': 'array', 'description': 'Operations run in order from the starting state.', 'items': {
                 'type': 'object',
                 'properties': {
@@ -111,6 +208,6 @@ ANIMATION_TOOL = {'type': 'function', 'function': {
                 'required': ['op'],
             }},
         },
-        'required': ['kind', 'ops'],
+        'required': ['kind'],
     },
 }}
