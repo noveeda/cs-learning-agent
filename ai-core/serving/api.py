@@ -13,7 +13,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from openai import OpenAI
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from serving.concept_map import load_concept_map
 from serving.curriculum import JobState, ModelGateway, step
@@ -75,15 +75,21 @@ def health():
     return {'status': 'ok'}
 
 
-# 역할: 그래프 규칙 검증을 통과한 자료구조 개념 지도 반환; 진단 엔진과 로드맵 화면이 같은 지도를 쓰게 함
+# 역할: 그래프 규칙 검증을 통과한 자료구조 개념 지도와 막힘 지원 개념 목록 반환; 진단 엔진과 로드맵 화면이 같은 지도를 쓰게 함
+# - stuck_supported: 확인(check)·서술(explanation) 문항이 모두 있어 엔진이 이해 확인까지 할 수 있는 개념 ID(지도 순서)
+# - 화면이 목록을 따로 들고 있지 않고 문항 은행에서 계산하므로, 문항 묶음이 추가되면 [막혔어요]도 자동으로 따라옴
 @app.get('/concept-map')
 def concept_map():
     try:
-        return load_concept_map().model_dump()
-    except (OSError, ValidationError):
-        # 손상되거나 규칙을 어긴 지도는 진단 기준이 될 수 없으므로 일부라도 응답하지 않고, 경로·오류 내용은 로그에만 남김
+        concept_map = load_concept_map()
+        purposes = {(item.concept, item.purpose) for item in load_item_bank(concept_map=concept_map)}
+    except (OSError, ValueError):
+        # 손상되거나 규칙을 어긴 지도·문항은 진단 기준이 될 수 없으므로 일부라도 응답하지 않고, 경로·오류 내용은 로그에만 남김
+        # - pydantic ValidationError도 ValueError의 하위 클래스라 함께 잡힘
         logging.exception('Concept map failed to load')
         raise HTTPException(500, '개념 지도를 불러오지 못했습니다.') from None
+    supported = [c.id for c in concept_map.concepts if {(c.id, 'check'), (c.id, 'explanation')} <= purposes]
+    return {**concept_map.model_dump(), 'stuck_supported': supported}
 
 
 # 역할: 막힘 세션 단계 요청; state가 없으면 시작 입력으로 새 세션을 만듦
