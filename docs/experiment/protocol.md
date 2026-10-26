@@ -15,6 +15,7 @@
 - [ ] 운영 모델(8000)에 다른 대량 측정이 돌고 있지 않은지 코디네이터에게 확인한다. 실험 중에는 대량 측정을 멈춘다.
 - [ ] 노트북 화면 폭 1280px 이상, 브라우저 확대 100%.
 - [ ] 다른 탭, 검색, 다른 AI 도구를 닫는다.
+- [ ] 브라우저를 전체 화면(F11)으로 열고 주소창을 숨긴다. 주소에서 `#/experiment`를 지우면 일반 학습 앱이 열리므로, 참여자가 주소창을 건드리지 않게 한다.
 
 ## 3. 진행 (약 1시간)
 
@@ -40,7 +41,9 @@
 
 ## 5. 끝난 뒤
 
-- [ ] 그날 실험이 모두 끝나면 `GET /api/experiments/export`로 기록을 내보내 `ai-core/outputs/experiment/`에 저장한다(Git 밖).
+- [ ] 그날 실험이 모두 끝나면 서버에서 Spring에 직접 요청해 기록을 내보낸다(Git 밖에 저장):
+  `curl -s http://127.0.0.1:8080/api/experiments/export > ai-core/outputs/experiment/export-<날짜>.json`
+  - 화면 주소(5173)를 거쳐 받지 않는다. 참여자 브라우저에서 기록이 열리지 않게 프록시 경유 요청은 막혀 있다.
 - [ ] 사후 서술 답 채점 시트를 만들어 석사 과정생에게 전달한다:
   `python ai-core/eval/experiment_report.py grading-sheet --export <파일> --out ai-core/outputs/experiment/grading-G1.csv`
   - 채점자에게는 참여자, 조건, 개념 순서를 알리지 않는다.
