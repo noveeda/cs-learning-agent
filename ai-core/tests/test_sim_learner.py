@@ -14,7 +14,7 @@ from eval.sim_learner.client import StuckApiError, StuckClient
 from eval.sim_learner.learner import Learner
 from eval.sim_learner.profiles import (Profile, generate_profiles, prerequisite_depths, recall_ceiling, select_targets,
                                        true_gaps)
-from eval.sim_learner.run import EVAL_ROOT, main, oracle_gaps, run_profile, summarize
+from eval.sim_learner.run import EVAL_ROOT, _session_metrics, main, oracle_gaps, run_profile, summarize
 from serving.concept_map import load_concept_map
 from serving.grading import grade
 from serving.item_bank import load_item_bank
@@ -221,6 +221,46 @@ class RunTest(unittest.TestCase):
         self.assertLess(record['recall'], 1.0)
         self.assertEqual(record['miss_reasons'], {'not_probed_pruned': 1})
 
+    # 검증 목적: 놓친 빈틈 이유를 "상한 탓"과 "찍기 탓"으로 나누는지 확인(2026-10-26 오프라인 재생 분석 근거)
+    # - 예전 분류는 "묻지 않았고 문항 5개를 다 씀"만 보고 상한 탓으로 셌음. 찍기로 가지치기된 빈틈과 진짜 가지치기를 상한 탓과 섞지 않게 함
+    # - heap의 선수 관계: heap → binary-tree·array, binary-tree → tree, array → memory-address·complexity-analysis,
+    #   tree → reference·recursion, complexity-analysis → big-o
+    def test_miss_reasons_split_budget_and_guess(self):
+        def reasons(truth, evidence):
+            record = {'target': 'heap', 'gaps': [c for c, result, _ in evidence if result == 'gap'], 'remediated': [],
+                      'evidence': [{'concept': c, 'result': result} for c, result, _ in evidence],
+                      'answers': [{'stage': 'diagnose', 'concept': c, 'item': f'{c}-d', 'note': note}
+                                  for c, _, note in evidence]}
+            return _session_metrics(record, profile_with('heap', truth), set(truth), MAP, ITEMS)['miss_reasons']
+
+        # 모르는 array를 찍어 맞힘(문항 2개만 씀): array는 guessed, 그 아래 complexity-analysis·big-o는 찍기로 가지치기됨
+        self.assertEqual(reasons({'array', 'complexity-analysis', 'big-o'},
+                                 [('binary-tree', 'known', 'known'), ('array', 'known', 'guess')]),
+                         {'guessed': 1, 'not_probed_guessed': 2})
+        # 문항 5개를 다 썼어도 아는 binary-tree를 맞혀 그 아래 tree를 묻지 않은 것은 상한이 아니라 진짜 가지치기
+        self.assertEqual(reasons({'array', 'memory-address', 'complexity-analysis', 'big-o', 'tree'},
+                                 [('binary-tree', 'known', 'known'), ('array', 'gap', 'unknown'),
+                                  ('memory-address', 'gap', 'unknown'), ('complexity-analysis', 'gap', 'unknown'),
+                                  ('big-o', 'gap', 'unknown')]),
+                         {'not_probed_pruned': 1})
+        # 문항 5개를 다 쓴 뒤 대기열에 남은 reference·recursion·big-o는 상한 탓
+        self.assertEqual(reasons({'binary-tree', 'array', 'tree', 'complexity-analysis', 'reference', 'recursion',
+                                  'big-o'},
+                                 [('binary-tree', 'gap', 'unknown'), ('array', 'gap', 'unknown'),
+                                  ('tree', 'gap', 'unknown'), ('memory-address', 'known', 'known'),
+                                  ('complexity-analysis', 'gap', 'unknown')]),
+                         {'not_probed_budget': 3})
+
+    # 검증 목적: 실제 엔진으로 끝까지 진행한 세션에서 상한에 걸린 빈틈은 대기열에 남은 것과 그보다 더 깊은 것 모두 상한 탓으로 셈
+    # - mst의 선수 개념을 모두 모르면 깊이 1·2 개념 5개를 묻고 끝남. 남은 7개 중 heap·queue·sorting-basics는 대기열,
+    #   reference·array·binary-tree·adt는 대기열의 개념을 빈틈으로 판정해야 닿는 더 깊은 개념
+    def test_miss_reasons_budget_with_real_engine(self):
+        unknown = set(prerequisite_depths(MAP, 'mst'))
+        profile = profile_with('mst', unknown)
+        record = run_profile(profile, FakeApi(), Learner(profile, ITEMS, random.Random(0), fake_explainer), MAP, ITEMS)
+        self.assertEqual(len(record['evidence']), MAX_DIAGNOSIS_ITEMS)
+        self.assertEqual(record['miss_reasons'], {'not_probed_budget': len(unknown) - MAX_DIAGNOSIS_ITEMS})
+
     # 검증 목적: summarize가 M1(recall·precision·상한 대비)·M2(과잉 보충률)를 계산하고 어긋난 프로필을 따로 묶는지 확인
     def test_summarize(self):
         base = {'stage': 'complete', 'error': None, 'seconds': 1.0, 'steps': 10, 'miss_reasons': {}, 'false_gap_reasons': {}}
@@ -231,7 +271,8 @@ class RunTest(unittest.TestCase):
              'remediated': ['a', 'b', 't'], 'over_remediated': ['b'], 'target': 't', 'miss_reasons': {'not_probed_budget': 1}},
             {**base, 'consistent': False, 'recall': 0.0, 'precision': 1.0, 'ceiling': 1.0, 'oracle_recall': 0.0,
              'remediated': ['t'], 'over_remediated': [], 'target': 't'},
-            {**base, 'consistent': True, 'stage': 'diagnose', 'error': '503', 'recall': None, 'precision': None},
+            {**base, 'consistent': True, 'stage': 'diagnose', 'error': '503', 'recall': None, 'precision': None,
+             'miss_reasons': {'guessed': 1, 'not_probed_guessed': 2, 'not_probed_pruned': 1}},
         ]
         summary = summarize(results)
         consistent = summary['consistent']
@@ -241,7 +282,11 @@ class RunTest(unittest.TestCase):
         self.assertEqual(consistent['m1']['sessions_below_ceiling'], 0)
         self.assertAlmostEqual(consistent['m2']['over_remediation_rate'], 1 / 5, places=3)
         self.assertAlmostEqual(consistent['m2']['prerequisite_over_remediation_rate'], 1 / 3, places=3)
-        self.assertEqual(consistent['miss_reasons'], {'not_probed_budget': 1})
+        self.assertEqual(consistent['miss_reasons'],
+                         {'not_probed_budget': 1, 'guessed': 1, 'not_probed_guessed': 2, 'not_probed_pruned': 1})
+        # 발표용 묶음: 상한 탓(budget)·찍기 탓(guess: 직접 찍음 + 찍기로 가지치기)·나머지(other)
+        self.assertEqual(consistent['miss_causes'], {'budget': 1, 'guess': 3, 'other': 1})
+        self.assertEqual(summary['inconsistent']['miss_causes'], {'budget': 0, 'guess': 0, 'other': 0})
         self.assertEqual(summary['inconsistent']['sessions'], 1)
         self.assertAlmostEqual(summary['inconsistent']['m1']['recall_mean'], 0.0)
 
