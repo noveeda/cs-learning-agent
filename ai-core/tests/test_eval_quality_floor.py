@@ -135,6 +135,12 @@ class RunAndSummaryTest(unittest.TestCase):
         self.assertEqual(summary['cs_bench/standard']['by_format']['assertion']['accuracy_mean'], 1.0)
         self.assertEqual(summary['cs_bench/options_only']['overall']['accuracy_mean'], 0.5)
 
+    # 검증: 회차마다 답(파싱 실패는 None)이 달라진 문항 수를 셈; 온도 0이라 3회가 거의 같을 수 있어 반복의 의미를 함께 보이기 위함
+    def test_summary_counts_items_changed_between_runs(self):
+        records = [dict(record(run, id_, 'correct'), prediction=prediction)
+                   for run, id_, prediction in ((1, 1, 'A'), (2, 1, 'A'), (1, 2, 'B'), (2, 2, 'C'), (1, 3, None), (2, 3, 'D'))]
+        self.assertEqual(quality_floor.summarize(records)['cs_bench/standard']['overall']['changed_items'], 2)
+
     # 검증: KMMLU 칸에는 같은 문항의 수험생 정답률 평균이 나란히 붙음(회차가 여러 번이어도 문항당 한 번만 셈)
     def test_summary_human_accuracy(self):
         records = [record(run, id_, 'correct', human=human) for run in (1, 2) for id_, human in ((1, 0.2), (2, 0.6))]

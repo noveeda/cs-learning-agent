@@ -170,6 +170,7 @@ def run(client, model, set_name, items, runs, options_only, out, progress=None):
 
 
 # 역할: 기록 묶음 하나의 칸; 회차별 정답률(파싱 실패 포함 분모)의 평균·최솟값·최댓값과 파싱 실패율
+# - changed_items: 회차마다 답(파싱 실패는 None)이 달라진 문항 수; 온도 0에서 반복이 실제로 다른 결과를 냈는지 보이기 위함
 # - 수험생 정답률 평균은 첫 회차의 문항으로만 셈: 같은 문항을 회차 수만큼 겹쳐 세지 않기 위함
 def _cell(records):
     by_run = {}
@@ -177,10 +178,14 @@ def _cell(records):
         by_run.setdefault(r['run'], []).append(r)
     rates = [sum(r['outcome'] == 'correct' for r in rs) / len(rs) for _, rs in sorted(by_run.items())]
     failures = sum(r['outcome'] == 'parse_failure' for r in records)
+    answers = {}
+    for r in records:
+        answers.setdefault(r['id'], set()).add(r.get('prediction'))
     cell = {'items': max(len(rs) for rs in by_run.values()), 'runs': len(rates),
             'accuracy_mean': round(sum(rates) / len(rates), 4), 'accuracy_min': round(min(rates), 4),
             'accuracy_max': round(max(rates), 4), 'parse_failures': failures,
-            'parse_failure_rate': round(failures / len(records), 4)}
+            'parse_failure_rate': round(failures / len(records), 4),
+            'changed_items': sum(len(values) > 1 for values in answers.values())}
     human = [r['human_accuracy'] for r in by_run[min(by_run)] if r.get('human_accuracy') is not None]
     if human:
         cell['human_accuracy_mean'] = round(sum(human) / len(human), 4)
