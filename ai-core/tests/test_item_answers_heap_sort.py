@@ -132,7 +132,7 @@ def expected_answers(items):
     popped[0] = popped.pop()  # 마지막 원소를 루트로 옮긴 뒤 아래로 재정렬
     sift_down(popped, 0)
     fifo, pq = deque(), []
-    for value in (5, 2, 8, 1):
+    for value in (7, 3, 9, 4):
         fifo.append(value)
         heapq.heappush(pq, value)
     tasks = []
@@ -153,7 +153,7 @@ def expected_answers(items):
         'priority-queue-c1': join(order),
         'priority-queue-c2': sift_up(worst, len(worst) - 1),
         'sorting-basics-d1': join(selection([29, 10, 14, 37, 13], steps=2)),
-        'sorting-basics-c1': join(insertion([5, 2, 4, 6, 1, 3], steps=3)),
+        'sorting-basics-c1': join(insertion([7, 3, 5, 8, 2, 6], steps=3)),
         'sorting-basics-c2': join(mark for _, mark in selection([(4, 1), (4, 2), (3, 3)], key=lambda v: v[0])),
         'merge-sort-d1': merge([3, 8, 12], [1, 9, 10, 15])[1],
         'merge-sort-c1': join(merge_sort([38, 27, 43, 3, 9, 82, 10][3:])),
