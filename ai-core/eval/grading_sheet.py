@@ -4,6 +4,7 @@
 """Build a blinded human grading sheet (and criteria sheet) from collected Korean answers."""
 import argparse
 import csv
+import io
 import random
 import sys
 import zlib
@@ -30,12 +31,26 @@ SHEET_COLUMNS = ('answer_id', 'practice', 'question', 'answer',
 CRITERIA_COLUMNS = ('item_id', 'question', 'rubric_no', 'rubric', 'met_example')
 
 
+# 역할: CSV 한 개를 행 목록으로 읽음; 사람이 엑셀로 열어 채운 뒤 돌려주는 파일을 모두 이 함수로 읽음
+# - UTF-8(BOM 포함)로 먼저 읽고, 실패하면 cp949로 다시 읽음
+#   엑셀에서 형식을 "CSV(쉼표로 분리)"로 저장하면 한글 Windows에서는 cp949(ANSI)가 되기 때문
+# - 둘 다 실패하면 깨진 글자로 계산하지 않도록, 다시 저장할 형식을 알려 주는 ValueError를 냄
+def read_csv(path):
+    data = Path(path).read_bytes()
+    for encoding in ('utf-8-sig', 'cp949'):
+        try:
+            text = data.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise ValueError(f'{path}: 글자 인코딩을 읽을 수 없습니다. 엑셀에서 "CSV UTF-8(쉼표로 분리)" 형식으로 다시 저장해 주세요.')
+    return list(csv.DictReader(io.StringIO(text, newline='')))
+
+
 # 역할: 답 시트 CSV들을 읽어 빈 답을 뺀 행 목록 반환; 빈 답은 채점할 내용이 없어 사람·AI 모두 채점하지 않음
 def read_answers(paths):
-    rows = []
-    for path in paths:
-        with open(path, encoding='utf-8-sig', newline='') as file:
-            rows += list(csv.DictReader(file))
+    rows = [row for path in paths for row in read_csv(path)]
     return [r for r in rows if r['answer'].strip()]
 
 
@@ -94,13 +109,22 @@ def write_csv(parser, path, columns, rows):
 
 
 # 역할: 명령행 실행; 채점 시트(--out)와 같은 폴더에 <이름>-criteria.csv 기준표를 함께 씀(엑셀용 UTF-8 BOM)
+# - 도움말 끝에 채점자에게 시트를 나눠 줄 때 지킬 두 가지를 적음(epilog)
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='한국어 서술 답 눈가림 채점 시트 만들기')
-    parser.add_argument('--answers', nargs='+', required=True, type=Path, help='MVP 2 답 시트 CSV')
+    parser = argparse.ArgumentParser(
+        description='한국어 서술 답 눈가림 채점 시트 만들기',
+        epilog='모든 채점자(G1, G2…) 시트는 같은 --answers 목록으로 만드세요. 연습 5개를 입력 답에서 고르므로 '
+               '목록이 다르면 채점자마다 연습 답이 달라집니다. 채점자는 엑셀에서 저장할 때 형식을 '
+               '"CSV UTF-8(쉼표로 분리)"로 유지해야 합니다.')
+    parser.add_argument('--answers', nargs='+', required=True, type=Path, help='MVP 2 답 시트 CSV(모든 채점자에게 같은 목록)')
     parser.add_argument('--grader', required=True, help='채점자 코드(예: G1, G2)')
     parser.add_argument('--out', required=True, type=Path, help='ai-core/outputs/grading/<채점자>.csv')
     args = parser.parse_args(argv)
-    answers, items = read_answers(args.answers), load_item_bank()
+    try:
+        answers = read_answers(args.answers)
+    except ValueError as exc:
+        parser.error(str(exc))
+    items = load_item_bank()
     write_csv(parser, args.out, SHEET_COLUMNS, build_sheet(answers, items, args.grader))
     write_csv(parser, args.out.with_name(f'{args.out.stem}-criteria.csv'), CRITERIA_COLUMNS, build_criteria(answers, items))
 
