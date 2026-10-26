@@ -2,6 +2,10 @@
 .animation-player { margin: var(--space-4) 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); }
 .animation-player:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .animation-title { margin: 0 0 var(--space-2); font-weight: 600; }
+/* 채팅 artifact 패널(가로 flex인 diagram-stage) 안에서는 남은 폭을 모두 써서 SVG가 0 폭으로 줄지 않게 함 */
+.diagram-stage .animation-player { flex: 1; min-width: 0; }
+/* 패널 머리글이 이미 같은 제목을 보여 주므로 재생기 안 제목은 숨김(재생기 aria-label에는 제목이 남아 있음) */
+.diagram-stage .animation-title { display: none; }
 /* width 100%로 패널 폭에 맞추고 높이는 viewBox 비율을 따름; 가로 스크롤이 생기지 않게 함 */
 .animation-canvas { display: block; width: 100%; height: auto; margin: 0 auto; overflow: visible; }
 .animation-box { transition: transform 300ms ease; }
