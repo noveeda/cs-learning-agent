@@ -10,8 +10,8 @@ from collections import deque
 
 from pydantic import ValidationError
 
-from serving.animation import (CONCEPT_SCENE_LIMITS, CONCEPT_SCENES, SCENE_FORMATS, SIMULATORS, scene_formats,
-                               scene_schema, simulate)
+from serving.animation import (CONCEPT_SCENE_LIMITS, CONCEPT_SCENES, SCENE_FORMATS, SIMULATORS, check_limits,
+                               scene_formats, scene_schema, simulate)
 from serving.animation.model import MAX_FRAMES, AnimationRequestModel
 from serving.concept_map import load_concept_map
 
@@ -247,6 +247,22 @@ class ConceptScenesTest(unittest.TestCase):
         self.assertEqual(CONCEPT_SCENE_LIMITS['sorting-basics'], {'algorithm': ('insertion',)})
         self.assertLessEqual(set(CONCEPT_SCENE_LIMITS), set(CONCEPT_SCENES))
         self.assertLessEqual(set(CONCEPT_SCENES), {c.id for c in load_concept_map().concepts})
+
+    # 검증 목적: priority-queue 보충 장면은 최소 힙만 허용(schema enum·형식 예시·응답 검증 모두)
+    # - 이 저장소의 priority-queue 문항은 모두 "숫자가 작을수록 먼저"인데, 운영 E2E(2026-10-26)에서 최대 힙 장면이 나와 어긋났음
+    # - heap·heap-sort는 최대·최소 모두 다루므로 제한하지 않음
+    def test_priority_queue_uses_min_heap(self):
+        limits = CONCEPT_SCENE_LIMITS['priority-queue']
+        self.assertEqual(limits, {'order': ('min',)})
+        (option,) = scene_schema(CONCEPT_SCENES['priority-queue'], limits)['properties']['scene']['anyOf']
+        self.assertEqual(option['properties']['order']['enum'], ['min'])
+        self.assertEqual(scene_formats(CONCEPT_SCENES['priority-queue'], limits)['heap']['order'], 'min')
+        max_heap = AnimationRequestModel.model_validate(dict(SCENE_FORMATS['heap'], order='max')).root
+        with self.assertRaises(ValueError):
+            check_limits(max_heap, limits)
+        check_limits(AnimationRequestModel.model_validate(dict(SCENE_FORMATS['heap'], order='min')).root, limits)
+        self.assertNotIn('heap', CONCEPT_SCENE_LIMITS)
+        self.assertNotIn('heap-sort', CONCEPT_SCENE_LIMITS)
 
     # 검증 목적: merge-sort의 장면 선택 schema가 algorithm merge만 허용하고, 형식 예시도 merge로 바뀌는지 확인
     # - 가이드 디코딩이 허용 밖 알고리즘을 형식 단계에서 막아 "병합 정렬 보충에 삽입 정렬 장면"이 나오지 않게 함
