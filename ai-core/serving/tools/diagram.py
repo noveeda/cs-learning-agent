@@ -52,12 +52,40 @@ class Diagram(BaseModel):
         return self
 
 
+# 제약 키워드를 description 문장으로 옮길 때 쓰는 한국어 이름; 이 순서대로 문장에 붙임
+CONSTRAINT_NAMES = {'pattern': '정규식', 'minimum': '최솟값', 'maximum': '최댓값', 'minLength': '최소 길이',
+                    'maxLength': '최대 길이', 'minItems': '최소 개수', 'maxItems': '최대 개수'}
+
+
+# 역할: Pydantic JSON schema의 $ref를 $defs 내용으로 펼치고, 제약 키워드를 같은 필드 description에 문장으로 덧붙여 반환
+# - Gemma 4 채팅 템플릿은 도구 스키마의 $defs·$ref와 pattern·maximum 같은 제약을 렌더링하지 않음
+# - 펼치지 않으면 모델이 노드의 column·row 필드와 격자 범위를 볼 수 없어 도식 호출이 실패함(모델 선택 시험: 도식 성공 0/8 → 펼친 뒤 8/8, 첫 시도 성공 5/8)
+# - 제약 키워드 자체는 지우지 않음: 렌더링하는 템플릿에는 그대로 전달되고, 실제 검증은 서버의 Diagram 모델이 함
+def inline_schema(schema: dict) -> dict:
+    defs = schema.get('$defs', {})
+
+    def walk(node):
+        if isinstance(node, list):
+            return [walk(value) for value in node]
+        if not isinstance(node, dict):
+            return node
+        if '$ref' in node:
+            return walk(defs[node['$ref'].split('/')[-1]])
+        out = {key: walk(value) for key, value in node.items() if key != '$defs'}
+        rules = [f'{name} {node[key]}' for key, name in CONSTRAINT_NAMES.items() if key in node]
+        if rules:
+            out['description'] = (node.get('description', '') + ' ' + ', '.join(rules)).strip()
+        return out
+    return walk(schema)
+
+
+# 채팅 요청(agent.run_agent)과 /tokenize 토큰 계산(context.token_counter)이 함께 쓰는 단일 도구 정의
 TOOL = {'type': 'function', 'function': {
     'name': 'create_diagram',
     'description': ('Create and save a CS concept diagram as SVG. Use when the user '
                     'requests a diagram. Place nodes in columns left to right and rows '
                     'top to bottom. Keep labels short. Edges are directed arrows.'),
-    'parameters': Diagram.model_json_schema(),
+    'parameters': inline_schema(Diagram.model_json_schema()),
 }}
 
 
