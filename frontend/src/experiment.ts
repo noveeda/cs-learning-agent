@@ -190,9 +190,9 @@ export function formatClock(seconds: number): string {
   return `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`;
 }
 
-// 참가자 코드는 S1~S9만 허용; 이름 같은 개인정보가 들어오지 않게 함
+// 참가자 코드는 S1~S99만 허용; 이름 같은 개인정보가 들어오지 않게 함
 export function validParticipant(code: string): boolean {
-  return /^S[1-9]$/.test(code);
+  return /^S[1-9][0-9]?$/.test(code);
 }
 
 export function allAnswered(

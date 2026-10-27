@@ -116,9 +116,12 @@ class ExperimentControllerTests {
     @Test
     // 역할: 참가자 번호로 조건 순서와 사전·사후 형이 1절 상쇄 규칙대로 배정되는지 검증
     // - 홀수: 개념 1 제안 시스템 / 번호÷2 몫이 짝수: 사전 A형·사후 B형
+    // - 참가자가 9명을 넘을 수 있어 두 자리 번호(S10~S99)도 같은 규칙을 따르는지 함께 확인
     void assignmentFollowsParity() throws Exception {
+        // S10 이상(두 자리 번호)도 같은 규칙: S10 = 짝수·10÷2=5(홀수) → 채팅 먼저·사전 B형
         var expected = Map.of("S1", List.of("system", "A"), "S2", List.of("chat", "B"),
-                "S3", List.of("system", "B"), "S4", List.of("chat", "A"));
+                "S3", List.of("system", "B"), "S4", List.of("chat", "A"),
+                "S10", List.of("chat", "B"), "S13", List.of("system", "A"), "S99", List.of("system", "B"));
         for (var entry : expected.entrySet()) {
             var created = create(entry.getKey(), List.of());
             var form = entry.getValue().get(1);
@@ -251,7 +254,9 @@ class ExperimentControllerTests {
     void invalidCreateRejected() throws Exception {
         for (var request : List.of(
                 new ExperimentController.CreateRequest("홍길동", 3, "taken", List.of()),
-                new ExperimentController.CreateRequest("S10", 3, "taken", List.of()),
+                new ExperimentController.CreateRequest("S0", 3, "taken", List.of()),
+                new ExperimentController.CreateRequest("S01", 3, "taken", List.of()),
+                new ExperimentController.CreateRequest("S100", 3, "taken", List.of()),
                 new ExperimentController.CreateRequest("S1", 5, "taken", List.of()),
                 new ExperimentController.CreateRequest("S1", 3, "none", List.of()),
                 new ExperimentController.CreateRequest("S1", 3, "taken", List.of("unknown")),

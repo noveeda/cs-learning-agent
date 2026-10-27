@@ -266,10 +266,10 @@ function SetupScreen({
         진행자가 입력합니다. 이름·연락처·성적은 받지 않아요.
       </p>
       <label>
-        참가자 코드(S1~S9)
+        참가자 코드(S1~S99)
         <input
           value={form.participant}
-          maxLength={2}
+          maxLength={3}
           onChange={(event) => {
             setConflict(null);
             setForm({ ...form, participant: event.target.value.toUpperCase() });
