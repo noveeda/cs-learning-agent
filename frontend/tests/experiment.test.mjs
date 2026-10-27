@@ -98,10 +98,14 @@ test('submits answers then reloads the session from the server', async (t) => {
   await assert.rejects(getExperiment(id), (error) => error.status === 404);
 });
 
-// 검증 목적: 참가자 코드는 S1~S9만 받아 이름 같은 개인정보가 들어오지 않게 함, 빈 답 확인, 새로고침용 세션 id 저장
+// 검증 목적: 참가자 코드는 S1~S99만 받아 이름 같은 개인정보가 들어오지 않게 함, 빈 답 확인, 새로고침용 세션 id 저장
 test('validates participant codes, checks answers and remembers the session id', () => {
   assert.equal(validParticipant('S1'), true);
-  assert.equal(validParticipant('S10'), false);
+  assert.equal(validParticipant('S10'), true);
+  assert.equal(validParticipant('S99'), true);
+  assert.equal(validParticipant('S0'), false);
+  assert.equal(validParticipant('S01'), false);
+  assert.equal(validParticipant('S100'), false);
   assert.equal(validParticipant('홍길동'), false);
   const items = [{ id: 'a' }, { id: 'b' }];
   assert.equal(allAnswered(items, { a: 'A', b: ' ' }), false);

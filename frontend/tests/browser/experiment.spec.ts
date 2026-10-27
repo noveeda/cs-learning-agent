@@ -182,7 +182,7 @@ test("같은 참가자 코드로 다시 시작하면 덮어쓰지 않고 기존 
   });
   await page.goto("/#/experiment");
   await expect(page.getByRole("button", { name: "실험 시작" })).toBeDisabled();
-  await page.getByLabel("참가자 코드(S1~S9)").fill("s3");
+  await page.getByLabel("참가자 코드(S1~S99)").fill("s3");
   await page.getByLabel("수강 중").check();
   await page.getByLabel("bfs").check();
   await page.screenshot({

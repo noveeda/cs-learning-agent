@@ -56,7 +56,7 @@ public class ExperimentController {
         this.clock = clock;
     }
 
-    // 역할: 세션 시작 요청; 참가자 코드(S1~S9)·학년(1~4)·자료구조 수강 여부·제외할 개념만 받음
+    // 역할: 세션 시작 요청; 참가자 코드(S1~S99)·학년(1~4)·자료구조 수강 여부·제외할 개념만 받음
     public record CreateRequest(String participant, Integer grade, String dsa, List<String> exclude) {}
     // 역할: 사전·사후 시험과 설문 제출; 문항 ID → 답
     public record AnswersRequest(Map<String, String> answers) {}
@@ -72,8 +72,8 @@ public class ExperimentController {
     // 역할: 새 세션을 만들고 사전 시험 화면을 반환; 같은 참가자 코드가 있으면 덮어쓰지 않고 409와 기존 id 반환
     public synchronized ResponseEntity<?> create(@RequestBody CreateRequest body) throws IOException {
         if (!materials.available()) return error(503, "실험 자료가 아직 준비되지 않았습니다.");
-        if (body == null || body.participant() == null || !body.participant().matches("S[1-9]"))
-            return error(422, "참가자 코드는 S1~S9 중 하나여야 합니다.");
+        if (body == null || body.participant() == null || !body.participant().matches("S[1-9][0-9]?"))
+            return error(422, "참가자 코드는 S1~S99 중 하나여야 합니다.");
         if (body.grade() == null || body.grade() < 1 || body.grade() > 4) return error(422, "학년은 1~4 중 하나여야 합니다.");
         if (!"taken".equals(body.dsa()) && !"taking".equals(body.dsa())) return error(422, "자료구조 수강 여부는 taken 또는 taking이어야 합니다.");
         var exclude = new LinkedHashSet<>(body.exclude() == null ? List.of() : body.exclude());
@@ -85,7 +85,7 @@ public class ExperimentController {
                 "message", "이미 같은 참가자 코드의 세션이 있습니다. 기존 세션을 이어서 진행해 주세요.", "id", existing.path("id").asString()));
 
         // 사전 형 상쇄: 번호를 2로 나눈 몫이 짝수면 사전 A형·사후 B형, 홀수면 반대(S1 A, S2 B, S3 B, S4 A)
-        int number = body.participant().charAt(1) - '0';
+        int number = participantNumber(body.participant());
         String pretestForm = (number / 2) % 2 == 0 ? "A" : "B";
         var session = ConversationStore.JSON.createObjectNode();
         session.put("id", UUID.randomUUID().toString().replace("-", "")).put("participant", body.participant())
@@ -96,6 +96,12 @@ public class ExperimentController {
         candidates.forEach(session.putArray("candidates")::add);
         store.save(session);
         return ok(session);
+    }
+
+    // 역할: 참가자 코드에서 번호를 꺼냄(S7 → 7, S12 → 12); 조건 순서·사전 형 배정 규칙의 입력
+    // - 참가자가 9명을 넘을 수 있어 첫 글자 하나가 아니라 S 뒤 숫자 전체를 읽음
+    private static int participantNumber(String participant) {
+        return Integer.parseInt(participant.substring(1));
     }
 
     @GetMapping("/{id}")
@@ -131,7 +137,7 @@ public class ExperimentController {
         chosen.sort(Comparator.comparingInt(byConcept::get));
         boolean high = chosen.subList(0, 2).stream().anyMatch(c -> byConcept.get(c) == materials.concept(c).autoItems(form).size());
         // 조건 상쇄: 참가자 번호가 홀수면 개념 1을 제안 시스템, 짝수면 채팅으로 학습
-        boolean systemFirst = (session.path("participant").asString().charAt(1) - '0') % 2 == 1;
+        boolean systemFirst = participantNumber(session.path("participant").asString()) % 2 == 1;
 
         var pretest = session.putObject("pretest");
         pretest.put("submitted_at", iso(now()));
