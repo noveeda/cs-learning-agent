@@ -38,17 +38,20 @@ class Learner:
     # - 서술형: 아는 개념이면 근거·루브릭을 참고 답으로 주고, 모르거나 slip이면 참고 답 없이 학습자 모델에 맡김
     def answer(self, view: dict) -> tuple[str, str]:
         item = self.items[view['id']]
-        knows = item.concept in self.known
-        slipped = knows and self.rng.random() < self.profile.slip
+        state = self.answer_state(item.concept, multiple_choice=item.format == 'multiple_choice')
         if item.format == 'explanation':
-            if knows and not slipped:
-                return self.explainer(item.question, {'rationale': item.rationale, 'rubric': item.rubric}), 'known'
-            return self.explainer(item.question, None), 'slip' if slipped else 'unknown'
-        if knows:
-            return (self._wrong(item), 'slip') if slipped else (item.answer, 'known')
-        if item.format == 'multiple_choice' and self.rng.random() < self.profile.guess:
-            return item.answer, 'guess'
-        return self._wrong(item), 'unknown'
+            reference = {'rationale': item.rationale, 'rubric': item.rubric} if state == 'known' else None
+            return self.explainer(item.question, reference), state
+        return (item.answer if state in ('known', 'guess') else self._wrong(item)), state
+
+    # 역할: 개념을 물었을 때의 응답 상태만 결정. 규칙 문항과 자유 대화가 slip·guess 의미와 난수 순서를 공유
+    # - guess는 선택형만 허용하고, 맞혔더라도 learn() 전까지 지식 상태를 바꾸지 않음
+    def answer_state(self, concept: str, multiple_choice: bool = False) -> str:
+        if concept in self.known:
+            return 'slip' if self.rng.random() < self.profile.slip else 'known'
+        if multiple_choice and self.rng.random() < self.profile.guess:
+            return 'guess'
+        return 'unknown'
 
     # 역할: 확실히 틀리는 답. 선택형은 정답이 아닌 보기 중 하나, 단답형은 정해 둔 모름 답
     def _wrong(self, item: Item) -> str:
