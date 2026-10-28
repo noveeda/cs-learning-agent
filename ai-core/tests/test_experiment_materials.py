@@ -102,14 +102,35 @@ def median_first(keys):
     return [keys[mid]] + median_first(keys[:mid]) + median_first(keys[mid + 1:])
 
 
-## @brief 최소 힙에 넣고 위로 재정렬; (부모와 바꾼 횟수, 최종 인덱스) 반환
-def heap_push(heap, value):
-    heap = heap + [value]
-    i, swaps = len(heap) - 1, 0
-    while i > 0 and heap[(i - 1) // 2] > heap[i]:
-        heap[i], heap[(i - 1) // 2] = heap[(i - 1) // 2], heap[i]
-        i, swaps = (i - 1) // 2, swaps + 1
+## @brief 최소 힙에서 루트를 빼고 마지막 원소를 루트로 옮긴 뒤 작은 자식과 바꾸며 내림; (바꾼 횟수, 최종 인덱스) 반환
+# - 문항의 배열이 실제 최소 힙인지도 함께 확인해, 힙이 아닌 배열로 낸 문항을 걸러 냄
+def heap_pop(heap):
+    assert all(heap[(i - 1) // 2] <= heap[i] for i in range(1, len(heap))), heap
+    heap = [heap[-1]] + heap[1:-1]
+    i, swaps = 0, 0
+    while True:
+        children = [c for c in (2 * i + 1, 2 * i + 2) if c < len(heap)]
+        if not children:
+            break
+        smaller = min(children, key=lambda c: heap[c])
+        if heap[smaller] >= heap[i]:
+            break
+        heap[i], heap[smaller] = heap[smaller], heap[i]
+        i, swaps = smaller, swaps + 1
     return swaps, i
+
+
+## @brief 문항의 "정점: 이웃, 이웃 / ..." 인접 리스트로 BFS를 돌려 두 번째로 꺼낸 정점을 처리한 직후 큐를 "[a, b]" 꼴로 반환
+def bfs_queue_after_second(question):
+    adjacency = {int(v): [int(n) for n in ns.split(', ')] for v, ns in re.findall(r'(\d+): (\d+(?:, \d+)*)', question)}
+    marked, queue = {1}, deque([1])
+    for _ in range(2):
+        v = queue.popleft()
+        for n in adjacency[v]:
+            if n not in marked:
+                marked.add(n)
+                queue.append(n)
+    return '[' + ', '.join(map(str, queue)) + ']'
 
 
 ## @brief 완전 이진 트리를 위층·왼쪽부터 채우는 규칙만으로 {자식: 부모}를 만듦(부모 공식을 쓰지 않고 확인하기 위함)
@@ -254,8 +275,7 @@ def cache_answer(question):
 def expected_answers(items):
     q = {item['id']: item['question'] for item in items}
     ha, hb = chain_lengths(q['exp-hash-table-A1']), chain_lengths(q['exp-hash-table-B1'])
-    heap_a = heap_push(array_in(q['exp-heap-A1']), numbers_in(q['exp-heap-A1'].split(']')[1])[0])
-    heap_b = heap_push(array_in(q['exp-heap-B1']), numbers_in(q['exp-heap-B1'].split(']')[1])[0])
+    heap_a, heap_b = heap_pop(array_in(q['exp-heap-A1'])), heap_pop(array_in(q['exp-heap-B1']))
     qa, pa = lomuto(array_in(q['exp-quick-sort-A1']))
     qb, pb = lomuto(array_in(q['exp-quick-sort-B1']))
     ma, mb = array_in(q['exp-merge-sort-A1']), array_in(q['exp-merge-sort-B1'])
@@ -306,11 +326,14 @@ def expected_choices(items):
         sjf_id, priority_id = f'exp-sjf-{form}2', f'exp-priority-scheduling-{form}2'
         long, short = map(int, re.findall(r'\(실행 (\d+)\)', questions[sjf_id]))
         choices[sjf_id] = f'②가 SJF이며 대기 시간 합은 {long}에서 {short}로 줄어든다'
-        name, initial, waited = re.search(r'요청 ([A-Z])[은는] 기본 우선순위 (\d+)에서 (\d+)단위', questions[priority_id]).groups()
-        newcomer = re.search(r'새 요청 ([A-Z])', questions[priority_id]).group(1)
-        interval = int(re.search(r'기다린 시간 (\d+)단위마다', questions[priority_id]).group(1))
-        aged = int(initial) - int(waited) // interval
-        choices[priority_id] = f'{name}의 현재 숫자는 {aged}이므로 {newcomer}보다 먼저 고른다'
+        # CPU가 빈 시각까지 도착한 프로세스만 (우선순위, 도착, 이름)으로 비교
+        now = int(re.search(r'시각 (\d+)에 실행 중이던', questions[priority_id]).group(1))
+        ready = [(int(rank), int(arrival), name) for name, arrival, rank in
+                 re.findall(r'([A-Z])\((\d+),(\d+)\)', questions[priority_id]) if int(arrival) <= now]
+        names = '·'.join(name for _, _, name in sorted(ready, key=lambda p: (p[1], p[2])))
+        choices[priority_id] = f'{min(ready)[2]}: 시각 {now}까지 도착한 {names} 중 우선순위 숫자가 더 작다'
+        bfs_id = f'exp-bfs-{form}2'
+        choices[bfs_id] = bfs_queue_after_second(questions[bfs_id])
         tree_id = f'exp-btree-index-{form}2'
         keys = array_in(questions[tree_id])
         target = int(re.search(r'키 (\d+)을 찾기', questions[tree_id]).group(1))
