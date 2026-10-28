@@ -85,3 +85,6 @@ htmlcov/
 /.claude/settings.local.json
 /.claude/worktrees/
 /CLAUDE.local.md
+
+# Local presentation decks and build files (moved from ~/cs-defense); keep out of Git.
+/presentation/
