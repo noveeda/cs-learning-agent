@@ -80,7 +80,7 @@ class ExperimentMaterialsTests {
         assertAnswer("priority-scheduling", "A", "7," + (0 + 3 + 6 + 7));
         assertAnswer("priority-scheduling", "B", "4," + (0 + 2 + 3 + 4));
         assertAnswer("btree-index", "A", "2," + Set.of("I1", "L1", "L2", "I2", "L3").size());
-        assertAnswer("btree-index", "B", "3," + Set.of("J1", "M1", "J2", "M2", "J3", "M3").size());
+        assertAnswer("btree-index", "B", "2," + Set.of("J1", "M1", "J2", "M2", "M3").size());
         int routeA = Math.min(3 + 1 + 3, 2 + 2 + 3);
         int routeB = Math.min(2 + 2 + 5, 1 + 2 + 5);
         assertAnswer("routing", "A", routeA + "," + (routeA - 6));
