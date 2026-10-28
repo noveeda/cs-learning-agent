@@ -157,6 +157,7 @@ function AnswerForm({
 /**
  * @brief 막힘 세션 하나를 열어 단계별 화면을 그림
  * - 세션 ID는 처음 받은 순간 브라우저에 저장하고, 끝나면 진행 중 목록에서 뺌(새로고침 재개 기준)
+ * - 지도 연결 콜백은 세션 응답·재시작·404만 전달; 실험 화면에서는 생략 가능
  * - 요청은 한 번에 하나만 보냄(inFlight): 연속 클릭으로 같은 단계를 두 번 진행하지 않게 함
  */
 export function StuckPanel({
@@ -165,12 +166,14 @@ export function StuckPanel({
   onClose,
   onReturn,
   onSessionsChange,
+  onSessionChange,
 }: {
   request: StuckRequest;
   concepts: Concept[];
   onClose: () => void;
   onReturn: (returnTo: string) => void;
   onSessionsChange: () => void;
+  onSessionChange?: (session: StuckSession | null) => void;
 }) {
   const [session, setSession] = useState<StuckSession | null>(null);
   const [excerpt, setExcerpt] = useState("");
@@ -208,6 +211,7 @@ export function StuckPanel({
       );
     }
     onSessionsChange();
+    onSessionChange?.(next);
   }
 
   /**
@@ -244,6 +248,7 @@ export function StuckPanel({
           }
           onSessionsChange();
         }
+        onSessionChange?.(null);
         setError({ message: `${message} 패널을 닫고 다시 시작해 주세요.` });
       } else {
         setError({
@@ -293,6 +298,7 @@ export function StuckPanel({
       // 목록에서 빼지 못해도 새 세션을 받으면 같은 키를 새 ID로 덮어씀
     }
     onSessionsChange();
+    onSessionChange?.(null);
     setSession(null);
     setNotice("");
     setError(null);
