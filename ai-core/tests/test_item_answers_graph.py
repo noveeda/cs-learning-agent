@@ -1,4 +1,5 @@
-# 파일 역할: 묶음 4(힙 정렬·그래프·그래프 표현·BFS·DFS) 문항의 구성을 검사하고, 단답 정답을 문항 속 그래프를 실제로 만들어 탐색해 독립 계산해 대조
+## @file
+# @brief 묶음 4(힙 정렬·그래프·그래프 표현·BFS·DFS) 문항의 구성을 검사하고, 단답 정답을 문항 속 그래프를 실제로 만들어 탐색해 독립 계산해 대조
 import math
 import random
 import re
@@ -13,7 +14,7 @@ SCOPE = {'heap-sort', 'graph', 'graph-representation', 'bfs', 'dfs'}
 EXTREME_WORDS = ('항상', '반드시', '절대', '전혀', '무조건')
 
 
-# 역할: 문항 속 간선 표기("1-2"는 무방향, "1→2"는 방향)를 읽어 {정점: 이웃 정렬 목록} 반환; 이웃을 작은 번호부터 보는 규칙을 그대로 따르기 위함
+## @brief 문항 속 간선 표기("1-2"는 무방향, "1→2"는 방향)를 읽어 {정점: 이웃 정렬 목록} 반환; 이웃을 작은 번호부터 보는 규칙을 그대로 따르기 위함
 def graph(question):
     adjacency = {}
     for a, kind, b in re.findall(r'(\d+)(-|→)(\d+)', question):
@@ -25,7 +26,7 @@ def graph(question):
     return {v: sorted(ns) for v, ns in adjacency.items()}
 
 
-# 역할: 최대 힙 아래로 재정렬; 앞쪽 size칸만 힙으로 봄
+## @brief 최대 힙 아래로 재정렬; 앞쪽 size칸만 힙으로 봄
 def sift_down_max(values, i, size):
     while 2 * i + 1 < size:
         child = 2 * i + 1
@@ -37,7 +38,7 @@ def sift_down_max(values, i, size):
         i = child
 
 
-# 역할: 큐로 BFS; 꺼낸 정점의 이웃을 작은 번호부터 넣고 넣을 때 방문 표시. stop을 꺼내 이웃을 넣은 직후 큐도 함께 반환
+## @brief 큐로 BFS; 꺼낸 정점의 이웃을 작은 번호부터 넣고 넣을 때 방문 표시. stop을 꺼내 이웃을 넣은 직후 큐도 함께 반환
 def bfs(adjacency, start, stop=None):
     order, distance, queue = [], {start: 0}, deque([start])
     snapshot = None
@@ -53,7 +54,7 @@ def bfs(adjacency, start, stop=None):
     return order, distance, snapshot
 
 
-# 역할: 재귀 DFS; 미방문 이웃을 작은 번호부터 따라 내려감
+## @brief 재귀 DFS; 미방문 이웃을 작은 번호부터 따라 내려감
 def dfs(adjacency, v, seen=None):
     seen = seen if seen is not None else []
     seen.append(v)
@@ -63,7 +64,7 @@ def dfs(adjacency, v, seen=None):
     return seen
 
 
-# 역할: 스택 DFS; 꺼낸 정점이 미방문이면 방문하고 이웃을 큰 번호부터 넣음(작은 번호가 먼저 나오게)
+## @brief 스택 DFS; 꺼낸 정점이 미방문이면 방문하고 이웃을 큰 번호부터 넣음(작은 번호가 먼저 나오게)
 def stack_dfs(adjacency, start):
     seen, stack = [], [start]
     while stack:
@@ -74,7 +75,7 @@ def stack_dfs(adjacency, start):
     return seen
 
 
-# 역할: 무방향 그래프의 연결 요소 목록과 요소마다의 간선 수
+## @brief 무방향 그래프의 연결 요소 목록과 요소마다의 간선 수
 def components(adjacency):
     found, seen = [], set()
     for v in sorted(adjacency):
@@ -90,7 +91,7 @@ def join(values):
     return ','.join(str(v) for v in values)
 
 
-# 역할: 문항 ID → 정답 키와 별도로 계산한 기대 답
+## @brief 문항 ID → 정답 키와 별도로 계산한 기대 답
 def expected_answers(items):
     q = {item.id: item.question for item in items}
     built = [4, 10, 3, 5, 1]

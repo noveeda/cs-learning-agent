@@ -1,4 +1,5 @@
-# 파일 역할: Spring 막힘 세션 공개 API 클라이언트. 사람 학습자의 브라우저와 같은 경로(POST /api/stuck/sessions, /{id}/step)로 진행
+## @file
+# @brief Spring 막힘 세션 공개 API 클라이언트. 사람 학습자의 브라우저와 같은 경로(POST /api/stuck/sessions, /{id}/step)로 진행
 # - 응답은 브라우저 공개 형태({id, version, stage, view, entry})만 받음. 측정도 화면에 보이는 view만으로 계산함
 """Client for the public Spring stuck-session API."""
 import time
@@ -26,15 +27,15 @@ class StuckClient:
         self.http = httpx.Client(base_url=base_url, timeout=TIMEOUT, transport=transport)
         self.sleep = sleep
 
-    # 역할: 새 막힘 세션을 시작하고 첫 공개 상태를 반환
+    ## @brief 새 막힘 세션을 시작하고 첫 공개 상태를 반환
     def start(self, entry: dict) -> dict:
         return self._post('/api/stuck/sessions', {'entry': entry})
 
-    # 역할: 마지막으로 받은 version과 입력을 보내 다음 공개 상태를 반환
+    ## @brief 마지막으로 받은 version과 입력을 보내 다음 공개 상태를 반환
     def step(self, session: dict, data: dict) -> dict:
         return self._post(f'/api/stuck/sessions/{session["id"]}/step', {'version': session['version'], 'input': data})
 
-    # 역할: POST 한 번(재시도 포함). 409·503은 RETRIES번까지 다시 보내고, 끝내 실패하면 상태 코드를 담은 StuckApiError
+    ## @brief POST 한 번(재시도 포함). 409·503은 RETRIES번까지 다시 보내고, 끝내 실패하면 상태 코드를 담은 StuckApiError
     def _post(self, path: str, body: dict) -> dict:
         for attempt in range(RETRIES):
             response = self.http.post(path, json=body)

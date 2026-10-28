@@ -1,4 +1,5 @@
-# 파일 역할: 품질 하한 시험(설계 2-4) — 공식 데이터셋의 자료구조·운영체제 문항을 운영 서빙 모델에 풀려 정답률을 잼
+## @file
+# @brief 품질 하한 시험(설계 2-4) — 공식 데이터셋의 자료구조·운영체제 문항을 운영 서빙 모델에 풀려 정답률을 잼
 # - select-cs-bench: CS-Bench 영어 test에서 코드 규칙으로 문항을 골라 ID 목록(quality_floor_ids/cs_bench.json, 커밋 대상)을 만듦
 # - run: 고른 문항을 운영 설정(추론 끔, 온도 0)으로 한 문항씩 묻고 결과를 한 줄씩 기록(중단 후 이어하기)
 # - summarize: 세트·영역·형식별 정답률을 회차 평균·범위로, 파싱 실패율과 보기만 조건을 따로 집계
@@ -48,7 +49,7 @@ TIMEOUT = 30
 ATTEMPTS = 2
 
 
-# 역할: CS-Bench 행 목록에서 선별 규칙에 맞는 문항을 골라 [{id, area, format}]을 ID 순서로 반환
+## @brief CS-Bench 행 목록에서 선별 규칙에 맞는 문항을 골라 [{id, area, format}]을 ID 순서로 반환
 def select_cs_bench(rows):
     picked = [{'id': row['ID'], 'area': CS_BENCH_AREAS[row['Domain']], 'format': CS_BENCH_FORMATS[row['Format']]}
               for row in rows if row['Domain'] in CS_BENCH_AREAS and row['Format'] in CS_BENCH_FORMATS]
@@ -60,7 +61,7 @@ def load_cs_bench_rows(path):
         return [json.loads(line) for line in file if line.strip()]
 
 
-# 역할: KMMLU Computer-Science test CSV를 문항 목록으로 읽음
+## @brief KMMLU Computer-Science test CSV를 문항 목록으로 읽음
 # - ID는 머리줄을 뺀 1부터의 행 번호로 'kmmlu-cs-<n>'; 원본에 문항 ID 열이 없어 분류 목록이 이 번호로 문항을 가리킴
 # - 정답 1~4를 보기 기호 A~D로 바꾸고, 문항별 수험생 정답률(Human Accuracy)을 함께 둠
 def load_kmmlu(path):
@@ -71,7 +72,7 @@ def load_kmmlu(path):
                 for n, row in enumerate(csv.DictReader(file), start=1)]
 
 
-# 역할: 세트의 원본과 ID 목록을 합쳐 실행할 문항 목록([{id, area, format, question, options, answer, human_accuracy?}])을 만듦
+## @brief 세트의 원본과 ID 목록을 합쳐 실행할 문항 목록([{id, area, format, question, options, answer, human_accuracy?}])을 만듦
 # - ID 목록에 있는데 원본에 없으면 오류: 다른 판본의 원본을 받아 문항이 조용히 빠지는 일을 막음
 def build_items(set_name, data_path, ids_path):
     entries = [entry for entry in json.loads(Path(ids_path).read_text(encoding='utf-8')) if entry['area'] in AREAS]
@@ -94,12 +95,12 @@ def build_items(set_name, data_path, ids_path):
     return items
 
 
-# 역할: 조건에 맞는 문항만 남김; 참거짓 문항은 질문을 지우면 남는 내용이 없어 보기만 조건에서 뺌
+## @brief 조건에 맞는 문항만 남김; 참거짓 문항은 질문을 지우면 남는 내용이 없어 보기만 조건에서 뺌
 def condition_items(items, options_only):
     return [item for item in items if not options_only or item['format'] == 'multiple_choice']
 
 
-# 역할: 문항 하나의 대화 메시지를 만듦; 보기만 조건이면 질문 문장을 아예 넣지 않음
+## @brief 문항 하나의 대화 메시지를 만듦; 보기만 조건이면 질문 문장을 아예 넣지 않음
 def build_messages(set_name, item, options_only):
     instruction = INSTRUCTIONS[set_name]['options_only' if options_only else item['format']]
     user = {} if options_only else {'question': item['question']}
@@ -108,7 +109,7 @@ def build_messages(set_name, item, options_only):
     return [{'role': 'system', 'content': instruction}, {'role': 'user', 'content': json.dumps(user, ensure_ascii=False)}]
 
 
-# 역할: 문항 하나를 운영 설정으로 묻고 {prediction, outcome, raw}를 반환
+## @brief 문항 하나를 운영 설정으로 묻고 {prediction, outcome, raw}를 반환
 # - json_schema로 답을 형식별 선택지 하나로 묶음(가이드 디코딩)
 # - outcome: correct / wrong / parse_failure; 잘린 출력·JSON 아님·선택지 밖 값은 오답이 아니라 parse_failure(Review Focus 5)
 # - 연결 오류는 ATTEMPTS번까지 다시 묻고, 그래도 실패하면 예외를 그대로 올려 실행을 멈춤
@@ -141,7 +142,7 @@ def ask(client, model, set_name, item, options_only):
     return {'prediction': prediction, 'outcome': 'correct' if prediction == item['answer'] else 'wrong', 'raw': None}
 
 
-# 역할: 문항 목록을 runs회 차례로 묻고 결과를 out(JSONL)에 한 줄씩 덧붙임
+## @brief 문항 목록을 runs회 차례로 묻고 결과를 out(JSONL)에 한 줄씩 덧붙임
 # - 이미 기록된 (회차, 문항, 조건)은 건너뜀: 중단 뒤 같은 명령으로 이어서 실행하기 위함
 # - 요청은 하나씩 보냄: 운영 서버(--max-num-seqs 1)와 GPU를 같이 쓰므로 동시에 보내지 않음
 def run(client, model, set_name, items, runs, options_only, out, progress=None):
@@ -169,7 +170,7 @@ def run(client, model, set_name, items, runs, options_only, out, progress=None):
                     progress(f"{run_no} {item['id']}: {record['outcome']}")
 
 
-# 역할: 기록 묶음 하나의 칸; 회차별 정답률(파싱 실패 포함 분모)의 평균·최솟값·최댓값과 파싱 실패율
+## @brief 기록 묶음 하나의 칸; 회차별 정답률(파싱 실패 포함 분모)의 평균·최솟값·최댓값과 파싱 실패율
 # - changed_items: 회차마다 답(파싱 실패는 None)이 달라진 문항 수; 온도 0에서 반복이 실제로 다른 결과를 냈는지 보이기 위함
 # - 수험생 정답률 평균은 첫 회차의 문항으로만 셈: 같은 문항을 회차 수만큼 겹쳐 세지 않기 위함
 def _cell(records):
@@ -192,7 +193,7 @@ def _cell(records):
     return cell
 
 
-# 역할: 실행 기록을 '<세트>/standard|options_only'마다 전체·영역별·형식별 칸으로 집계
+## @brief 실행 기록을 '<세트>/standard|options_only'마다 전체·영역별·형식별 칸으로 집계
 def summarize(records):
     groups = {}
     for r in records:
@@ -204,7 +205,7 @@ def summarize(records):
     return summary
 
 
-# 역할: 명령행 진입점(select-cs-bench, run, summarize)
+## @brief 명령행 진입점(select-cs-bench, run, summarize)
 # - run의 --out은 ai-core/outputs/eval/ 아래만 허용(결과 원본의 Git 유입 방지); 이미 있으면 이어서 씀
 # - 시작 전에 모델 목록을 한 번 조회해 서버가 없으면 종료: 연결 실패를 결과로 남기지 않기 위함
 def main(argv=None):

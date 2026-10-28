@@ -1,4 +1,5 @@
-# 파일 역할: 품질 하한 시험 도구(eval/quality_floor.py)가 문항을 규칙대로 고르고, 보기만 조건에서 질문을 숨기며,
+## @file
+# @brief 품질 하한 시험 도구(eval/quality_floor.py)가 문항을 규칙대로 고르고, 보기만 조건에서 질문을 숨기며,
 #            파싱 실패를 오답과 따로 세고, 반복 실행 결과를 평균·범위로 집계하는지 검증(모델 서버 없이 가짜 클라이언트 사용)
 import csv
 import json
@@ -10,7 +11,7 @@ from types import SimpleNamespace
 from eval import quality_floor
 
 
-# 역할: 정해 둔 응답 문자열을 차례로 돌려주는 가짜 OpenAI 클라이언트; 받은 요청 인자는 calls에 남김
+## @brief 정해 둔 응답 문자열을 차례로 돌려주는 가짜 OpenAI 클라이언트; 받은 요청 인자는 calls에 남김
 class FakeClient:
     def __init__(self, contents, finish_reason='stop'):
         self.contents, self.finish_reason, self.calls = list(contents), finish_reason, []
@@ -104,7 +105,7 @@ class RequestTest(unittest.TestCase):
         self.assertEqual(cut['outcome'], 'parse_failure')
 
 
-# 역할: 집계 시험용 기록 한 줄; 실제 실행 기록과 같은 키만 채움
+## @brief 집계 시험용 기록 한 줄; 실제 실행 기록과 같은 키만 채움
 def record(run, id_, outcome, area='dsa', format_='multiple_choice', options_only=False, human=None):
     return {'set': 'kmmlu' if human is not None else 'cs_bench', 'run': run, 'options_only': options_only, 'id': id_,
             'area': area, 'format': format_, 'outcome': outcome, 'human_accuracy': human}

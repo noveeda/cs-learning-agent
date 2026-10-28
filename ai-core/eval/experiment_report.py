@@ -1,4 +1,5 @@
-# 파일 역할: 비교 실험(계획 Task 6 비교 실험 모드) 결과 계산 — 내보낸 실험 기록과 실험 자료의 정답 키로 O1~O3를 냄
+## @file
+# @brief 비교 실험(계획 Task 6 비교 실험 모드) 결과 계산 — 내보낸 실험 기록과 실험 자료의 정답 키로 O1~O3를 냄
 # - grading-sheet: 사후 서술 답을 눈가림 채점 시트로 만듦(MVP 3 채점 시트와 같은 열; 참가자·조건·개념을 가림)
 # - report: 학생별 표(사전·사후 정답 수, 변화, 서술 충족 비율, O2, O3)와 조건별 차이(system − chat) 요약
 # - 참가자가 4~5명이라 유의성 검정은 하지 않음(설계 2-4): 학생별 표, 차이의 중앙값·범위, 사례로 보고
@@ -35,7 +36,7 @@ CONDITIONS = ('system', 'chat')
 METRICS = ('change', 'explanation', 'o2', 'o3_seconds')
 
 
-# 역할: 눈가림 답 ID; 세션 id와 문항 id로 결정적으로 만들어 별도 대응표 없이 report에서 다시 계산함
+## @brief 눈가림 답 ID; 세션 id와 문항 id로 결정적으로 만들어 별도 대응표 없이 report에서 다시 계산함
 # - 문자 접두 'X': 16진수만 있으면 엑셀이 '1e5' 같은 값을 숫자로 바꿔 ID가 깨짐(PR #69와 같은 이유)
 def answer_id(session_id, item_id):
     return 'X' + hashlib.sha256(f'{session_id}{item_id}'.encode()).hexdigest()[:8]
@@ -45,12 +46,12 @@ def load_json(path):
     return json.loads(Path(path).read_text(encoding='utf-8'))
 
 
-# 역할: 개념 id → 형(A/B) → 문항 목록; 자동 채점 문항과 서술 문항은 format으로 나눔
+## @brief 개념 id → 형(A/B) → 문항 목록; 자동 채점 문항과 서술 문항은 format으로 나눔
 def forms(materials):
     return {c['id']: c['pre_post'] for c in materials['concepts']}
 
 
-# 역할: 자동 채점 문항(선택형·단답) 중 맞힌 개수; 운영 채점기(serving.grading.grade)와 같은 규칙으로 채점
+## @brief 자동 채점 문항(선택형·단답) 중 맞힌 개수; 운영 채점기(serving.grading.grade)와 같은 규칙으로 채점
 # - 실험 문항 ID(exp-<개념>-<형><번호>)는 문항 은행 ID 규칙과 달라 Item 검증을 건너뛰고 채점에 쓰는 필드만 채움
 def auto_correct(items, answers):
     auto = [i for i in items if i['format'] != 'explanation']
@@ -61,7 +62,7 @@ def _explanation(items):
     return next(i for i in items if i['format'] == 'explanation')
 
 
-# 역할: 사후 서술 답 목록 [{answer_id, item, answer, session, concept}]; 빈 답은 채점할 내용이 없어 뺌
+## @brief 사후 서술 답 목록 [{answer_id, item, answer, session, concept}]; 빈 답은 채점할 내용이 없어 뺌
 # - 사전 시험 전 세션은 learn이 없고, 사후 시험 전 세션은 posttest가 없어 자연히 빠짐(export는 모든 세션을 내보냄)
 def explanation_answers(export, materials):
     by_concept = forms(materials)
@@ -79,7 +80,7 @@ def explanation_answers(export, materials):
     return found
 
 
-# 역할: 채점자 시트 행 목록; 열은 MVP 3 채점 시트(SHEET_COLUMNS)와 같고 판정 칸은 비워 둠
+## @brief 채점자 시트 행 목록; 열은 MVP 3 채점 시트(SHEET_COLUMNS)와 같고 판정 칸은 비워 둠
 # - 참가자·조건·개념·문항 ID는 넣지 않음(눈가림); 순서는 answer_id로 정렬한 뒤 채점자 seed로 섞음
 # - 실험에는 개발자 답이 없어 연습 답(practice=1)은 만들지 않음; 연습은 MVP 3 채점 시트로 이미 함
 def build_grading_sheet(export, materials, grader):
@@ -97,7 +98,7 @@ def build_grading_sheet(export, materials, grader):
     return rows
 
 
-# 역할: 채점된 시트들에서 답 하나의 서술 점수(루브릭 충족 비율, 채점자 평균)
+## @brief 채점된 시트들에서 답 하나의 서술 점수(루브릭 충족 비율, 채점자 평균)
 # - 전체 판정(overall_pass)을 채운 행만 채점이 끝난 답으로 봄(agreement.labels, MVP 3 일치도 계산과 같은 규칙)
 # - 루브릭 개수만큼의 칸 중 채운 칸만 셈; 한 칸도 안 채운 채점자는 그 답에서 빠짐
 # - 아무도 채점하지 않았으면 None
@@ -110,14 +111,14 @@ def _explanation_score(aid, rubric_len, sheet_labels):
     return sum(ratios) / len(ratios) if ratios else None
 
 
-# 역할: 서버 시각 문자열(ISO-8601, 끝 'Z')을 시각 값으로 바꿈
+## @brief 서버 시각 문자열(ISO-8601, 끝 'Z')을 시각 값으로 바꿈
 # - 문자열로 비교하지 않는 이유: 서버 Instant.toString()은 0밀리초면 '…:05Z', 아니면 '…:05.120Z'라
 #   같은 초 안에서 문자열 순서('.' < 'Z')와 시간 순서가 어긋남(PR #73 검수)
 def _parse(value):
     return datetime.fromisoformat(value.replace('Z', '+00:00'))
 
 
-# 역할: 시작한 학습 단계 하나의 O2·O3와 도움 사용 여부
+## @brief 시작한 학습 단계 하나의 O2·O3와 도움 사용 여부
 # - O2: 계속 읽기를 눌렀는가(마감 뒤 사건은 서버가 거부하므로 기록에 있으면 시간 안)
 # - O3: 첫 계속 읽기보다 앞선 첫 도움 요청(help_open)부터 그 계속 읽기까지 초
 #   - 서버는 계속 읽기 뒤에도 마감 전이면 help_open을 받으므로, 그 뒤의 도움 요청은 O3에 쓰지 않음(음수 O3 방지)
@@ -132,7 +133,7 @@ def _o2_o3(events):
     return back is not None, bool(helps), o3
 
 
-# 역할: 끝나지 않은 세션·단계 목록 [{participant, slot, reason}]
+## @brief 끝나지 않은 세션·단계 목록 [{participant, slot, reason}]
 # - pretest_not_submitted: 사전 시험 전이라 개념·조건 배정이 없음 → 학생별 표에서 뺌
 # - learn_not_started: 배정은 됐지만 그 학습 단계를 시작하지 않음(events·started_at 없음) → 표에는 started=False로 남김
 # - 실험 중 중단·재시작이나 진행자의 연습 세션이 export에 함께 나오므로, 멈추지 않고 따로 보고하기 위함
@@ -152,7 +153,7 @@ def _started(learn):
     return bool(learn.get('started_at')) and 'events' in learn
 
 
-# 역할: 학생 × 개념 행 목록(학생별 표)
+## @brief 학생 × 개념 행 목록(학생별 표)
 # - pre: 사전 형 자동 채점 2문항 정답 수, post: 사후 형 자동 채점 2문항 정답 수, change: post − pre
 # - explanation: 사후 서술 충족 비율(채점자 평균); 빈 답은 채점 없이 0(모른 답이 계산에서 빠져 점수가 부풀지 않게)
 # - 사후 시험 전이면 post·change·explanation은 None
@@ -187,7 +188,7 @@ def student_rows(export, materials, sheets):
     return rows
 
 
-# 역할: 지표 하나의 조건 차이 요약; 학생마다 system 값 − chat 값, 두 값이 모두 있는 학생만
+## @brief 지표 하나의 조건 차이 요약; 학생마다 system 값 − chat 값, 두 값이 모두 있는 학생만
 def _differences(rows, metric):
     by_student = {}
     for participant in dict.fromkeys(r['participant'] for r in rows):
@@ -200,7 +201,7 @@ def _differences(rows, metric):
             'min': min(diffs) if diffs else None, 'max': max(diffs) if diffs else None, 'by_student': by_student}
 
 
-# 역할: 두 채점자 시트의 전체 판정(overall_pass) 일치도; 채점자가 둘이 아니면 None
+## @brief 두 채점자 시트의 전체 판정(overall_pass) 일치도; 채점자가 둘이 아니면 None
 # - 일치율을 함께 내는 이유: 판정이 한 범주로 쏠리면 kappa만으로는 읽기 어려움
 def _grader_agreement(sheets):
     if len(sheets) != 2:
@@ -213,7 +214,7 @@ def _grader_agreement(sheets):
     return {'compared': len(common), 'kappa': cohen_kappa(a, b), 'agreement': sum(x == y for x, y in zip(a, b)) / len(common)}
 
 
-# 역할: 보고서 사전; 학생별 표, 조건별 차이 요약(전체 / 사전 점수 높음 제외), 사전 점수 높음 학생, 미완료 목록, 채점자 일치도
+## @brief 보고서 사전; 학생별 표, 조건별 차이 요약(전체 / 사전 점수 높음 제외), 사전 점수 높음 학생, 미완료 목록, 채점자 일치도
 # - students는 export의 세션 수(미완료 포함); 미완료 학생은 한쪽 조건 값이 없으면 조건 차이에서 자연히 빠짐
 def build_report(export, materials, sheets):
     rows = student_rows(export, materials, sheets)
@@ -228,7 +229,7 @@ def build_report(export, materials, sheets):
             'note': '참가자 수가 적어 유의성 검정은 하지 않음. 차이는 system − chat.'}
 
 
-# 역할: 명령행 진입점(grading-sheet, report); 출력은 ai-core/outputs 아래만 허용하고 이미 있으면 덮어쓰지 않음
+## @brief 명령행 진입점(grading-sheet, report); 출력은 ai-core/outputs 아래만 허용하고 이미 있으면 덮어쓰지 않음
 def main(argv=None):
     parser = argparse.ArgumentParser(description='비교 실험 결과 계산(O1~O3)')
     commands = parser.add_subparsers(dest='command', required=True)

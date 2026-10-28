@@ -1,4 +1,5 @@
-# 파일 역할: 여러 과목 지도·문항을 하나의 연결 지도로 합치는 로더와, 합친 지도 기준의 그래프 규칙 검증을 확인
+## @file
+# @brief 여러 과목 지도·문항을 하나의 연결 지도로 합치는 로더와, 합친 지도 기준의 그래프 규칙 검증을 확인
 import json
 import tempfile
 import unittest
@@ -10,7 +11,7 @@ from serving.concept_map import CONTENT_DIR, load_concept_map
 from serving.item_bank import load_item_bank
 
 
-# 역할: 과목 지도 파일 내용 생성; edges는 {개념: [선수 개념]}, extra는 개념마다 덧붙일 필드
+## @brief 과목 지도 파일 내용 생성; edges는 {개념: [선수 개념]}, extra는 개념마다 덧붙일 필드
 def subject_map(subject, title, edges, status='reviewed', extra=None):
     return {'id': subject, 'title': title, 'version': 1, 'status': status, 'concepts': [
         {'id': cid, 'title': cid, 'description': cid, 'objectives': ['예시를 설명할 수 있다.'],
@@ -18,14 +19,14 @@ def subject_map(subject, title, edges, status='reviewed', extra=None):
         for cid, prerequisites in edges.items()]}
 
 
-# 역할: 문항 한 줄 생성; 로더가 과목 폴더마다 items-*.jsonl을 읽는지 확인하는 용도
+## @brief 문항 한 줄 생성; 로더가 과목 폴더마다 items-*.jsonl을 읽는지 확인하는 용도
 def check_item(concept):
     return {'id': f'{concept}-c1', 'concept': concept, 'purpose': 'check', 'objective': 0,
             'format': 'short_exact', 'question': '질문', 'answer': '1', 'rationale': '근거'}
 
 
 class MultiSubjectLoaderTests(unittest.TestCase):
-    # 역할: 임시 content 폴더를 만들고 로더의 CONTENT_DIR을 그쪽으로 돌림
+    ## @brief 임시 content 폴더를 만들고 로더의 CONTENT_DIR을 그쪽으로 돌림
     # - 기본 지도: dsa 2개념(queue ← priority-queue), os 1개념(round-robin → queue, 과목 사이 선수 관계)
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

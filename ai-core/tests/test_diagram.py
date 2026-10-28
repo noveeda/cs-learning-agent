@@ -1,4 +1,5 @@
-# 파일 역할: 모델 라벨의 XML 이스케이프, 잘못된 그래프의 파일 생성 차단, 모델에 보내는 도구 스키마 형태를 검증
+## @file
+# @brief 모델 라벨의 XML 이스케이프, 잘못된 그래프의 파일 생성 차단, 모델에 보내는 도구 스키마 형태를 검증
 import json
 import tempfile
 import unittest

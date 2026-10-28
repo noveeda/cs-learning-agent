@@ -1,4 +1,5 @@
-# 파일 역할: 결정적 채점이 표기 차이는 허용하고 내용 차이는 오답으로 판정하는지 검증
+## @file
+# @brief 결정적 채점이 표기 차이는 허용하고 내용 차이는 오답으로 판정하는지 검증
 import unittest
 
 from serving.grading import grade

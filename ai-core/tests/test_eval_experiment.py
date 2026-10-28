@@ -1,4 +1,5 @@
-# 파일 역할: 비교 실험 결과 계산(eval/experiment_report.py)이 서술 답 채점 시트를 눈가림으로 만들고,
+## @file
+# @brief 비교 실험 결과 계산(eval/experiment_report.py)이 서술 답 채점 시트를 눈가림으로 만들고,
 #            학생별 O1~O3 표와 조건별 차이(system − chat) 요약을 바르게 내는지 검증
 # - 실험 API·자료가 아직 구현 중이라, 계획 Task 1·2 Interfaces 형식의 가짜 자료와 가짜 기록 3명(S1~S3)을 씀
 import csv
@@ -10,7 +11,7 @@ from eval import experiment_report as report
 from eval.grading_sheet import OUTPUT_ROOT, SHEET_COLUMNS
 
 
-# 역할: 개념 하나의 가짜 자료; 형(A/B)마다 선택형 1·단답 1·서술 1(루브릭 2개)
+## @brief 개념 하나의 가짜 자료; 형(A/B)마다 선택형 1·단답 1·서술 1(루브릭 2개)
 def concept(cid):
     def form(f):
         return [{'id': f'exp-{cid}-{f}1', 'format': 'multiple_choice', 'question': f'{cid} {f} q1',
@@ -28,7 +29,7 @@ def at(minute, second=0):
     return f'2026-11-10T10:{minute:02d}:{second:02d}Z'
 
 
-# 역할: 학습 단계 하나; help·cont는 도움 요청·계속 읽기 시각(분, 초), None이면 그 사건 없음
+## @brief 학습 단계 하나; help·cont는 도움 요청·계속 읽기 시각(분, 초), None이면 그 사건 없음
 def slot(n, cid, condition, help_at=None, cont_at=None, timeout=False):
     events = []
     if help_at:
@@ -41,7 +42,7 @@ def slot(n, cid, condition, help_at=None, cont_at=None, timeout=False):
     return {'slot': n, 'concept': cid, 'condition': condition, 'started_at': at(0), 'deadline': at(15), 'events': events}
 
 
-# 역할: 가짜 실험 기록 3명
+## @brief 가짜 실험 기록 3명
 # - S1(홀수: 개념 1 system, A형 사전): heap 사전 0 → 사후 2, bst 사전 1 → 사후 1
 # - S2(짝수: 개념 1 chat, B형 사전): bst 사전 0 → 사후 1, heap 사전 0 → 사후 2; heap은 시간 초과(O2 미복귀)
 # - S3(사전 점수 높음): 사후 시험 전(posttest 없음)
@@ -77,7 +78,7 @@ def export():
     return {'exported_at': at(59), 'sessions': [s1, s2, s3]}
 
 
-# 역할: 채점자 시트 하나를 흉내 냄; marks: {(세션 id, 문항 id): (met_1, met_2)} → '1'/'0'/'' 칸
+## @brief 채점자 시트 하나를 흉내 냄; marks: {(세션 id, 문항 id): (met_1, met_2)} → '1'/'0'/'' 칸
 def graded(marks):
     rows = []
     for (sid, item_id), met in marks.items():
@@ -93,7 +94,7 @@ def graded(marks):
 S1, S2 = '1' * 32, '2' * 32
 
 
-# 역할: 끝나지 않은 세션이 섞인 기록(실제 export는 모든 세션을 내보냄, PR #73 검수 ②)
+## @brief 끝나지 않은 세션이 섞인 기록(실제 export는 모든 세션을 내보냄, PR #73 검수 ②)
 # - S4: 생성만 하고 사전 시험 전이라 pretest·learn 키가 없음
 # - S5: 학습 1 진행 중; 학습 2는 시작 전이라 concept·condition만 있고 events·started_at이 없음
 def export_with_incomplete():

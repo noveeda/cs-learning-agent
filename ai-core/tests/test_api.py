@@ -1,4 +1,5 @@
-# 파일 역할: 요청 검증·동시 실행 거부·내부 파일 경로 비공개·애니메이션 artifact 왕복·개념 지도 응답을 검증
+## @file
+# @brief 요청 검증·동시 실행 거부·내부 파일 경로 비공개·애니메이션 artifact 왕복·개념 지도 응답을 검증
 import json
 import unittest
 from types import SimpleNamespace
@@ -74,7 +75,7 @@ class ApiTests(unittest.TestCase):
             self.assertNotIn('private', response.text)
             self.assertNotIn('secret', response.text)
 
-    # 역할: 실제 모델 서버 없이 /chat이 run_agent까지 가도록 OpenAI 클라이언트의 모델 목록·주소를 채움
+    ## @brief 실제 모델 서버 없이 /chat이 run_agent까지 가도록 OpenAI 클라이언트의 모델 목록·주소를 채움
     def fake_model(self, client):
         client.return_value.__enter__.return_value.models.list.return_value.data = [
             SimpleNamespace(id='test', model_extra={'max_model_len': 32768})]

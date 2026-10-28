@@ -1,4 +1,5 @@
-# 파일 역할: 웹 없이 질문·도구 호출·도식 생성을 확인하는 CLI 실행 진입점
+## @file
+# @brief 웹 없이 질문·도구 호출·도식 생성을 확인하는 CLI 실행 진입점
 """Run with: python ask_agent.py '페이징 구조를 그림으로 설명해줘'"""
 import argparse
 import json
@@ -10,7 +11,7 @@ from openai import OpenAI
 from serving.agent import run_agent
 
 
-# 역할: 질문과 출력 옵션을 읽고 에이전트 이벤트를 JSON 또는 사람이 읽는 텍스트로 출력
+## @brief 질문과 출력 옵션을 읽고 에이전트 이벤트를 JSON 또는 사람이 읽는 텍스트로 출력
 def main():
     parser = argparse.ArgumentParser(description='Qwen + SVG diagram tool demo')
     parser.add_argument('question', nargs='?', default='가상 페이지 0, 1, 2가 물리 프레임 3, 0, 2에 매핑되는 도식을 만들고 설명해줘.')

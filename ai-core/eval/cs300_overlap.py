@@ -1,4 +1,5 @@
-# 파일 역할: 문항 은행 질문과 로컬 CS-300 질문의 문장 유사도를 비교해 겹치는 쌍을 찾음
+## @file
+# @brief 문항 은행 질문과 로컬 CS-300 질문의 문장 유사도를 비교해 겹치는 쌍을 찾음
 # - CS-300은 평가 전용 자료라 학습용 문항과 문장이 겹치면 평가가 오염됨
 # - CS-300은 Git 밖 로컬 자료이므로 경로는 인자로만 받고 CI에서는 돌리지 않음
 """Report item-bank questions that nearly duplicate a local CS-300 question (local use only)."""
@@ -13,12 +14,12 @@ from pathlib import Path
 THRESHOLD = 0.8
 
 
-# 역할: 공백·문장부호를 지우고 소문자로 바꿔, 표기만 다른 문장을 같은 문장으로 비교하게 함
+## @brief 공백·문장부호를 지우고 소문자로 바꿔, 표기만 다른 문장을 같은 문장으로 비교하게 함
 def normalize(text):
     return re.sub(r'[\W_]+', '', text).lower()
 
 
-# 역할: 문항·CS-300 질문 목록({'id', 'question'})을 모두 짝지어 비율이 기준 이상인 (비율, 문항 ID, CS-300 ID)를 높은 순으로 반환
+## @brief 문항·CS-300 질문 목록({'id', 'question'})을 모두 짝지어 비율이 기준 이상인 (비율, 문항 ID, CS-300 ID)를 높은 순으로 반환
 def find_overlaps(items, cs300, threshold=THRESHOLD):
     others = [(other['id'], normalize(other['question'])) for other in cs300]
     pairs = []
@@ -35,7 +36,7 @@ def read_jsonl(path):
     return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
 
 
-# 역할: 명령행 인자로 받은 두 위치를 읽어 겹치는 쌍을 출력; 하나라도 있으면 종료 코드 1로 알림
+## @brief 명령행 인자로 받은 두 위치를 읽어 겹치는 쌍을 출력; 하나라도 있으면 종료 코드 1로 알림
 def main(argv=None):
     parser = argparse.ArgumentParser(description='문항 은행과 CS-300의 유사 문항 검사(로컬 전용)')
     parser.add_argument('--cs300', required=True, type=Path, help='questions.jsonl이 있는 로컬 CS-300 폴더')

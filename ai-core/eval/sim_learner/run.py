@@ -1,4 +1,5 @@
-# 파일 역할: 시뮬레이션 학습자 실행기. 프로필마다 로드맵 진입으로 막힘 세션을 공개 API로 끝까지 진행하고 M1·M2를 계산
+## @file
+# @brief 시뮬레이션 학습자 실행기. 프로필마다 로드맵 진입으로 막힘 세션을 공개 API로 끝까지 진행하고 M1·M2를 계산
 # - M1(진단 먼저): 진단 결과 화면의 빈틈(gaps)과 프로필의 정답 선수 빈틈을 비교한 recall·precision, 문항 상한 대비 비율
 # - M2(최소 보충): 보충 화면에 나온 개념 중 프로필이 이미 아는 개념의 비율(과잉 보충률)
 # - 결과 원본은 git-ignored 폴더(ai-core/outputs/eval/sim/)에만 쓰고, PR·발표에는 요약만 옮김
@@ -39,7 +40,7 @@ END_STAGES = ('complete', 'out_of_scope')
 MISS_CAUSES = {'not_probed_budget': 'budget', 'guessed': 'guess', 'not_probed_guessed': 'guess'}
 
 
-# 역할: 완벽한 응답자(slip·guess 0)가 같은 프로필로 진단만 받았을 때 엔진이 찾는 빈틈(엔진 오라클)
+## @brief 완벽한 응답자(slip·guess 0)가 같은 프로필로 진단만 받았을 때 엔진이 찾는 빈틈(엔진 오라클)
 # - 진단 단계는 LLM을 쓰지 않으므로 실제 엔진을 이 프로세스에서 바로 돌림
 # - 시스템 결과가 오라클보다 못하면 학습자 잡음(slip·guess), 오라클이 정답보다 못하면 엔진 규칙(가지치기·문항 상한) 탓으로 나눌 수 있음
 def oracle_gaps(profile: Profile, concept_map: ConceptMap, items: list[Item]) -> set[str]:
@@ -54,7 +55,7 @@ def oracle_gaps(profile: Profile, concept_map: ConceptMap, items: list[Item]) ->
     return {gap['id'] for gap in state.view['gaps']}
 
 
-# 역할: 프로필 하나로 세션을 끝까지 진행하고 기록 한 줄(dict)을 반환. 실패해도 예외를 던지지 않고 error에 남김
+## @brief 프로필 하나로 세션을 끝까지 진행하고 기록 한 줄(dict)을 반환. 실패해도 예외를 던지지 않고 error에 남김
 # - 입력은 stage로 정함: 문항이 있는 단계(diagnose·check·explain)는 답, 나머지(remediate·decide·return)는 계속
 # - 보충 화면을 받은 개념은 학습자가 "알게 됨"으로 바꾼 뒤 그 화면의 확인 문항에 답함
 # - subject·cross_subject: 대상 과목과, 깊이 3 안 선수 개념 중 다른 과목 개념 목록(과목 경계 빈틈 recall을 따로 내기 위함)
@@ -107,7 +108,7 @@ def run_profile(profile: Profile, api, learner: Learner, concept_map: ConceptMap
     return record
 
 
-# 역할: 진단 문항 상한이 없을 때 엔진이 같은 판정으로 빈틈을 찾게 되는 개념 집합
+## @brief 진단 문항 상한이 없을 때 엔진이 같은 판정으로 빈틈을 찾게 되는 개념 집합
 # - 엔진(_next_probe·_diagnose)과 같은 규칙: 직접 선수 개념(깊이 1)부터 내려가고, 빈틈 판정이면서 깊이가 MAX_DEPTH 미만일 때만
 #   그 개념의 선수 개념으로 더 내려감. 진단 문항이 없는 개념은 판정하지 않고 내려가지도 않음
 # - 상한이 없으면 묻는 순서는 찾는 집합을 바꾸지 않음. 너비 우선으로 돌아 개념마다 가장 얕은 깊이로 판단함
@@ -128,7 +129,7 @@ def _uncapped_gaps(target: str, is_gap, concept_map: ConceptMap, diagnosable: se
     return found
 
 
-# 역할: 기록 한 줄의 M1·M2 값과 실패 사례 이유를 계산(진단 결과 화면을 받지 못했으면 M1은 None)
+## @brief 기록 한 줄의 M1·M2 값과 실패 사례 이유를 계산(진단 결과 화면을 받지 못했으면 M1은 None)
 # - 놓친 빈틈 이유
 #   - no_items: 진단 문항이 없어 확인하지 못함
 #   - answered_correct·guessed: 진단 문항을 맞힘(guessed는 학습자가 찍어서 맞힘)
@@ -174,14 +175,14 @@ def _session_metrics(record: dict, profile: Profile, truth: set[str], concept_ma
             'miss_reasons': dict(misses), 'false_gap_reasons': dict(false_gaps)}
 
 
-# 역할: 기록 목록을 기본 프로필(consistent)과 어긋난 프로필(inconsistent) 묶음으로 나눠 M1·M2를 집계
+## @brief 기록 목록을 기본 프로필(consistent)과 어긋난 프로필(inconsistent) 묶음으로 나눠 M1·M2를 집계
 # - 어긋난 묶음은 엔진 가정을 일부러 어긴 것이라 M1 목표(≥0.8) 판정에 섞지 않음(Review Focus 1)
 def summarize(results: list[dict]) -> dict:
     return {'consistent': _group([r for r in results if r.get('consistent', True)]),
             'inconsistent': _group([r for r in results if not r.get('consistent', True)])}
 
 
-# 역할: 한 묶음의 집계
+## @brief 한 묶음의 집계
 # - M1: 세션별 recall·precision 평균과 분포, 문항 상한(ceiling) 대비 비율(Review Focus 2), 엔진 오라클 recall
 # - M2: 과잉 보충률 = 모든 세션의 (이미 아는데 보충한 개념 수) / (보충한 개념 수). 대상 개념 포함·제외 두 값과 Wilson 95% 구간
 # - 놓친 빈틈: 이유별 개수(miss_reasons)와 상한·찍기·나머지 묶음(miss_causes, MISS_CAUSES)
@@ -236,7 +237,7 @@ def _group(records: list[dict]) -> dict:
     return summary
 
 
-# 역할: 세션 묶음의 빈틈을 하나씩 세어 합산한 recall·precision과 Wilson 95% 구간(pairs: (찾은 빈틈, 정답 빈틈) 집합 쌍)
+## @brief 세션 묶음의 빈틈을 하나씩 세어 합산한 recall·precision과 Wilson 95% 구간(pairs: (찾은 빈틈, 정답 빈틈) 집합 쌍)
 # - 세션 평균(recall_mean)은 빈틈이 적은 세션도 같은 무게라, 빈틈 개수 기준 비율과 그 불확실성을 함께 보고하기 위함
 # - 과목 경계 빈틈은 세션마다 0~2개로 적어 세션 평균보다 빈틈 단위 합산이 해석하기 쉬움
 def _pooled(pairs) -> dict:
@@ -252,7 +253,7 @@ def _pooled(pairs) -> dict:
     return result
 
 
-# 역할: 명령행 인자를 읽어 실행하고 기록(JSONL)·요약(JSON)을 씀
+## @brief 명령행 인자를 읽어 실행하고 기록(JSONL)·요약(JSON)을 씀
 # - --out이 ai-core/outputs/eval/sim/ 밖이거나 이미 있으면 API·모델을 부르기 전에 종료(결과 원본 보호, Git 유입 방지)
 # - 기록은 세션이 끝날 때마다 한 줄씩 써서 중간에 멈춰도 끝난 세션은 남음
 def main(argv=None):

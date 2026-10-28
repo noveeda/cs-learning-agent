@@ -1,4 +1,5 @@
-# 파일 역할: 묶음 3(힙·우선순위 큐·기초 정렬·병합 정렬·퀵 정렬) 문항의 구성을 검사하고, 단답 정답을 힙 연산·정렬을 실제로 돌려 독립 계산해 대조
+## @file
+# @brief 묶음 3(힙·우선순위 큐·기초 정렬·병합 정렬·퀵 정렬) 문항의 구성을 검사하고, 단답 정답을 힙 연산·정렬을 실제로 돌려 독립 계산해 대조
 import heapq
 import math
 import unittest
@@ -12,7 +13,7 @@ SCOPE = {'heap', 'priority-queue', 'sorting-basics', 'merge-sort', 'quick-sort'}
 EXTREME_WORDS = ('항상', '반드시', '절대', '전혀', '무조건')
 
 
-# 역할: 완전 이진 트리를 위층부터 왼쪽부터 채우며 {인덱스: [자식 인덱스…]}를 만듦; 부모·자식 공식을 쓰지 않고 배치 규칙만으로 위치를 구하기 위함
+## @brief 완전 이진 트리를 위층부터 왼쪽부터 채우며 {인덱스: [자식 인덱스…]}를 만듦; 부모·자식 공식을 쓰지 않고 배치 규칙만으로 위치를 구하기 위함
 def layout(n):
     children, waiting, nxt = {i: [] for i in range(n)}, deque([0]), 1
     while nxt < n:
@@ -25,7 +26,7 @@ def layout(n):
     return children
 
 
-# 역할: 최소 힙 위로 재정렬; 부모와 비교한 횟수를 반환
+## @brief 최소 힙 위로 재정렬; 부모와 비교한 횟수를 반환
 def sift_up(heap, i):
     compared = 0
     while i > 0:
@@ -38,7 +39,7 @@ def sift_up(heap, i):
     return compared
 
 
-# 역할: 최소 힙 아래로 재정렬; 두 자식 중 작은 쪽과 바꾸며 내려감
+## @brief 최소 힙 아래로 재정렬; 두 자식 중 작은 쪽과 바꾸며 내려감
 def sift_down(heap, i):
     while 2 * i + 1 < len(heap):
         child = 2 * i + 1
@@ -50,7 +51,7 @@ def sift_down(heap, i):
         i = child
 
 
-# 역할: 선택 정렬을 steps단계만 진행; 같은 값이면 먼저 찾은 원소를 최솟값으로 둠(strict <)
+## @brief 선택 정렬을 steps단계만 진행; 같은 값이면 먼저 찾은 원소를 최솟값으로 둠(strict <)
 def selection(values, steps=None, key=lambda v: v):
     values = list(values)
     for i in range(len(values) - 1 if steps is None else steps):
@@ -62,7 +63,7 @@ def selection(values, steps=None, key=lambda v: v):
     return values
 
 
-# 역할: 삽입 정렬로 인덱스 1..steps의 원소를 차례로 앞쪽 정렬된 부분에 끼워 넣음
+## @brief 삽입 정렬로 인덱스 1..steps의 원소를 차례로 앞쪽 정렬된 부분에 끼워 넣음
 def insertion(values, steps):
     values = list(values)
     for i in range(1, steps + 1):
@@ -73,7 +74,7 @@ def insertion(values, steps):
     return values
 
 
-# 역할: 정렬된 두 배열을 병합하고 비교 횟수를 함께 반환
+## @brief 정렬된 두 배열을 병합하고 비교 횟수를 함께 반환
 def merge(left, right):
     merged, i, j, compared = [], 0, 0, 0
     while i < len(left) and j < len(right):
@@ -94,7 +95,7 @@ def merge_sort(values):
     return merge(merge_sort(values[:mid]), merge_sort(values[mid:]))[0]
 
 
-# 역할: 로무토 분할(마지막 원소가 피벗, 피벗보다 작은 원소를 앞 구역으로 모음); 피벗 위치와 비교 횟수 반환
+## @brief 로무토 분할(마지막 원소가 피벗, 피벗보다 작은 원소를 앞 구역으로 모음); 피벗 위치와 비교 횟수 반환
 def lomuto(values, lo, hi):
     pivot, boundary = values[hi], lo
     for j in range(lo, hi):
@@ -105,7 +106,7 @@ def lomuto(values, lo, hi):
     return boundary, hi - lo
 
 
-# 역할: 퀵 정렬을 끝까지 수행하며 쓰인 피벗(왼쪽 부분 먼저)과 비교 횟수 합을 기록
+## @brief 퀵 정렬을 끝까지 수행하며 쓰인 피벗(왼쪽 부분 먼저)과 비교 횟수 합을 기록
 def quick_sort(values, lo=0, hi=None, log=None):
     hi = len(values) - 1 if hi is None else hi
     log = log if log is not None else {'pivots': [], 'compared': 0}
@@ -122,7 +123,7 @@ def join(values):
     return ','.join(str(v) for v in values)
 
 
-# 역할: 문항 ID → 정답 키와 별도로 계산한 기대 답
+## @brief 문항 ID → 정답 키와 별도로 계산한 기대 답
 def expected_answers(items):
     tree = layout(16)
     parent_of_4 = next(p for p, cs in tree.items() if 4 in cs)

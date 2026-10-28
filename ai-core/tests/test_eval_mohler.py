@@ -1,4 +1,5 @@
-# 파일 역할: Mohler 개발 검증 도구(eval/mohler.py)가 문항 단위로 분할하고, 통과 기준을 dev 분할에서만 고르며,
+## @file
+# @brief Mohler 개발 검증 도구(eval/mohler.py)가 문항 단위로 분할하고, 통과 기준을 dev 분할에서만 고르며,
 #            거짓 통과율·구간을 바르게 내고, 중단 뒤 채점을 이어 하는지 검증(모델 서버 없이 가짜 Gateway 사용)
 import json
 import tempfile
@@ -15,7 +16,7 @@ def row(question, n, score, grader_1=None, grader_2=None):
             'score_grader_2': score if grader_2 is None else grader_2, 'score_avg': score}
 
 
-# 역할: 답마다 정해 둔 met 목록을 돌려주는 가짜 Gateway; 채점한 답 문장을 calls에 남김
+## @brief 답마다 정해 둔 met 목록을 돌려주는 가짜 Gateway; 채점한 답 문장을 calls에 남김
 class FakeGateway:
     def __init__(self, met_by_answer=None):
         self.met_by_answer, self.calls = met_by_answer or {}, []
@@ -81,7 +82,7 @@ class SplitTest(unittest.TestCase):
                 self.assertEqual(len({q in dev for q in group}), 1, (seed, group))
 
 
-# 역할: 평가 시험용 데이터; dev 문항 2개·report 문항 2개, 답마다 사람 점수와 AI 충족 목록을 둠
+## @brief 평가 시험용 데이터; dev 문항 2개·report 문항 2개, 답마다 사람 점수와 AI 충족 목록을 둠
 def evaluation_data(report_cases):
     dev_cases = [  # (사람 점수, AI met) — 사람 기준 4.0에서 임계값 0.5만 완전 일치(kappa 1)가 되게 구성
         (5.0, [True, False]), (4.5, [True, False]), (2.0, [False, False]), (1.0, [False, False]),

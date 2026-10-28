@@ -1,4 +1,5 @@
-# 파일 역할: 평가 공통 지표(kappa, Wilson 구간, 가중 kappa, recall·precision)가 알려진 값과 같고, 경계 입력을 정해 둔 규칙대로 처리하는지 검증
+## @file
+# @brief 평가 공통 지표(kappa, Wilson 구간, 가중 kappa, recall·precision)가 알려진 값과 같고, 경계 입력을 정해 둔 규칙대로 처리하는지 검증
 # - Task 3(Mohler)·4(한국어 채점)·5(품질 하한)·2(M1·M2)가 같은 함수를 쓰므로, 경계 규칙이 바뀌면 여기서 먼저 깨지게 함
 import random
 import unittest
