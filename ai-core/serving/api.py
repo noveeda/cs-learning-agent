@@ -1,4 +1,5 @@
-# 파일 역할: FastAPI로 채팅 스트림·도식 파일·커리큘럼 단계·개념 지도·막힘 세션 단계를 제공하는 로컬 전용 AI 서비스
+## @file
+# @brief FastAPI로 채팅 스트림·도식 파일·커리큘럼 단계·개념 지도·막힘 세션 단계를 제공하는 로컬 전용 AI 서비스
 """Local web bridge for the diagram agent (no authentication; bind to loopback)."""
 import json
 import logging
@@ -30,13 +31,13 @@ OUTPUT_DIR = Path(__file__).resolve().parents[1] / 'outputs' / 'diagrams'
 BUSY = threading.Lock()
 
 
-# 역할: 대화 문맥에 다시 전달할 도식 ID와 그래프 구조
+## @brief 대화 문맥에 다시 전달할 도식 ID와 그래프 구조
 class DiagramArtifact(BaseModel):
     artifact_id: str = Field(pattern=r'^[0-9a-f]{32}$')
     diagram: Diagram
 
 
-# 역할: 대화 문맥에 다시 전달할 애니메이션 ID와 장면 요청. 프레임은 요청에서 다시 계산되므로 받지 않음
+## @brief 대화 문맥에 다시 전달할 애니메이션 ID와 장면 요청. 프레임은 요청에서 다시 계산되므로 받지 않음
 class AnimationArtifact(BaseModel):
     artifact_id: str = Field(pattern=r'^[0-9a-f]{32}$')
     kind: Literal['animation']
@@ -48,20 +49,20 @@ class AnimationArtifact(BaseModel):
 Artifact = DiagramArtifact | AnimationArtifact
 
 
-# 역할: 완료 이력으로 전달되는 문답 한 항목
+## @brief 완료 이력으로 전달되는 문답 한 항목
 class Turn(BaseModel):
     role: str = Field(pattern='^(user|assistant)$')
     content: str = Field(min_length=1)
     artifacts: list[Artifact] = Field(default_factory=list)
 
 
-# 역할: 최신 질문·완료 이력·활성 도식(또는 애니메이션)을 묶는 요청 계약
+## @brief 최신 질문·완료 이력·활성 도식(또는 애니메이션)을 묶는 요청 계약
 class Question(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     history: list[Turn] = Field(default_factory=list)
     active_artifact: Artifact | None = None
 
-    # 역할: 공백만 있는 질문을 거부해 의미 없는 모델 요청 방지
+    ## @brief 공백만 있는 질문을 거부해 의미 없는 모델 요청 방지
     @model_validator(mode='after')
     def validate_size(self):
         if not self.question.strip():
@@ -69,13 +70,13 @@ class Question(BaseModel):
         return self
 
 
-# 역할: AI core HTTP 서버의 응답 여부 확인; 모델 추론 성공 여부와는 별개
+## @brief AI core HTTP 서버의 응답 여부 확인; 모델 추론 성공 여부와는 별개
 @app.get('/health')
 def health():
     return {'status': 'ok'}
 
 
-# 역할: 그래프 규칙 검증을 통과한 개념 지도(모든 과목을 합친 지도)와 막힘 지원 개념 목록 반환; 진단 엔진과 로드맵 화면이 같은 지도를 쓰게 함
+## @brief 그래프 규칙 검증을 통과한 개념 지도(모든 과목을 합친 지도)와 막힘 지원 개념 목록 반환; 진단 엔진과 로드맵 화면이 같은 지도를 쓰게 함
 # - subjects: 지도에 든 과목 목록 [{id, title}], 개념마다 subject(과목 ID)가 붙어 화면이 과목을 구분함
 # - stuck_supported: 확인(check)·서술(explanation) 문항이 모두 있어 엔진이 이해 확인까지 할 수 있는 개념 ID(지도 순서)
 # - 화면이 목록을 따로 들고 있지 않고 문항 은행에서 계산하므로, 문항 묶음이 추가되면 [막혔어요]도 자동으로 따라옴
@@ -93,13 +94,13 @@ def concept_map():
     return {**concept_map.model_dump(), 'stuck_supported': supported}
 
 
-# 역할: 막힘 세션 단계 요청; state가 없으면 시작 입력으로 새 세션을 만듦
+## @brief 막힘 세션 단계 요청; state가 없으면 시작 입력으로 새 세션을 만듦
 class StuckRequest(BaseModel):
     state: StuckState | None = None
     input: StepInput
 
 
-# 역할: 막힘 세션을 한 단계 진행한 새 상태 반환; 저장·버전 관리는 호출한 Spring이 담당
+## @brief 막힘 세션을 한 단계 진행한 새 상태 반환; 저장·버전 관리는 호출한 Spring이 담당
 # - LLM이 필요한 단계는 채팅·커리큘럼과 같은 모델 잠금(BUSY)을 그 호출 동안만 잡음; 바쁘거나 모델이 실패하면 503, 상태는 바뀌지 않음
 # - 현재 단계와 맞지 않는 입력(오래된 화면의 답 등)은 409로 거부해 상태가 꼬이지 않게 함
 @app.post('/stuck/step', response_model=StuckState)
@@ -117,10 +118,10 @@ def stuck_session_step(body: StuckRequest):
 TOOL_ERROR_MESSAGES = {'create_diagram': '도식 입력을 수정하고 있습니다.', 'show_animation': '애니메이션 입력을 수정하고 있습니다.'}
 
 
-# 역할: 질문을 받아 에이전트 이벤트를 NDJSON 스트림으로 반환
+## @brief 질문을 받아 에이전트 이벤트를 NDJSON 스트림으로 반환
 @app.post('/chat')
 def chat(body: Question):
-    # 역할: 모델 접근 잠금을 획득하고 이벤트를 외부 공개 형태로 변환; 실패·종료 시 잠금 해제
+    ## @brief 모델 접근 잠금을 획득하고 이벤트를 외부 공개 형태로 변환; 실패·종료 시 잠금 해제
     def events():
         if not BUSY.acquire(blocking=False):
             yield json.dumps({'type': 'error', 'message': '다른 질문을 처리 중입니다. 잠시 후 다시 시도해 주세요.'}, ensure_ascii=False) + '\n'
@@ -158,7 +159,7 @@ def chat(body: Question):
                              headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
 
 
-# 역할: 검증된 도식 ID의 SVG를 제한된 브라우저 실행 정책과 함께 반환
+## @brief 검증된 도식 ID의 SVG를 제한된 브라우저 실행 정책과 함께 반환
 @app.get('/artifacts/{artifact_id}')
 def artifact(artifact_id: str):
     if not re.fullmatch(r'[0-9a-f]{32}', artifact_id):
@@ -172,7 +173,7 @@ def artifact(artifact_id: str):
     })
 
 
-# 역할: 채팅과 같은 모델 잠금을 사용해 저장 상태의 커리큘럼 한 단계만 실행
+## @brief 채팅과 같은 모델 잠금을 사용해 저장 상태의 커리큘럼 한 단계만 실행
 @app.post('/curriculum/step', response_model=JobState)
 def curriculum_step(body: JobState):
     if not BUSY.acquire(blocking=False):

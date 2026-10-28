@@ -1,4 +1,5 @@
-# 파일 역할: 막힘 흐름의 LLM 역할 5가지(개념 특정·보충 설명·장면 선택·서술 채점·복귀 요약)를 vLLM(OpenAI 호환) 모델에 연결
+## @file
+# @brief 막힘 흐름의 LLM 역할 5가지(개념 특정·보충 설명·장면 선택·서술 채점·복귀 요약)를 vLLM(OpenAI 호환) 모델에 연결
 # - stuck.py의 Gateway 계약을 구현하고, 모든 모델 오류를 LLMUnavailable(→ API 503, 상태 불변)로 바꿈
 # - 역할별 모델·샘플링·추론·분량·시간 설정은 ROLE_SETTINGS 한곳에서 관리
 """vLLM-backed Gateway for the stuck-session flow."""
@@ -16,7 +17,7 @@ from serving.item_bank import Item
 from serving.stuck import Entry, LLMUnavailable, StuckState
 
 
-# 역할: LLM 역할 하나의 호출 설정
+## @brief LLM 역할 하나의 호출 설정
 # - model: None이면 VLLM_MODEL 환경변수, 그것도 없으면 서버가 서빙 중인 첫 모델
 # - top_p·top_k: None이면 보내지 않음(서버 기본값); top_k는 OpenAI 표준 인자가 아니라 vLLM 확장 인자로 extra_body에 넣음
 # - thinking: chat template의 추론 모드(enable_thinking) 사용 여부
@@ -111,7 +112,7 @@ EXPLAIN_APPROACHES = {
 }
 
 
-# 역할: 기본 모델 클라이언트; 재시도는 이 모듈이 시도 횟수 표에 따라 직접 하므로 SDK 자동 재시도는 끔
+## @brief 기본 모델 클라이언트; 재시도는 이 모듈이 시도 횟수 표에 따라 직접 하므로 SDK 자동 재시도는 끔
 def _default_client():
     return OpenAI(base_url=os.getenv('VLLM_BASE_URL', 'http://127.0.0.1:8000/v1'),
                   api_key=os.getenv('VLLM_API_KEY', 'not-needed'), max_retries=0)
@@ -121,7 +122,7 @@ def _schema(name, schema):
     return {'type': 'json_schema', 'json_schema': {'name': name, 'strict': True, 'schema': schema}}
 
 
-# 역할: 막힘 흐름 Gateway의 vLLM 구현; 요청 한 건(단계 하나)마다 새로 만들어 씀
+## @brief 막힘 흐름 Gateway의 vLLM 구현; 요청 한 건(단계 하나)마다 새로 만들어 씀
 # - lock: 채팅·커리큘럼과 같은 모델 잠금; GPU 모델 하나에 요청이 겹치지 않게 하고, 바쁘면 기다리지 않고 503으로 돌려줌
 # - 잠금은 실제 모델을 부를 때만 잡음: 진단 문항 답처럼 LLM이 필요 없는 단계는 채팅 중에도 진행되게 하기 위함
 class StuckModelGateway:
@@ -131,7 +132,7 @@ class StuckModelGateway:
     def _title(self, concept_id):
         return next((c.title for c in self.concept_map.concepts if c.id == concept_id), concept_id)
 
-    # 역할: 역할 설정대로 모델을 한 번 호출하고 parse로 검증한 결과를 반환
+    ## @brief 역할 설정대로 모델을 한 번 호출하고 parse로 검증한 결과를 반환
     # - 연결 실패·시간 초과·잘린 출력·형식 오류는 시도 횟수 안에서 다시 시도하고, 끝내 실패하면 LLMUnavailable
     # - 실패 원인은 로그에만 남기고 학습자에게는 재시도 안내만 보여 줌
     def _call(self, role, user, parse, response_format=None):
@@ -171,7 +172,7 @@ class StuckModelGateway:
         finally:
             self.lock.release()
 
-    # 역할: S2 개념 특정; 발췌를 지도의 개념 ID 하나로 연결하고, 맞는 개념이 없으면 None(범위 밖)
+    ## @brief S2 개념 특정; 발췌를 지도의 개념 ID 하나로 연결하고, 맞는 개념이 없으면 None(범위 밖)
     # - 선택지를 지도 ID와 "none"으로 묶어 지도에 없는 ID를 만들지 못하게 함
     # - MVP 지원 여부(문항 은행 유무)는 여기서 거르지 않고 엔진이 판단: 지원 밖 개념을 가까운 지원 개념으로 잘못 고르지 않게 하기 위함
     def identify(self, excerpt: str, concept_map: ConceptMap) -> str | None:
@@ -189,7 +190,7 @@ class StuckModelGateway:
                 'excerpt': excerpt}
         return self._call('identify', user, parse, _schema('identify', schema))
 
-    # 역할: S4 보충 설명; 개념의 학습 목표·선수 개념과 학습자가 원래 막힌 맥락을 주고 마크다운 설명을 받음
+    ## @brief S4 보충 설명; 개념의 학습 목표·선수 개념과 학습자가 원래 막힌 맥락을 주고 마크다운 설명을 받음
     # - scene: 같은 화면에 보일 장면 요약(요청 + 코드가 계산한 단계 캡션 steps). 있으면 그대로 넘겨 글 예시를 장면과 맞추게 함
     #   프레임(상자 좌표)은 넘기지 않음: 글에는 캡션으로 충분하고 입력 토큰을 늘리지 않기 위함
     # - 확인·서술 문항과 정답은 넘기지 않음: 설명이 곧 정답 풀이가 되거나 정답 키가 새지 않게 하기 위함
@@ -202,7 +203,7 @@ class StuckModelGateway:
             user['scene'] = scene
         return self._call('explain', user, lambda content: content)
 
-    # 역할: S4 장면 선택; 개념 설명·학습 목표·막힌 맥락·허용 종류의 형식 예시를 주고 kinds 안의 장면 요청 하나를 받음
+    ## @brief S4 장면 선택; 개념 설명·학습 목표·막힌 맥락·허용 종류의 형식 예시를 주고 kinds 안의 장면 요청 하나를 받음
     # - 응답 schema를 kinds에 든 요청 타입으로 묶어(가이드 디코딩) 허용 밖 장면·잘못된 필드를 형식 단계에서 막고, 응답 후에도 다시 검증
     # - 개념별 제한표(CONCEPT_SCENE_LIMITS, 예: merge-sort는 algorithm merge만)를 schema·형식 예시·응답 검증에 함께 적용
     # - schema에 null은 없지만 응답이 null이면(가이드 디코딩이 꺼진 서버 등) None을 돌려 엔진이 텍스트만 보여 주게 함
@@ -225,7 +226,7 @@ class StuckModelGateway:
                 'scenes': list(kinds), 'formats': scene_formats(kinds, limits)}
         return self._call('animate', user, parse, _schema('animate', scene_schema(kinds, limits)))
 
-    # 역할: S5·S6 서술 채점; 루브릭 항목마다 충족 여부를 같은 순서의 list[bool]로 반환
+    ## @brief S5·S6 서술 채점; 루브릭 항목마다 충족 여부를 같은 순서의 list[bool]로 반환
     # - criteria 배열 길이를 루브릭 항목 수로 고정(minItems·maxItems)해 항목 누락·추가를 형식 단계에서 막고, 응답 후에도 다시 확인
     # - evidence는 200자 이내: 답안을 길게 옮겨 적다 출력 상한에 걸리지 않게 하기 위함
     # - 모범 근거(rationale)는 채점 정확도를 위해 모델에만 넘김; 응답·세션 상태에는 담지 않음
@@ -249,7 +250,7 @@ class StuckModelGateway:
         user = {'question': item.question, 'reference': item.rationale, 'rubric': rubric, 'answer': answer}
         return self._call('grade_explanation', user, parse, _schema('grade', schema))
 
-    # 역할: S7 복귀 요약; 보충한 개념별 결과와 원래 막힌 지점을 주고 연결 요약을 받음
+    ## @brief S7 복귀 요약; 보충한 개념별 결과와 원래 막힌 지점을 주고 연결 요약을 받음
     def summarize(self, state: StuckState, concept_map: ConceptMap) -> str:
         user = {'stuck_at': ({'concept': self._title(state.target)} if state.entry.kind == 'roadmap'
                              else {'concept': self._title(state.target), 'excerpt': state.entry.excerpt}),

@@ -1,4 +1,5 @@
-# 파일 역할: 완료된 문답과 도식·애니메이션을 모델 메시지로 바꾸고 실제 입력 토큰 예산에 맞춰 최근 대화 선택
+## @file
+# @brief 완료된 문답과 도식·애니메이션을 모델 메시지로 바꾸고 실제 입력 토큰 예산에 맞춰 최근 대화 선택
 """Fit complete recent exchanges to the actual vLLM chat-template token budget."""
 import json
 
@@ -10,7 +11,7 @@ from serving.tools.diagram import TOOL
 TOOLS = [TOOL, ANIMATION_TOOL]
 
 
-# 역할: 저장된 artifact를 모델에 다시 보여 줄 최소 데이터로 바꿈
+## @brief 저장된 artifact를 모델에 다시 보여 줄 최소 데이터로 바꿈
 # - 애니메이션은 프레임 전체 대신 장면 요청만 넘김. 프레임은 요청에서 다시 계산되고 문맥 토큰만 차지하기 때문
 # - 도식은 지금처럼 그래프 구조를 넘겨 수정 요청에 쓰게 함
 def artifact_data(artifact):
@@ -19,7 +20,7 @@ def artifact_data(artifact):
     return {'artifact_id': artifact['artifact_id'], 'diagram': artifact['diagram']}
 
 
-# 역할: 문답에 생성 도식·애니메이션 데이터를 붙이고 user/assistant 쌍 순서를 검증
+## @brief 문답에 생성 도식·애니메이션 데이터를 붙이고 user/assistant 쌍 순서를 검증
 def history_messages(history):
     messages = []
     for turn in history:
@@ -34,10 +35,10 @@ def history_messages(history):
     return messages
 
 
-# 역할: 현재 질문·도구 결과를 보존하면서 예산에 맞는 가장 긴 최근 문답 구간 반환
+## @brief 현재 질문·도구 결과를 보존하면서 예산에 맞는 가장 긴 최근 문답 구간 반환
 def fit_context(system, history, current, count_tokens, input_budget):
     # Keep the current request/tool loop intact; remove only whole oldest exchanges.
-    # 역할: 오래된 문답 쌍을 start개 제외한 후보 메시지 구성
+    ## @brief 오래된 문답 쌍을 start개 제외한 후보 메시지 구성
     def build(start):
         return [system, *history[start * 2:], *current]
 
@@ -56,9 +57,9 @@ def fit_context(system, history, current, count_tokens, input_budget):
     return messages, low * 2, count_tokens(messages)
 
 
-# 역할: 실제 모델 서버의 채팅 템플릿으로 토큰 수를 계산하는 함수 생성
+## @brief 실제 모델 서버의 채팅 템플릿으로 토큰 수를 계산하는 함수 생성
 def token_counter(http, model):
-    # 역할: 도구 스키마까지 포함해 /tokenize에 전달하고 입력 토큰 수 반환
+    ## @brief 도구 스키마까지 포함해 /tokenize에 전달하고 입력 토큰 수 반환
     def count(messages):
         response = http.post('/tokenize', json={
             'model': model, 'messages': messages, 'tools': TOOLS,
