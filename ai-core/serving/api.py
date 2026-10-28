@@ -17,6 +17,9 @@ from openai import OpenAI
 from pydantic import BaseModel, Field, model_validator
 
 from serving.concept_map import load_concept_map
+from serving.harness_chat import build_retriever, chat_events, harness_enabled
+from serving.harness_llm import HarnessGateway
+from serving.harness_log import HarnessLog
 from serving.curriculum import JobState, ModelGateway, step
 from serving.item_bank import load_item_bank
 from serving.stuck import LLMUnavailable, StepInput, StuckState, step as stuck_step
@@ -44,9 +47,38 @@ class AnimationArtifact(BaseModel):
     request: AnimationRequest
 
 
-# Spring은 artifact 이벤트를 그대로 저장해 이력·활성 artifact로 돌려보내므로 두 종류를 모두 받음
-# - kind가 없으면 도식, kind='animation'이면 애니메이션. 저장 이벤트의 나머지 필드(url, frames 등)는 무시
-Artifact = DiagramArtifact | AnimationArtifact
+## @brief 근거 검사 하네스 답의 근거 기록(개념·문단 ID·검증 문장). 후속 질문이 이어받으며 문단 원문은 담지 않음
+class GroundingData(BaseModel):
+    concepts: list[str]
+    passage_ids: list[str]
+    verified: list[str]
+
+
+class GroundingArtifact(BaseModel):
+    artifact_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    kind: Literal['grounding']
+    grounding: GroundingData
+
+
+## @brief 하네스 답에 붙은 교재 그림의 화면 정보(제목·원문 캡션·출처)
+class FigureInfo(BaseModel):
+    title: str
+    caption: str
+    source: str
+
+
+class FigureArtifact(BaseModel):
+    artifact_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    kind: Literal['figure']
+    figure: FigureInfo
+
+
+# Spring은 artifact 이벤트를 그대로 저장해 이력·활성 artifact로 돌려보내므로 모든 종류를 받음
+# - kind가 없으면 도식, 'animation'은 애니메이션, 'grounding'·'figure'는 하네스 답(CS_HARNESS=1)의 근거 기록·교재 그림
+# - 저장 이벤트의 나머지 필드(url, frames 등)는 무시
+Artifact = DiagramArtifact | AnimationArtifact | GroundingArtifact | FigureArtifact
+# 스위치가 꺼진 에이전트에 넘기지 않는 종류: 모델이 다시 그리거나 고칠 수 있는 데이터가 아님
+MODEL_HIDDEN_KINDS = ('grounding', 'figure')
 
 
 ## @brief 완료 이력으로 전달되는 문답 한 항목
@@ -118,16 +150,27 @@ def stuck_session_step(body: StuckRequest):
 TOOL_ERROR_MESSAGES = {'create_diagram': '도식 입력을 수정하고 있습니다.', 'show_animation': '애니메이션 입력을 수정하고 있습니다.'}
 
 
-## @brief 질문을 받아 에이전트 이벤트를 NDJSON 스트림으로 반환
+## @brief 질문을 받아 에이전트(또는 CS_HARNESS=1이면 근거 검사 하네스) 이벤트를 NDJSON 스트림으로 반환
 @app.post('/chat')
 def chat(body: Question):
     ## @brief 모델 접근 잠금을 획득하고 이벤트를 외부 공개 형태로 변환; 실패·종료 시 잠금 해제
+    # - 하네스 경로도 요청 전체 동안 BUSY를 잡음: 두 번째 채팅·막힘·커리큘럼 요청은 지금처럼 바로 거절됨
+    #   - 하네스 게이트웨이는 모델 호출마다 받은 잠금을 blocking=False로 잡으므로, BUSY를 주면 이미 잡힌 잠금이라 모든 호출이 실패함
+    #   - 그래서 게이트웨이에는 이 요청만 쓰는 새 잠금을 줌. 한 요청 안의 호출은 차례로 일어나 이 잠금이 겹치지 않음
     def events():
         if not BUSY.acquire(blocking=False):
             yield json.dumps({'type': 'error', 'message': '다른 질문을 처리 중입니다. 잠시 후 다시 시도해 주세요.'}, ensure_ascii=False) + '\n'
             return
         try:
             yield json.dumps({'type': 'started'}) + '\n'
+            if harness_enabled():
+                concept_map = load_concept_map()
+                for event in chat_events(body.question, [turn.model_dump() for turn in body.history],
+                                         HarnessGateway(concept_map, threading.Lock()), build_retriever(), concept_map,
+                                         HarnessLog(), OUTPUT_DIR):
+                    yield json.dumps(event, ensure_ascii=False) + '\n'
+                return
+            active = body.active_artifact.model_dump() if body.active_artifact else None
             with OpenAI(base_url=os.getenv('VLLM_BASE_URL', 'http://127.0.0.1:8000/v1'),
                         api_key=os.getenv('VLLM_API_KEY', 'not-needed'), timeout=120, max_retries=0) as client:
                 models = client.models.list().data
@@ -137,7 +180,7 @@ def chat(body: Question):
                                   headers={'Authorization': f'Bearer {client.api_key}'}, timeout=30) as http:
                     for event in run_agent(client, model, body.question, OUTPUT_DIR,
                                            history=[turn.model_dump() for turn in body.history],
-                                           active_artifact=body.active_artifact.model_dump() if body.active_artifact else None,
+                                           active_artifact=None if (active or {}).get('kind') in MODEL_HIDDEN_KINDS else active,
                                            count_tokens=token_counter(http, model), context_limit=int(limit)):
                         # 서버 파일 경로와 내부 도구 인자는 웹에 노출하지 않고 공개 URL·진행 상태만 전달
                         # 애니메이션은 SVG 파일이 없으므로 주소를 붙이지 않고 프레임 데이터만 전달
@@ -159,11 +202,15 @@ def chat(body: Question):
                              headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
 
 
-## @brief 검증된 도식 ID의 SVG를 제한된 브라우저 실행 정책과 함께 반환
+## @brief 검증된 ID의 교재 그림 PNG(하네스가 복사해 둔 것) 또는 도식 SVG를 제한된 브라우저 실행 정책과 함께 반환
 @app.get('/artifacts/{artifact_id}')
 def artifact(artifact_id: str):
     if not re.fullmatch(r'[0-9a-f]{32}', artifact_id):
         raise HTTPException(404)
+    png = OUTPUT_DIR / f'{artifact_id}.png'
+    if png.is_file():
+        return FileResponse(png, media_type='image/png', headers={
+            'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff'})
     path = OUTPUT_DIR / f'{artifact_id}.svg'
     if not path.is_file():
         raise HTTPException(404)
