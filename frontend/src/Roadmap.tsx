@@ -1,10 +1,11 @@
 /**
  * @file
- * @brief 개념 지도를 선수 관계 단계(위→아래)로 그리고 과목 구분·필터, 관계 강조·상세 선택·학습 진입 제공
+ * @brief 개념 지도를 선수 관계 단계(위→아래)로 그리고 과목 구분·필터, 탐색·진단 경로 강조·상세 선택·학습 진입 제공
  */
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ArrowUpRight, BookOpen, RotateCcw } from "lucide-react";
 import {
+  diagnosisHighlights,
   filterBySubject,
   layoutConcepts,
   listSubjects,
@@ -12,6 +13,7 @@ import {
   type Concept,
   type LearningStatus,
   type RoadmapState,
+  type RoadmapDiagnosis,
 } from "./roadmap";
 import { StuckButton } from "./StuckPanel";
 
@@ -59,6 +61,7 @@ export function Roadmap({
   onStatusChange,
   onStart,
   stuckSessions,
+  diagnosis,
   onStuck,
 }: {
   concepts: Concept[];
@@ -68,12 +71,17 @@ export function Roadmap({
   onStart: (concept: Concept) => void;
   // 진행 중 막힘 세션(키 roadmap:<개념 ID>); 버튼 문구를 "이어서 풀기"로 바꾸는 데 사용
   stuckSessions: Record<string, string>;
+  diagnosis: RoadmapDiagnosis | null;
   onStuck: (concept: Concept) => void;
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   // 과목 필터("all" 또는 과목 ID); 저장하지 않는 화면 상태라 새로고침하면 전체로 돌아감
   const [subjectFilter, setSubjectFilter] = useState("all");
+  // 새 진단은 과목 경계를 넘을 수 있어 전체 지도로 열고, 이후 사용자의 필터 탐색은 유지
+  useEffect(() => {
+    if (diagnosis) setSubjectFilter("all");
+  }, [diagnosis?.sessionId]);
   const subjects = useMemo(() => listSubjects(concepts), [concepts]);
   // 과목이 둘 이상일 때만 과목 표식·필터를 보여 줌; 자료구조 지도만 있을 때는 기존 화면과 같음
   const multiSubject = subjects.length > 1;
@@ -86,6 +94,7 @@ export function Roadmap({
     () => filterBySubject(concepts, shownSubject),
     [concepts, shownSubject],
   );
+  const highlighted = useMemo(() => diagnosisHighlights(visible, diagnosis), [visible, diagnosis]);
   const { layers, positions } = useMemo(
     () => layoutConcepts(visible),
     [visible],
@@ -153,10 +162,42 @@ export function Roadmap({
   // 강조 선을 나중에 그려 옅은 선 위에 보이게 함(SVG는 나중 요소가 위)
   const isFocusEdge = (edge: { source: string; target: string }) =>
     edge.source === focus.id || edge.target === focus.id;
+  /** @brief 실제 선수 관계 중 진단 경로에 속한 선인지 확인 */
+  const isDiagnosisEdge = (edge: { source: string; target: string }) =>
+    highlighted.edges.has(`${edge.source}:${edge.target}`);
   const orderedEdges = [
-    ...edges.filter((edge) => !isFocusEdge(edge)),
-    ...edges.filter(isFocusEdge),
+    ...edges.filter((edge) => !isFocusEdge(edge) && !isDiagnosisEdge(edge)),
+    ...edges.filter((edge) => isFocusEdge(edge) && !isDiagnosisEdge(edge)),
+    ...edges.filter(isDiagnosisEdge),
   ];
+  /**
+   * @brief 실제 선수 간선의 경로 문자열 생성; 긴 진단선은 중간 칸을 피하는 가장 가까운 세로 여백으로 우회
+   * - 단계 사이의 가로 여백에서만 방향을 바꿔 무관한 개념이 경로에 포함된 것처럼 보이는 상황 방지
+   */
+  function prerequisitePath(edge: { source: string; target: string }, diagnostic: boolean) {
+    const from = origin(edge.source);
+    const to = origin(edge.target);
+    const x1 = from.left + nodeWidth / 2;
+    const y1 = from.top + nodeHeight;
+    const x2 = to.left + nodeWidth / 2;
+    const y2 = to.top;
+    const startLayer = positions[edge.source].layer;
+    const endLayer = positions[edge.target].layer;
+    if (!diagnostic || endLayer - startLayer <= 1) {
+      const bend = (y2 - y1) / 2;
+      return `M ${x1} ${y1} C ${x1} ${y1 + bend} ${x2} ${y2 - bend} ${x2} ${y2}`;
+    }
+    const obstacles = visible
+      .filter(({ id }) => positions[id].layer > startLayer && positions[id].layer < endLayer)
+      .map(({ id }) => origin(id).left);
+    const center = (x1 + x2) / 2;
+    const lanes = [gutter - 8, ...obstacles.flatMap((left) => [left - 4, left + nodeWidth + 4])]
+      .filter((x) => x >= gutter - 8 && x <= width - 4 &&
+        obstacles.every((left) => x <= left - 2 || x >= left + nodeWidth + 2));
+    const lane = lanes.sort((a, b) => Math.abs(a - center) - Math.abs(b - center))[0];
+    const turn = (row - nodeHeight) / 2;
+    return `M ${x1} ${y1} L ${x1} ${y1 + turn} L ${lane} ${y1 + turn} L ${lane} ${y2 - turn} L ${x2} ${y2 - turn} L ${x2} ${y2}`;
+  }
   const successors = successorsOf(selected.id);
 
   return (
@@ -208,6 +249,14 @@ export function Roadmap({
             </span>
           ))}
         </div>
+        {diagnosis && diagnosis.gapIds.length > 0 && (
+          <p className="diagnosis-legend" aria-label="진단 표시 범례">
+            <span className="diagnosis-swatch" aria-hidden="true" />
+            <span>진단에서 찾은 모르는 개념</span>
+            <span className="diagnosis-path-swatch" aria-hidden="true" />
+            <span>막힌 개념까지의 선수 경로</span>
+          </p>
+        )}
         <div className="roadmap-scroll">
           <div
             className="roadmap-canvas"
@@ -236,16 +285,17 @@ export function Roadmap({
                 >
                   <path d="M 0 0 L 8 4 L 0 8 z" />
                 </marker>
+                <marker
+                  id="roadmap-diagnosis-arrow"
+                  viewBox="0 0 8 8" refX="7" refY="4"
+                  markerWidth="6" markerHeight="6" orient="auto"
+                >
+                  <path d="M 0 0 L 8 4 L 0 8 z" />
+                </marker>
               </defs>
               {orderedEdges.map((edge) => {
-                const from = origin(edge.source);
-                const to = origin(edge.target);
-                const x1 = from.left + nodeWidth / 2;
-                const y1 = from.top + nodeHeight;
-                const x2 = to.left + nodeWidth / 2;
-                const y2 = to.top;
-                const bend = (y2 - y1) / 2;
                 const strong = isFocusEdge(edge);
+                const diagnostic = isDiagnosisEdge(edge);
                 return (
                   <path
                     className="prerequisite-edge"
@@ -253,8 +303,9 @@ export function Roadmap({
                     data-source={edge.source}
                     data-target={edge.target}
                     data-emphasis={strong ? "related" : undefined}
-                    markerEnd={strong ? "url(#roadmap-arrow)" : undefined}
-                    d={`M ${x1} ${y1} C ${x1} ${y1 + bend} ${x2} ${y2 - bend} ${x2} ${y2}`}
+                    data-diagnosis={diagnostic || undefined}
+                    markerEnd={diagnostic ? "url(#roadmap-diagnosis-arrow)" : strong ? "url(#roadmap-arrow)" : undefined}
+                    d={prerequisitePath(edge, diagnostic)}
                   />
                 );
               })}
@@ -277,17 +328,22 @@ export function Roadmap({
                   const concept = byId.get(id)!;
                   const currentStatus =
                     state.statuses[concept.id] || "not-started";
+                  const diagnosisStatus = highlighted.gaps.has(id) ? "gap" : highlighted.passed.has(id) ? "passed" : undefined;
+                  const diagnosisLabel = diagnosisStatus === "gap" ? "모름" : diagnosisStatus === "passed" ? "확인 통과" : undefined;
+                  const isTarget = highlighted.target === id;
                   return (
                     <button
                       className={`roadmap-node ${currentStatus}`}
                       key={concept.id}
                       data-concept={concept.id}
+                      data-diagnosis={diagnosisStatus}
+                      data-diagnosis-target={isTarget || undefined}
                       data-subject={multiSubject ? concept.subject : undefined}
                       data-active={activeId === concept.id}
                       data-emphasis={emphasis(concept.id)}
                       {...interaction(concept.id)}
                       aria-pressed={selected.id === concept.id}
-                      aria-label={`${concept.title}${multiSubject ? ` · ${concept.domain}` : ""} · ${statusLabels[currentStatus]}`}
+                      aria-label={`${concept.title}${multiSubject ? ` · ${concept.domain}` : ""} · ${statusLabels[currentStatus]}${diagnosisLabel ? ` · ${diagnosisLabel}` : ""}${isTarget ? " · 막힌 개념" : ""}`}
                       style={origin(concept.id)}
                       onClick={() => {
                         onSelect(concept.id);
@@ -300,9 +356,16 @@ export function Roadmap({
                       }}
                     >
                       <strong>{concept.title}</strong>
-                      {currentStatus !== "not-started" && (
-                        <span className={`status-badge ${currentStatus}`}>
-                          {statusLabels[currentStatus]}
+                      {(currentStatus !== "not-started" || diagnosisLabel || isTarget) && (
+                        <span className="node-statuses">
+                          {currentStatus !== "not-started" && (
+                            <span className={`status-badge ${currentStatus}`}>
+                              {statusLabels[currentStatus]}
+                            </span>
+                          )}
+                          {(diagnosisLabel || isTarget) && (
+                            <span className="diagnosis-label">{diagnosisLabel || "막힌 개념"}</span>
+                          )}
                         </span>
                       )}
                       {/* 모바일 목록에서는 선이 없으므로 선수 개념 이름으로 방향을 보여 줌 */}

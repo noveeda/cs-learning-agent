@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief React 진입점; 개념 지도 로딩·해시 경로·로드맵 상태·개념별 대화 ID·막힘 패널·커리큘럼 화면 연결
+ * @brief React 진입점; 개념 지도 로딩·해시 경로·로드맵 상태·개념별 대화 ID·막힘 패널과 지도 진단 표시·커리큘럼 화면 연결
  */
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -11,10 +11,14 @@ import { ExperimentRunner } from "./ExperimentRunner";
 import { LearningShell } from "./LearningShell";
 import { ConceptMapStatus, Roadmap } from "./Roadmap";
 import { StuckPanel, type StuckRequest } from "./StuckPanel";
-import { entryKey, loadStuckStore, saveStuckStore, type Entry } from "./stuck";
+import { entryKey, loadStuckStore, saveStuckStore, type Entry, type StuckSession } from "./stuck";
 import {
   loadRoadmap,
   saveRoadmap,
+  advanceDiagnosis,
+  loadDiagnosis,
+  saveDiagnosis,
+  type RoadmapDiagnosis,
   type Concept,
   type RoadmapState,
   type LearningStatus,
@@ -66,6 +70,9 @@ function App() {
   });
   // 패널을 열 때마다 올려 key로 사용; 다른 개념의 막힘을 열면 이전 패널 상태를 남기지 않고 새로 만듦
   const [stuckOpening, setStuckOpening] = useState(0);
+  // 닫힌 패널의 늦은 응답이 새 진단 표시를 덮어쓰지 않게 열림 순서를 동기적으로 확인
+  const stuckOpeningRef = useRef(0);
+  const [diagnosis, setDiagnosis] = useState<RoadmapDiagnosis | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -110,6 +117,25 @@ function App() {
       ignore = true;
     };
   }, [mapRequest]);
+
+  // 서버에서 세션을 받은 뒤에만 표시를 저장; 새로고침 때는 같은 세션의 GET 성공 후 복원
+  useEffect(() => {
+    if (!diagnosis) return;
+    try {
+      saveDiagnosis(diagnosis, Object.values(stuckSessions));
+    } catch {
+      setNotice("지도 진단 표시를 저장하지 못했어요. 새로고침하면 표시가 사라질 수 있어요.");
+    }
+  }, [diagnosis, stuckSessions]);
+
+  /** @brief 받은 세션의 진단·통과 정보만 지도에 반영; 저장 진단은 일치하는 세션에서만 복원 */
+  function reflectDiagnosis(next: StuckSession | null, opening: number) {
+    if (stuckOpeningRef.current !== opening) return;
+    setDiagnosis((previous) => advanceDiagnosis(
+      previous?.sessionId === next?.id ? previous : next ? loadDiagnosis(next.id) : null,
+      next,
+    ));
+  }
 
   /** @brief 브라우저 저장 성공 뒤에만 화면 상태 갱신; 저장 실패를 성공처럼 표시하지 않음 */
   function updateRoadmap(next: RoadmapState) {
@@ -163,6 +189,7 @@ function App() {
   const conceptId = concept?.id;
   /** @brief 막힘 패널을 엶; 같은 개념·진입의 진행 중 세션이 있으면 새로 만들지 않고 이어서 엶 */
   function openStuck(key: string, start: StuckRequest) {
+    setDiagnosis(null);
     const store = loadStuckStore();
     const id = store.sessions[key];
     if (id) {
@@ -173,7 +200,7 @@ function App() {
       }
       setStuck({ mode: "resume", key, id });
     } else setStuck(start);
-    setStuckOpening((count) => count + 1);
+    setStuckOpening(++stuckOpeningRef.current);
   }
   /** @brief 개념의 [막혔어요]; 복귀 위치는 버튼을 누른 화면의 해시 경로 */
   function stuckOnConcept(id: string) {
@@ -186,6 +213,8 @@ function App() {
   }
   /** @brief 패널만 닫음; 세션은 진행 중 목록에 남아 다시 열면 이어서 함 */
   function closeStuck() {
+    stuckOpeningRef.current += 1;
+    setDiagnosis(null);
     try {
       saveStuckStore({ ...loadStuckStore(), active: null });
     } catch {
@@ -281,6 +310,7 @@ function App() {
               onStatusChange={updateStatus}
               onStart={startConcept}
               stuckSessions={stuckSessions}
+              diagnosis={diagnosis}
               onStuck={(item) => stuckOnConcept(item.id)}
             />
           ) : (
@@ -324,6 +354,7 @@ function App() {
           onClose={closeStuck}
           onReturn={returnFromStuck}
           onSessionsChange={() => setStuckSessions(loadStuckStore().sessions)}
+          onSessionChange={(next) => reflectDiagnosis(next, stuckOpening)}
         />
       )}
     </LearningShell>

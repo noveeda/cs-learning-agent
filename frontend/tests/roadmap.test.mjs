@@ -1,12 +1,13 @@
 /**
  * @file
- * @brief 개념 지도 응답 해석·선수 관계 단계 배치·손상된 브라우저 저장값 복구를 검증
+ * @brief 개념 지도 응답 해석·선수 관계 단계 배치·진단 경로·통과 상태·손상된 브라우저 저장값 복구를 검증
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { loadConceptMap } from '../src/api.ts';
 import { filterBySubject, layoutConcepts, listSubjects, loadRoadmap, saveRoadmap } from '../src/roadmap.ts';
+import * as roadmap from '../src/roadmap.ts';
 
 // 실제 화면이 받는 것과 같은 검수 완료 지도로 배치를 검증; 데이터가 바뀌어도 규칙 위반을 잡기 위함
 const conceptMap = JSON.parse(readFileSync(new URL('../../ai-core/content/dsa/concept-map.json', import.meta.url)));
@@ -209,4 +210,90 @@ test('ignores the old 9-concept roadmap key without touching it', () => {
 
 test('reports save failures so the screen can explain unsaved progress', () => {
   assert.throws(() => saveRoadmap(emptyState, { setItem() { throw new Error('quota exceeded'); } }), /quota exceeded/);
+});
+
+
+/** @brief 과목 경계를 넘는 실제 선수 간선만 강조하고 무관한 가지·없는 ID는 제외하는지 검증 */
+test('diagnosis highlights only real paths from gaps to the target across subjects', () => {
+  const concept = (id, prerequisites = []) => ({
+    id, title: id, subject: id === 'sjf' ? 'os' : 'dsa', domain: '', description: '',
+    objectives: [], prerequisites: prerequisites.map(id => ({ id, reason: '' })), stuckSupported: true,
+  });
+  const concepts = [
+    concept('heap'), concept('priority-queue', ['heap']), concept('fcfs'),
+    concept('priority-scheduling', ['priority-queue', 'fcfs']),
+    concept('sjf', ['priority-scheduling']), concept('unrelated', ['priority-queue']),
+  ];
+  const highlight = roadmap.diagnosisHighlights(concepts, {
+    sessionId: '0123456789abcdef0123456789abcdef', targetId: 'sjf',
+    gapIds: ['priority-queue', 'removed'], passedIds: [],
+  });
+  assert.deepEqual([...highlight.gaps], ['priority-queue']);
+  assert.equal(highlight.target, 'sjf');
+  assert.deepEqual([...highlight.edges].sort(), [
+    'priority-queue:priority-scheduling', 'priority-scheduling:sjf',
+  ]);
+  // 우선순위 큐의 선수 힙과 무관한 후속 가지는 빈틈→막힌 개념 경로가 아님
+  assert.equal(highlight.edges.has('heap:priority-queue'), false);
+  assert.equal(highlight.edges.has('priority-queue:sjf'), false);
+  const filtered = roadmap.diagnosisHighlights(filterBySubject(concepts, 'os'), {
+    sessionId: '0123456789abcdef0123456789abcdef', targetId: 'sjf',
+    gapIds: ['priority-queue'], passedIds: [],
+  });
+  assert.deepEqual([...filtered.edges], []);
+});
+
+/** @brief 분기했다가 합쳐지는 경로도 모두 남기되 같은 간선을 중복 표시하지 않는지 검증 */
+test('diagnosis highlights every existing branch reaching the target and separates passed gaps', () => {
+  const concepts = [
+    { id: 'gap', prerequisites: [] },
+    { id: 'left', prerequisites: [{ id: 'gap' }] },
+    { id: 'right', prerequisites: [{ id: 'gap' }] },
+    { id: 'target', prerequisites: [{ id: 'left' }, { id: 'right' }] },
+  ];
+  const highlight = roadmap.diagnosisHighlights(concepts, {
+    sessionId: '0123456789abcdef0123456789abcdef', targetId: 'target', gapIds: ['gap'], passedIds: ['gap'],
+  });
+  assert.deepEqual([...highlight.passed], ['gap']);
+  assert.deepEqual([...highlight.gaps], []);
+  assert.deepEqual([...highlight.edges].sort(), ['gap:left', 'gap:right', 'left:target', 'right:target']);
+  const cleared = roadmap.diagnosisHighlights(concepts, null);
+  assert.equal(cleared.target, null);
+  assert.equal(cleared.gaps.size + cleared.passed.size + cleared.edges.size, 0);
+});
+
+/** @brief 진단 이후 단계에서 원래 빈틈을 유지하고 실제 통과·미해결 판정을 지도 상태에 반영하는지 검증 */
+test('diagnosis state keeps gaps through remediation and applies result and summary outcomes', () => {
+  const sessionId = '0123456789abcdef0123456789abcdef';
+  const target = { id: 'sjf', title: 'SJF 스케줄링' };
+  const gap = { id: 'priority-queue', title: '우선순위 큐' };
+  const session = view => ({ id: sessionId, version: 1, stage: 'remediate', entry: { kind: 'roadmap', concept: 'sjf', return_to: '#/roadmap' }, view });
+  const initial = roadmap.advanceDiagnosis(null, session({ kind: 'diagnosis_result', target, gaps: [gap], evidence: [], opted_out: false }));
+  assert.deepEqual(initial, { sessionId, targetId: 'sjf', gapIds: ['priority-queue'], passedIds: [] });
+  assert.deepEqual(roadmap.advanceDiagnosis(initial, session({ kind: 'remediation', concept: gap, attempt: 1, text: '', is_target: false })), initial);
+  const passed = roadmap.advanceDiagnosis(initial, session({ kind: 'result', concept: gap, passed: true }));
+  assert.deepEqual(passed.passedIds, ['priority-queue']);
+  assert.deepEqual(roadmap.advanceDiagnosis(passed, session({ kind: 'result', concept: gap, passed: false })).passedIds, []);
+  assert.deepEqual(roadmap.advanceDiagnosis(passed, session({ kind: 'summary', text: '', return_to: '#/roadmap', results: [{ concept: gap, outcome: 'unresolved', attempts: 2 }] })).passedIds, []);
+  assert.equal(roadmap.advanceDiagnosis(initial, { ...session({ kind: 'next' }), id: 'fedcba9876543210fedcba9876543210' }), null);
+  assert.equal(roadmap.advanceDiagnosis(initial, null), null);
+});
+
+/** @brief 답안·대화 없이 세션별 개념 ID만 저장하고 현재 진행 중인 세션만 남기는지 검증 */
+test('restores diagnosis metadata only for the matching session and tolerates damaged storage', () => {
+  const sessionId = '0123456789abcdef0123456789abcdef';
+  const otherId = 'fedcba9876543210fedcba9876543210';
+  let value = null;
+  const storage = { getItem: () => value, setItem: (_, text) => { value = text; } };
+  const snapshot = { sessionId, targetId: 'sjf', gapIds: ['priority-queue'], passedIds: ['priority-queue'] };
+  roadmap.saveDiagnosis(snapshot, [sessionId], storage);
+  assert.deepEqual(roadmap.loadDiagnosis(sessionId, storage), snapshot);
+  assert.equal(roadmap.loadDiagnosis(otherId, storage), null);
+  roadmap.saveDiagnosis({ ...snapshot, sessionId: otherId }, [otherId], storage);
+  assert.equal(roadmap.loadDiagnosis(sessionId, storage), null);
+  for (const raw of ['{broken', 'null', '[]', '{"version":2}', '{"version":1,"sessions":[]}']) {
+    value = raw;
+    assert.equal(roadmap.loadDiagnosis(sessionId, storage), null);
+  }
+  assert.equal(roadmap.loadDiagnosis(sessionId, { getItem() { throw new Error('denied'); } }), null);
 });
