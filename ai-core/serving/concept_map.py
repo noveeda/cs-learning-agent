@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CONTENT_DIR = Path(__file__).resolve().parents[1] / 'content'
 # 과목 폴더 이름과 합칠 때의 순서; 존재하는 폴더만 읽어 아직 내용이 없는 과목은 건너뜀
-SUBJECT_ORDER = ('dsa', 'os')
+SUBJECT_ORDER = ('dsa', 'os', 'network')
 
 
 ## @brief 한 개념이 직접 의존하는 선수 개념과 그 근거; 근거는 검수자가 관계의 타당성을 판단하는 자료
