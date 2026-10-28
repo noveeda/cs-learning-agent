@@ -313,7 +313,7 @@ function SetupScreen({
         ))}
       </fieldset>
       <fieldset>
-        <legend>제외할 개념(서술 답 수집에 이미 쓴 개념)</legend>
+        <legend>제외할 개념(서술 답 수집에 이미 쓴 개념, 수강하지 않은 과목의 개념)</legend>
         <div className="experiment-concepts">
           {EXPERIMENT_CONCEPTS.map((concept) => (
             <label key={concept} className="experiment-choice">

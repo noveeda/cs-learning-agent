@@ -63,7 +63,8 @@ export type NewExperiment = {
   exclude: string[];
 };
 
-// 실험 후보 개념(실험 자료 materials.json과 같은 8개); 진행자가 이미 서술 답 수집에 쓴 개념을 빼는 데 씀
+// 실험 후보 개념(실험 자료 materials.json과 같은 13개); 진행자가 서술 답 수집에 이미 쓴 개념이나
+// 참가자가 수강하지 않은 과목의 개념을 빼는 데 씀(사전 시험이 길어지지 않고, 모르는 과목만으로 학습 개념이 정해지지 않게)
 export const EXPERIMENT_CONCEPTS = [
   "hash-table",
   "bst",
@@ -73,6 +74,11 @@ export const EXPERIMENT_CONCEPTS = [
   "bfs",
   "topological-sort",
   "dynamic-programming",
+  "sjf",
+  "priority-scheduling",
+  "btree-index",
+  "routing",
+  "cache-locality",
 ];
 
 export const stageTitles: Record<Stage, string> = {
