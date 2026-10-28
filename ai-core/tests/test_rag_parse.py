@@ -124,7 +124,49 @@ Cloud text.
 """.format(M=SUBHEADING_MARK)
 
 
+# UTA 'Computer Organization and Assembly Language Programming' PDF를 gs txtwrite로 뽑은 모양을 줄인 예
+# - 제목은 글꼴로만 구분됨: 장(Calibri 20)={M}, 절(15.96)={M}{M}, 소절(14.04)={M}{M}{M}. 목차·번호 목록은 본문 글꼴
+# - 원문 그대로의 특이점: 2장 뒤쪽 절은 '2. Octal'처럼 장 번호 없이 매겨지고, 5.2.2처럼 같은 번호가 두 번 나옴
+UTA_TEXT = """CONTENTS
+Chapter 2. The Number Systems .............................. 14
+2.1.3 Two’s Complement ..................................... 18
+{M}Acknowledgement
+Thanks to reviewers.
+{M}Chapter 2. The Number
+{M}Systems
+Intro.
+{M}{M}2.1 Binary (Base-2) Number System
+Binary.
+{M}{M}{M}2.1.3 Two’s Complement
+Invert and add one.
+2.  Add R1 and R2:
+{M}{M}{M}Negation
+Negate text.
+{M}{M}2. Octal (Base-8) Number System
+{M}{M}3. Decimal (Base-10) Number System
+Decimal.
+17
+{M}{M}{M}2.1.3 Repeated Number
+Again.
+{M}AI Usage Statement
+Figures drawn with tools.
+""".format(M=SUBHEADING_MARK)
+
+
 class PdfTests(unittest.TestCase):
+    # 검증 목적: 글꼴로 표시된 장·절 제목의 원문 번호를 section_id로 쓰고, 목차·번호 목록·장 밖 구역이 절로 잡히지 않는지 확인
+    # - 목차 줄(점선·쪽 번호)과 본문 번호 목록('2.  Add R1')은 본문 글꼴이라 제목이 아님
+    # - 번호 없는 소제목은 본문으로 남기고, 원문에서 겹친 번호는 '-2'를 붙여 section_id가 겹치지 않게 함
+    # - 본문 없는 절 제목(2.2) 바로 뒤의 번호 제목(2.3)은 줄 넘김으로 이어 붙이지 않음
+    def test_numbered_font_headings_use_book_numbers(self):
+        sections = parse_pdf_text('uta-coal', 'coal.pdf', UTA_TEXT, PDF_LAYOUTS['uta-coal'])
+        self.assertEqual([(s.section_id, s.title, s.text) for s in sections],
+                         [('coal.pdf#2', 'The Number Systems', 'Intro.'),
+                          ('coal.pdf#2.1', 'Binary (Base-2) Number System', 'Binary.'),
+                          ('coal.pdf#2.1.3', 'Two’s Complement', 'Invert and add one. 2. Add R1 and R2: Negation Negate text.'),
+                          ('coal.pdf#2.3', 'Decimal (Base-10) Number System', 'Decimal.'),
+                          ('coal.pdf#2.1.3-2', 'Repeated Number', 'Again.')])
+
     # 검증 목적: 목차·장 개요·장 끝 요약에 반복되는 x.y 제목을 절로 오인하지 않고, 머리말·꼬리말이 본문에 섞이지 않는지 확인
     # - 장 개요의 6.1~6.6을 제목으로 받으면 순서 검사 때문에 실제 절 제목이 모두 버려져 한 절이 13만 자가 되던 문제
     # - 하위 제목 표시 줄은 <장>.<절>.<하위> 절이 되어 긴 절이 나뉘고, 여러 줄 제목은 하나로 이어짐

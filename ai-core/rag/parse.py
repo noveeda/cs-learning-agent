@@ -496,12 +496,14 @@ def pdf_text(path, subheadings=()):
 # - stop: 본문이 끝나고 장 끝 반복 구역(용어·요약·문제)이 시작되는 줄. 다음 절 제목까지 버림
 # - noise: 머리말·꼬리말·쪽 번호처럼 쪽마다 반복되어 본문에서 지울 줄
 # - subheadings: 절 안 하위 제목 글꼴('<글꼴 이름> <크기>' 정규식)을 수준 순서로. 긴 절을 <장>.<절>.<하위>[.<하위>]로 나눔
+# - numbered: True면 subheadings가 장·절·소절 제목 글꼴 전체이고, 번호는 제목 글자의 원문 번호를 씀(_parse_numbered_headings)
 @dataclass(frozen=True)
 class PdfLayout:
     confirm: str | None = None
     stop: str | None = None
     noise: str | None = None
     subheadings: tuple[str, ...] = ()
+    numbered: bool = False
 
 
 # OpenStax: 목차·장 첫머리 Chapter Outline·장 끝 Summary에 같은 x.y 제목이 반복되지만,
@@ -515,6 +517,12 @@ PDF_LAYOUTS = {
         noise=r'\s*(Access for free at openstax\.org.*|\d+(\.\d+)? • .*\s\d+|\d+\s+\d+ • .*|\d{1,3}'
               r'|Learning Objectives|By the end of this section, you will be able to:)\s*$',
         subheadings=(r'NotoSans-Bold 12\.9\d*$', r'NotoSans-Bold 10\.8\d*$')),
+    # UTA COAL: 목차·본문·번호 목록은 Cambria, 제목만 Calibri라 글꼴 크기로 수준을 가름
+    # - 장 'Chapter N. 제목' 20.04, 절 'N.M 제목' 15.96, 소절 'N.M.K 제목' 14.04
+    'uta-coal': PdfLayout(
+        noise=r'\s*\d{1,3}\s*$',
+        subheadings=(r'Calibri\S* 20\.0\d*$', r'Calibri\S* 15\.9\d*$', r'Calibri\S* 14\.0\d*$'),
+        numbered=True),
 }
 
 _PDF_HEADING = re.compile(r'^\s*(\d+)\.(\d+)(?:\s+(\S.{0,90}?))?\s*$')
@@ -558,6 +566,8 @@ def _pdf_heading(lines, i, layout, last, first, seen):
 # - 여러 줄로 나뉜 하위 제목(본문 없이 같은 수준 표시가 연달아 나옴)은 하나로 이음
 def parse_pdf_text(book_id, file, text, layout=PdfLayout()):
     lines = text.replace('\r', '').splitlines()
+    if layout.numbered:
+        return _parse_numbered_headings(book_id, file, lines, layout)
     sections, seen = [], set()
     last, counters, title, body = (0, 0), [], None, []
 
@@ -594,6 +604,50 @@ def parse_pdf_text(book_id, file, text, layout=PdfLayout()):
             title, body = plain.strip(), []
         elif not level:
             body.append(line)
+    flush()
+    return sections
+
+
+## @brief 글꼴로 표시된 장·절·소절 제목에 적힌 원문 번호로 절을 나눔(layout.numbered인 책)
+# - 장: 'Chapter N. 제목' → '<file>#N'. 번호 없는 1수준 제목(감사의 글·AI 사용 안내 등)부터 다음 장까지는 버림
+# - 절·소절: 'N.M[.K] 제목'은 그 번호를 쓰고, 장 번호가 빠진 'M. 제목'(2장 뒤쪽 절)은 '<장>.M'으로 씀
+# - 번호 없는 소제목은 절 경계로 쓰지 않고 본문 줄로 남김(번호를 지어내면 원문 번호와 겹칠 수 있음)
+# - 줄을 넘긴 제목(본문 없이 같은 수준 표시 줄이 이어짐)은 하나로 잇고, 원문에서 겹친 번호는 '-2'를 붙임
+def _parse_numbered_headings(book_id, file, lines, layout):
+    sections, counts = [], {}
+    number, title, level_open, body = None, None, 0, []
+
+    def flush():
+        joined = _tidy('\n'.join(body))
+        if number and joined:
+            counts[number] = counts.get(number, 0) + 1
+            suffix = f'-{counts[number]}' if counts[number] > 1 else ''
+            sections.append(Section(book_id, f'{file}#{number}{suffix}', title, joined, ()))
+
+    chapter = None
+    for line in lines:
+        plain = line.lstrip(SUBHEADING_MARK)
+        level, plain = len(line) - len(plain), plain.strip()
+        if layout.noise and re.match(layout.noise, plain):
+            continue
+        # 번호로 시작하는 줄은 줄 넘김이 아니라 새 제목이므로 잇지 않음
+        if level and level == level_open and not body and not re.match(r'(Chapter\s+)?\d+(\.\d+)*\.?\s', plain):
+            title += ' ' + plain
+            continue
+        if level == 1:
+            flush()
+            match = re.match(r'Chapter\s+(\d+)\.?\s*(.*)', plain)
+            chapter = number = match.group(1) if match else None
+            title, level_open, body = (match.group(2) if match else plain), 1, []
+            continue
+        match = re.match(r'(\d+(?:\.\d+)*)\.?\s+(\S.*)', plain) if level else None
+        if match and chapter:
+            flush()
+            parts = match.group(1).split('.')
+            number = match.group(1) if len(parts) > 1 else f'{chapter}.{parts[0]}'
+            title, level_open, body = match.group(2), level, []
+            continue
+        body.append(plain if level else line)
     flush()
     return sections
 
