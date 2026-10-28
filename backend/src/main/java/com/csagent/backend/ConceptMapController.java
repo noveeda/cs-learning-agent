@@ -1,4 +1,7 @@
-// 파일 역할: 개념 지도 조회 API; AI core가 검증한 지도를 브라우저에 그대로 중계
+/**
+ * @file
+ * @brief 개념 지도 조회 API; AI core가 검증한 지도를 브라우저에 그대로 중계
+ */
 package com.csagent.backend;
 
 import java.io.IOException;
@@ -20,13 +23,13 @@ public class ConceptMapController {
     private final HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(5)).build();
 
-    // 역할: AI core 연결 주소 주입
+    /** @brief AI core 연결 주소 주입 */
     public ConceptMapController(@Value("${ai-core.base-url:http://127.0.0.1:8001}") String coreUrl) {
         this.coreUrl = coreUrl;
     }
 
     @GetMapping("/concept-map")
-    // 역할: AI core의 검증된 지도를 받아 중계; 상류 오류 내용은 숨기고 502로 안내
+    /** @brief AI core의 검증된 지도를 받아 중계; 상류 오류 내용은 숨기고 502로 안내 */
     public ResponseEntity<?> conceptMap() {
         try {
             var request = HttpRequest.newBuilder(URI.create(coreUrl + "/concept-map"))
@@ -46,7 +49,7 @@ public class ConceptMapController {
         }
     }
 
-    // 역할: 브라우저에 보낼 안내 메시지만 담은 오류 응답 생성
+    /** @brief 브라우저에 보낼 안내 메시지만 담은 오류 응답 생성 */
     private static ResponseEntity<?> error(int status, String message) {
         return ResponseEntity.status(status).header("Cache-Control", "no-store").body(Map.of("message", message));
     }
