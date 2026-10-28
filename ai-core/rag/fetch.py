@@ -2,7 +2,7 @@
 # @brief 공개 교재 원본을 내려받고 절로 분해해 sections.jsonl과 PNG 그림을 만드는 명령(python -m rag.fetch [--book ID])
 # - 저장 위치는 RAG_DATA_DIR(없으면 ai-core/data/rag). 모두 Git 밖이라 교재 원문·그림이 저장소에 들어가지 않음
 #   - raw/<book>/: 받은 원본, figures/<book>/<file>.png: 변환한 그림, sections.jsonl: 절 결과
-# - fetch=None인 책(Watt·OpenStax)은 사이트가 자동 요청을 막거나 약관상 사람이 받아야 하므로 놓을 위치만 안내함
+# - fetch=None인 책(Watt)은 사이트가 자동 요청을 403으로 막으므로 우회하지 않고 놓을 위치만 안내함
 # - 이미 받은 원본·변환한 그림은 다시 받지 않음. 새로 받으려면 해당 raw/<book>/ 폴더를 지우고 실행
 import argparse
 import json
@@ -71,6 +71,19 @@ def fetch_file(url, dest):
         _download(url, sink)
 
 
+## @brief OpenStax 공식 CMS API의 책 목록에서 slug가 같은 책의 PDF 주소를 찾아 받음
+# - 자산 주소가 판마다 바뀔 수 있어 주소를 코드에 고정하지 않고 API에서 그때그때 읽음
+def fetch_openstax(slug, dest):
+    with tempfile.TemporaryFile() as tmp:
+        _download('https://openstax.org/apps/cms/api/books/?format=json', tmp)
+        tmp.seek(0)
+        books = json.load(tmp)['books']
+    book = next((b for b in books if b.get('slug') == slug), None)
+    if not book or not (book.get('high_resolution_pdf_url') or book.get('pdf_url')):
+        raise OSError(f'OpenStax CMS API에서 PDF 주소를 찾지 못했습니다: {slug}')
+    fetch_file(book.get('high_resolution_pdf_url') or book['pdf_url'], dest)
+
+
 ## @brief MediaWiki API로 JSON 응답 하나를 받음
 def _wiki_api(params):
     query = urllib.parse.urlencode({**params, 'format': 'json', 'formatversion': 2})
@@ -102,6 +115,8 @@ def fetch_wikibooks(name, dest):
 def fetch_book(book, raw):
     if book.fetch.startswith('github:'):
         fetch_github(book.fetch.removeprefix('github:'), raw)
+    elif book.fetch.startswith('openstax:'):
+        fetch_openstax(book.fetch.removeprefix('openstax:'), raw)
     elif book.fetch.startswith('wikibooks:'):
         fetch_wikibooks(book.fetch.removeprefix('wikibooks:'), raw)
     else:

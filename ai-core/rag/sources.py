@@ -7,7 +7,8 @@ from typing import Literal
 
 
 ## @brief 교재 한 권의 출처와 수집·그림 정책
-# - fetch: 'github:<owner>/<repo>', PDF 주소, 'wikibooks:<책 이름>' 중 하나. None이면 사람이 직접 내려받는 책
+# - fetch: 'github:<owner>/<repo>', 'openstax:<CMS slug>', PDF 주소, 'wikibooks:<책 이름>' 중 하나
+#   None이면 사람이 직접 내려받는 책
 # - figures: 'all'은 figure_deny만 빼고 사용, 'allowlist'는 figure_allow에 있는 파일만 사용, 'none'은 그림 미사용
 # - figure_allow·figure_deny 항목은 원본 폴더(raw/<id>/) 기준 그림 경로로 FigureRef.file과 같은 형식
 @dataclass(frozen=True)
@@ -63,10 +64,12 @@ BOOKS: dict[str, Book] = {b.id: b for b in (
          'https://gustavus.edu/+max/os-book/', 'latex',
          'github:Max-Hailperin/Operating-Systems-and-Middleware--Supporting-Controlled-Interaction',
          'all', figure_deny=('hail_f0801',)),
-    # 사람이 내려받음: RAG_DATA_DIR/raw/openstax-cs/*.pdf. 그림마다 출처 표기가 달라 확인 전에는 쓰지 않음
+    # OpenStax 공식 CMS API가 알려 주는 PDF 주소로 받음(자동 요청을 막지 않는 공식 경로)
+    # - 그림마다 출처 표기가 달라 확인 전에는 쓰지 않음
     Book('openstax-cs', 'Introduction to Computer Science', 'OpenStax', 'CC BY-NC-SA 4.0',
          'https://creativecommons.org/licenses/by-nc-sa/4.0/',
-         'https://openstax.org/details/books/introduction-computer-science', 'pdf', None, 'none'),
+         'https://openstax.org/details/books/introduction-computer-science', 'pdf',
+         'openstax:books/introduction-computer-science', 'none'),
     # 사람이 내려받음: RAG_DATA_DIR/raw/watt-db/*.epub. 사이트가 자동 요청을 403으로 막으므로 우회하지 않음
     # - 그림별 출처 표기를 아직 확인하지 못해 'none'으로 시작
     Book('watt-db', 'Database Design – 2nd Edition', 'Adrienne Watt, Nelson Eng', 'CC BY 4.0',
