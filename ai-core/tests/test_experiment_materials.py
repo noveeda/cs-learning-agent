@@ -19,8 +19,9 @@ ROOT = Path(__file__).resolve().parents[2]
 MATERIALS = ROOT / 'backend' / 'src' / 'main' / 'resources' / 'experiment' / 'materials.json'
 # CS-300은 Git 밖 로컬 자료라 worktree에는 없음; 환경 변수 CS300_QUESTIONS로 메인 체크아웃의 파일을 가리킬 수 있음
 CS300 = Path(os.environ.get('CS300_QUESTIONS', ROOT / 'codex' / 'model-evaluation' / 'cs-300-v1' / 'questions.jsonl'))
-# 실험 계획 Task 1: 선수 개념이 2단계 이상이라 막힘이 생기기 쉬운 후보 개념 8개, 자료 파일 순서가 배정 동점 규칙에 쓰임
-CONCEPTS = ['hash-table', 'bst', 'heap', 'quick-sort', 'merge-sort', 'bfs', 'topological-sort', 'dynamic-programming']
+# 실험 후보 13개: 기존 자료구조 8개 뒤에 과목 경계 진단을 관찰할 5개를 추가; 자료 순서는 배정 동점 규칙
+CONCEPTS = ['hash-table', 'bst', 'heap', 'quick-sort', 'merge-sort', 'bfs', 'topological-sort', 'dynamic-programming',
+            'sjf', 'priority-scheduling', 'btree-index', 'routing', 'cache-locality']
 # 읽기 글 길이(글자 수): 1부는 15분 학습의 본문, 2부는 1부를 이해해야 읽히는 이어지는 내용
 PART1_RANGE, PART2_RANGE = (400, 600), (200, 400)
 ITEM_FIELDS = {'id', 'format', 'question', 'options', 'answer', 'rationale', 'rubric'}
@@ -101,14 +102,35 @@ def median_first(keys):
     return [keys[mid]] + median_first(keys[:mid]) + median_first(keys[mid + 1:])
 
 
-## @brief 최소 힙에 넣고 위로 재정렬; (부모와 바꾼 횟수, 최종 인덱스) 반환
-def heap_push(heap, value):
-    heap = heap + [value]
-    i, swaps = len(heap) - 1, 0
-    while i > 0 and heap[(i - 1) // 2] > heap[i]:
-        heap[i], heap[(i - 1) // 2] = heap[(i - 1) // 2], heap[i]
-        i, swaps = (i - 1) // 2, swaps + 1
+## @brief 최소 힙에서 루트를 빼고 마지막 원소를 루트로 옮긴 뒤 작은 자식과 바꾸며 내림; (바꾼 횟수, 최종 인덱스) 반환
+# - 문항의 배열이 실제 최소 힙인지도 함께 확인해, 힙이 아닌 배열로 낸 문항을 걸러 냄
+def heap_pop(heap):
+    assert all(heap[(i - 1) // 2] <= heap[i] for i in range(1, len(heap))), heap
+    heap = [heap[-1]] + heap[1:-1]
+    i, swaps = 0, 0
+    while True:
+        children = [c for c in (2 * i + 1, 2 * i + 2) if c < len(heap)]
+        if not children:
+            break
+        smaller = min(children, key=lambda c: heap[c])
+        if heap[smaller] >= heap[i]:
+            break
+        heap[i], heap[smaller] = heap[smaller], heap[i]
+        i, swaps = smaller, swaps + 1
     return swaps, i
+
+
+## @brief 문항의 "정점: 이웃, 이웃 / ..." 인접 리스트로 BFS를 돌려 두 번째로 꺼낸 정점을 처리한 직후 큐를 "[a, b]" 꼴로 반환
+def bfs_queue_after_second(question):
+    adjacency = {int(v): [int(n) for n in ns.split(', ')] for v, ns in re.findall(r'(\d+): (\d+(?:, \d+)*)', question)}
+    marked, queue = {1}, deque([1])
+    for _ in range(2):
+        v = queue.popleft()
+        for n in adjacency[v]:
+            if n not in marked:
+                marked.add(n)
+                queue.append(n)
+    return '[' + ', '.join(map(str, queue)) + ']'
 
 
 ## @brief 완전 이진 트리를 위층·왼쪽부터 채우는 규칙만으로 {자식: 부모}를 만듦(부모 공식을 쓰지 않고 확인하기 위함)
@@ -178,17 +200,87 @@ def stair_ways(steps, n):
     return sum(stair_ways(steps, n - s) for s in steps if s <= n)
 
 
+## @brief 문항의 프로세스 표에서 비선점 실행을 독립 추적해 P3 시작과 전체 대기 합을 계산
+# - 시뮬레이터를 호출하지 않아 같은 구현 오류가 정답과 검산에 함께 섞이지 않게 함
+def scheduling_answer(question, priority=False):
+    pending = [(name, int(arrival), int(burst), int(rank or 0))
+               for name, arrival, burst, rank in re.findall(r'(P\d+)\((\d+),(\d+)(?:,(\d+))?\)', question)]
+    time, starts, waits = 0, {}, []
+    while pending:
+        ready = [p for p in pending if p[1] <= time]
+        if not ready:
+            time = min(p[1] for p in pending)
+            continue
+        selected = min(ready, key=lambda p: (p[3] if priority else p[2], p[1], p[0]))
+        name, arrival, burst, _ = selected
+        starts[name] = time
+        waits.append(time - arrival)
+        time += burst
+        pending.remove(selected)
+    return join([starts['P3'], sum(waits)])
+
+
+## @brief 문항에 주어진 루트·내부·리프 경로에서 첫 방문한 비상주 페이지 수를 셈
+def page_read_answer(question):
+    paths = re.findall(r'R-([A-Z]\d)-([A-Z]\d)', question)
+    return join([len({internal for internal, _ in paths}), len({page for path in paths for page in path})])
+
+
+## @brief 링크 비용을 문항에서 읽고 모든 단순 경로를 열거해 장애 전후 최소 비용을 비교
+def routing_answer(question):
+    edges = {(a, b): int(cost) for a, b, cost in re.findall(r'([A-Z])-([A-Z])=(\d+)', question)}
+    broken = re.search(r'([A-Z])-([A-Z]) 링크만 끊긴', question).groups()
+
+    ## @brief 현재 링크 집합에서 S→T의 모든 단순 경로 비용 중 최솟값 반환
+    def cheapest():
+        totals = []
+
+        ## @brief 이미 지난 정점을 다시 방문하지 않고 인접 링크를 따라 비용 합을 모음
+        def visit(node, seen, cost):
+            if node == 'T':
+                totals.append(cost)
+                return
+            for (a, b), weight in edges.items():
+                neighbor = b if a == node else a if b == node else None
+                if neighbor and neighbor not in seen:
+                    visit(neighbor, seen | {neighbor}, cost + weight)
+
+        visit('S', {'S'}, 0)
+        return min(totals)
+
+    before = cheapest()
+    del edges[broken]
+    after = cheapest()
+    return join([after, after - before])
+
+
+## @brief 문항의 배열 길이·원소 크기·주소·블록·라인 수에서 두 번 순회의 캐시 적중을 추적
+def cache_answer(question):
+    n = int(re.search(r'원소 (\d+)개인 배열', question).group(1))
+    width = int(re.search(r'원소는 (\d+)바이트', question).group(1))
+    start = int(re.search(r'배열 시작은 바이트 주소 (\d+)', question).group(1))
+    block_bytes, lines = map(int, re.search(r'블록 (\d+)바이트·라인 (\d+)개', question).groups())
+    cache, misses = {}, 0
+    for _ in range(2):
+        for index in range(n):
+            block = (start + index * width) // block_bytes
+            line = block % lines
+            if cache.get(line) != block:
+                misses += 1
+                cache[line] = block
+    return join([misses, 2 * n - misses])
+
+
 ## @brief 문항 ID → 정답 키와 별도로 계산한 기대 답
 def expected_answers(items):
     q = {item['id']: item['question'] for item in items}
     ha, hb = chain_lengths(q['exp-hash-table-A1']), chain_lengths(q['exp-hash-table-B1'])
-    heap_a = heap_push(array_in(q['exp-heap-A1']), numbers_in(q['exp-heap-A1'].split(']')[1])[0])
-    heap_b = heap_push(array_in(q['exp-heap-B1']), numbers_in(q['exp-heap-B1'].split(']')[1])[0])
+    heap_a, heap_b = heap_pop(array_in(q['exp-heap-A1'])), heap_pop(array_in(q['exp-heap-B1']))
     qa, pa = lomuto(array_in(q['exp-quick-sort-A1']))
     qb, pb = lomuto(array_in(q['exp-quick-sort-B1']))
     ma, mb = array_in(q['exp-merge-sort-A1']), array_in(q['exp-merge-sort-B1'])
     ba, bb = bfs(q['exp-bfs-A1'], 1)[6], bfs(q['exp-bfs-B1'], 1)[6]
-    return {
+    answers = {
         'exp-hash-table-A1': join([ha.count(0), max(ha)]),
         'exp-hash-table-B1': join([hb.count(0), max(hb)]),
         'exp-bst-A1': join(sorted(leaves(bst(numbers_in(q['exp-bst-A1'].split(':')[1].split('.')[0]))))),
@@ -206,14 +298,22 @@ def expected_answers(items):
         'exp-dynamic-programming-A1': stair_ways((1, 3), 8),
         'exp-dynamic-programming-B1': stair_ways((1, 2, 4), 6),
     }
+    for form in ('A', 'B'):
+        for concept, compute in [('sjf', scheduling_answer),
+                                 ('priority-scheduling', lambda question: scheduling_answer(question, priority=True)),
+                                 ('btree-index', page_read_answer), ('routing', routing_answer),
+                                 ('cache-locality', cache_answer)]:
+            item_id = f'exp-{concept}-{form}1'
+            answers[item_id] = compute(q[item_id])
+    return answers
 
 
 ## @brief 선택형 중 계산으로 정답을 확인할 수 있는 문항의 기대 정답 보기 문자열
-def expected_choices():
+def expected_choices(items):
     sorted_tree, low_tree = bst(range(1, 1024)), bst(median_first(list(range(1, 1024))))
     absent = [k + 0.5 for k in range(0, 1024)]  # 키 사이의 없는 값을 모두 시도
     tree = parents(32)
-    return {
+    choices = {
         'exp-hash-table-A2': str(13 % 8),  # 재해싱: 버킷 4개에서 1번이던 키 13의 새 버킷
         'exp-bst-A2': str(max(comparisons(sorted_tree, k) for k in absent)),
         'exp-bst-B2': str(max(comparisons(low_tree, k) for k in absent)),
@@ -221,6 +321,31 @@ def expected_choices():
         'exp-heap-B2': str(tree[tree[10]]),
         'exp-merge-sort-A2': str(int(math.log2(16))),
     }
+    questions = {item['id']: item['question'] for item in items}
+    for form in ('A', 'B'):
+        sjf_id, priority_id = f'exp-sjf-{form}2', f'exp-priority-scheduling-{form}2'
+        long, short = map(int, re.findall(r'\(실행 (\d+)\)', questions[sjf_id]))
+        choices[sjf_id] = f'②가 SJF이며 대기 시간 합은 {long}에서 {short}로 줄어든다'
+        # CPU가 빈 시각까지 도착한 프로세스만 (우선순위, 도착, 이름)으로 비교
+        now = int(re.search(r'시각 (\d+)에 실행 중이던', questions[priority_id]).group(1))
+        ready = [(int(rank), int(arrival), name) for name, arrival, rank in
+                 re.findall(r'([A-Z])\((\d+),(\d+)\)', questions[priority_id]) if int(arrival) <= now]
+        names = '·'.join(name for _, _, name in sorted(ready, key=lambda p: (p[1], p[2])))
+        choices[priority_id] = f'{min(ready)[2]}: 시각 {now}까지 도착한 {names} 중 우선순위 숫자가 더 작다'
+        bfs_id = f'exp-bfs-{form}2'
+        choices[bfs_id] = bfs_queue_after_second(questions[bfs_id])
+        tree_id = f'exp-btree-index-{form}2'
+        keys = array_in(questions[tree_id])
+        target = int(re.search(r'키 (\d+)을 찾기', questions[tree_id]).group(1))
+        lower, upper = next((a, b) for a, b in zip(keys, keys[1:]) if a < target < b)
+        choices[tree_id] = f'{lower}보다 크고 {upper}보다 작은 범위'
+        cache_id = f'exp-cache-locality-{form}2'
+        block_bytes, lines = map(int, re.search(r'블록 (\d+)바이트·라인 (\d+)개', questions[cache_id]).groups())
+        first, second = (int(address) // block_bytes for address in re.findall(r'[A-D]=(\d+)', questions[cache_id]))
+        if first % lines != second % lines:
+            raise AssertionError(f'{cache_id}: 충돌을 묻는 두 블록이 다른 라인에 있음')
+        choices[cache_id] = f'블록 {first}과 {second}가 같은 라인에 들어가 서로 교체한다'
+    return choices
 
 
 class ExperimentMaterialsTests(unittest.TestCase):
@@ -229,7 +354,7 @@ class ExperimentMaterialsTests(unittest.TestCase):
         cls.materials = load()
         cls.items = all_items(cls.materials)
 
-    # 검증 목적: 계획 Task 1 형식(개념 8개, 1부·2부 글, A·B형 각 자동 채점 2 + 서술 1)과 ID 규칙 exp-<개념>-<A|B><번호>
+    ## @brief 확장된 13개 개념의 읽기 글·A/B형 각 자동 2+서술 1 구성과 ID 규칙 검증
     def test_structure_and_ids(self):
         self.assertIsInstance(self.materials['version'], int)
         self.assertEqual([c['id'] for c in self.materials['concepts']], CONCEPTS)
@@ -286,7 +411,7 @@ class ExperimentMaterialsTests(unittest.TestCase):
     # 검증 목적: 계산으로 확인할 수 있는 선택형은 계산 결과와 같은 보기가 정답 하나뿐임
     def test_computable_choices(self):
         by_id = {i['id']: i for i in self.items}
-        for item_id, value in expected_choices().items():
+        for item_id, value in expected_choices(self.items).items():
             item = by_id[item_id]
             self.assertEqual([k for k, v in item['options'].items() if v == value], [item['answer']], item_id)
         dag = by_id['exp-topological-sort-B2']
