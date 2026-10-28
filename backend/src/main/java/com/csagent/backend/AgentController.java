@@ -1,4 +1,7 @@
-// 파일 역할: 브라우저 채팅 요청을 AI core로 중계하며 문답과 도식 기록을 서버에 저장
+/**
+ * @file
+ * @brief 브라우저 채팅 요청을 AI core로 중계하며 문답과 도식 기록을 서버에 저장
+ */
 package com.csagent.backend;
 
 import java.io.IOException;
@@ -30,7 +33,7 @@ public class AgentController {
     private final String coreUrl;
     private final ConversationStore store;
 
-    // 역할: AI core 주소와 대화 저장소 주입
+    /** @brief AI core 주소와 대화 저장소 주입 */
     public AgentController(@Value("${ai-core.base-url:http://127.0.0.1:8001}") String coreUrl,
                            ConversationStore store) {
         this.coreUrl = coreUrl;
@@ -40,13 +43,13 @@ public class AgentController {
     public record ChatRequest(String conversation_id, String question, String artifact_id) {}
 
     @GetMapping("/conversations/{id}")
-    // 역할: 대화 ID로 저장된 문답 조회
+    /** @brief 대화 ID로 저장된 문답 조회 */
     public ObjectNode conversation(@PathVariable String id) throws IOException {
         return store.load(id);
     }
 
     @PostMapping(value = "/chat", produces = "application/x-ndjson")
-    // 역할: 완료 이력을 모델에 전달하고 이벤트를 즉시 중계; 성공·실패 결과를 저장
+    /** @brief 완료 이력을 모델에 전달하고 이벤트를 즉시 중계; 성공·실패 결과를 저장 */
     public ResponseEntity<StreamingResponseBody> chat(@RequestBody ChatRequest body, HttpServletResponse servletResponse) {
         if (body.question() == null || body.question().isBlank() || body.question().length() > 4000) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid question");
@@ -143,7 +146,7 @@ public class AgentController {
     }
 
     @GetMapping("/artifacts/{id}")
-    // 역할: 도식 ID를 검증하고 SVG 응답과 브라우저 보안 헤더 중계
+    /** @brief 도식 ID를 검증하고 SVG 응답과 브라우저 보안 헤더 중계 */
     public ResponseEntity<byte[]> artifact(@PathVariable String id) {
         if (!id.matches("[0-9a-f]{32}")) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         try {

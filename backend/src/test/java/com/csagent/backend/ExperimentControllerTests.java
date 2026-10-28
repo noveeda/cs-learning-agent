@@ -1,5 +1,8 @@
-// 파일 역할: 비교 실험 API의 정답 키 비공개·상쇄 배정·서버 시각 마감·중복 참가자·내보내기 규칙 검증
-// - 실제 실험 자료(Task 1) 대신 src/test/resources/experiment/test-materials.json(가짜 개념 3개)을 씀
+/**
+ * @file
+ * @brief 비교 실험 API의 정답 키 비공개·상쇄 배정·서버 시각 마감·중복 참가자·내보내기 규칙 검증
+ * - 실제 실험 자료(Task 1) 대신 src/test/resources/experiment/test-materials.json(가짜 개념 3개)을 씀
+ */
 package com.csagent.backend;
 
 import java.nio.file.Files;
@@ -31,7 +34,7 @@ class ExperimentControllerTests {
     private ExperimentStore store;
     private ExperimentController controller;
 
-    // 역할: 테스트가 직접 움직이는 서버 시계; 실제 15분을 기다리지 않고 마감 전후를 재현
+    /** @brief 테스트가 직접 움직이는 서버 시계; 실제 15분을 기다리지 않고 마감 전후를 재현 */
     static class MutableClock extends Clock {
         private Instant now;
         MutableClock(Instant now) { this.now = now; }
@@ -57,7 +60,7 @@ class ExperimentControllerTests {
         return body(response);
     }
 
-    // 역할: 테스트 자료에서 정답 키를 읽어, 고른 개념은 맞히고 나머지는 틀린 사전 시험 답을 만듦
+    /** @brief 테스트 자료에서 정답 키를 읽어, 고른 개념은 맞히고 나머지는 틀린 사전 시험 답을 만듦 */
     private Map<String, String> pretestAnswers(String form, Set<String> correctConcepts) throws Exception {
         var raw = ConversationStore.JSON.readTree(getClass().getClassLoader().getResourceAsStream(MATERIALS));
         Map<String, String> answers = new HashMap<>();
@@ -84,8 +87,10 @@ class ExperimentControllerTests {
     private static String message(ResponseEntity<?> response) { return ((Map<?, ?>) response.getBody()).get("message").toString(); }
 
     @Test
-    // 역할: 사전·사후 시험 화면 데이터에 정답 키·근거·루브릭이 섞이지 않는지 검증(Global Constraints 정답 키)
-    // - 서버 저장본에는 채점 결과가 있으므로 응답을 고르는 단계에서 빠지면 학생이 정답을 볼 수 있음
+    /**
+     * @brief 사전·사후 시험 화면 데이터에 정답 키·근거·루브릭이 섞이지 않는지 검증(Global Constraints 정답 키)
+     * - 서버 저장본에는 채점 결과가 있으므로 응답을 고르는 단계에서 빠지면 학생이 정답을 볼 수 있음
+     */
     void pretestHidesKeys() throws Exception {
         var created = create("S1", List.of());
         assertEquals("pretest", created.path("stage").asString());
@@ -114,9 +119,11 @@ class ExperimentControllerTests {
     }
 
     @Test
-    // 역할: 참가자 번호로 조건 순서와 사전·사후 형이 1절 상쇄 규칙대로 배정되는지 검증
-    // - 홀수: 개념 1 제안 시스템 / 번호÷2 몫이 짝수: 사전 A형·사후 B형
-    // - 참가자가 9명을 넘을 수 있어 두 자리 번호(S10~S99)도 같은 규칙을 따르는지 함께 확인
+    /**
+     * @brief 참가자 번호로 조건 순서와 사전·사후 형이 1절 상쇄 규칙대로 배정되는지 검증
+     * - 홀수: 개념 1 제안 시스템 / 번호÷2 몫이 짝수: 사전 A형·사후 B형
+     * - 참가자가 9명을 넘을 수 있어 두 자리 번호(S10~S99)도 같은 규칙을 따르는지 함께 확인
+     */
     void assignmentFollowsParity() throws Exception {
         // S10 이상(두 자리 번호)도 같은 규칙: S10 = 짝수·10÷2=5(홀수) → 채팅 먼저·사전 B형
         var expected = Map.of("S1", List.of("system", "A"), "S2", List.of("chat", "B"),
@@ -146,7 +153,7 @@ class ExperimentControllerTests {
     }
 
     @Test
-    // 역할: 사전 점수가 낮은 개념부터 고르고, 모르는 개념이 2개 미만이면 사전 점수 높음을 기록하는지 검증(Review Focus 3)
+    /** @brief 사전 점수가 낮은 개념부터 고르고, 모르는 개념이 2개 미만이면 사전 점수 높음을 기록하는지 검증(Review Focus 3) */
     void fewUnknownConceptsFlagged() throws Exception {
         // hash-table만 만점 → bst, heap을 고르고 둘 다 모르는 개념이라 표시 없음
         var low = create("S1", List.of());
@@ -165,7 +172,7 @@ class ExperimentControllerTests {
     }
 
     @Test
-    // 역할: 남은 시간이 서버 시각 기준이라 새로고침·서버 재시작으로 늘어나지 않는지 검증(Review Focus 1)
+    /** @brief 남은 시간이 서버 시각 기준이라 새로고침·서버 재시작으로 늘어나지 않는지 검증(Review Focus 1) */
     void deadlineFromServerClock() throws Exception {
         var id = create("S1", List.of()).path("id").asString();
         var learn = submitPretest(id, Map.of());
@@ -187,8 +194,10 @@ class ExperimentControllerTests {
     }
 
     @Test
-    // 역할: 마감 뒤 도움 요청·계속 읽기를 거부하고, 마감 기록(timeout)만 받는지 검증(Review Focus 2)
-    // - 마감 직전 화면이 늦게 보낸 이벤트가 O2(복귀)를 바꾸지 못하게 함
+    /**
+     * @brief 마감 뒤 도움 요청·계속 읽기를 거부하고, 마감 기록(timeout)만 받는지 검증(Review Focus 2)
+     * - 마감 직전 화면이 늦게 보낸 이벤트가 O2(복귀)를 바꾸지 못하게 함
+     */
     void eventsAfterDeadlineRejected() throws Exception {
         var id = create("S1", List.of()).path("id").asString();
         submitPretest(id, Map.of());
@@ -211,8 +220,10 @@ class ExperimentControllerTests {
     }
 
     @Test
-    // 역할: 계속 읽기로 연 2부가 새로고침(GET)·서버 재시작 뒤에도 그대로 보이는지 검증(Review Focus 1)
-    // - 복구 화면에서 2부가 사라지면 학생이 계속 읽기를 다시 눌러야 하고 O3 끝 시각이 흐려짐
+    /**
+     * @brief 계속 읽기로 연 2부가 새로고침(GET)·서버 재시작 뒤에도 그대로 보이는지 검증(Review Focus 1)
+     * - 복구 화면에서 2부가 사라지면 학생이 계속 읽기를 다시 눌러야 하고 O3 끝 시각이 흐려짐
+     */
     void continueReadingSurvivesReload() throws Exception {
         var id = create("S1", List.of()).path("id").asString();
         submitPretest(id, Map.of());
@@ -224,7 +235,7 @@ class ExperimentControllerTests {
     }
 
     @Test
-    // 역할: 단답 채점이 서버 기본 로캘과 무관한지 검증; 터키어 로캘에서는 "I".toLowerCase()가 점 없는 ı가 되어 정답을 틀리게 셀 수 있음
+    /** @brief 단답 채점이 서버 기본 로캘과 무관한지 검증; 터키어 로캘에서는 "I".toLowerCase()가 점 없는 ı가 되어 정답을 틀리게 셀 수 있음 */
     void gradingIgnoresDefaultLocale() {
         var original = Locale.getDefault();
         try {
@@ -235,7 +246,7 @@ class ExperimentControllerTests {
     }
 
     @Test
-    // 역할: 진행자가 같은 참가자 코드로 다시 만들면 기존 세션을 덮어쓰지 않고 409와 기존 id를 주는지 검증(Review Focus 5)
+    /** @brief 진행자가 같은 참가자 코드로 다시 만들면 기존 세션을 덮어쓰지 않고 409와 기존 id를 주는지 검증(Review Focus 5) */
     void duplicateParticipantConflict() throws Exception {
         var id = create("S3", List.of()).path("id").asString();
         submitPretest(id, Map.of());
@@ -249,8 +260,10 @@ class ExperimentControllerTests {
     }
 
     @Test
-    // 역할: 참가자 코드·학년·수강 여부·제외 개념 형식이 틀리면 저장 없이 422로 거부되는지 검증
-    // - 이름 같은 개인정보를 코드 자리에 넣는 실수를 막음
+    /**
+     * @brief 참가자 코드·학년·수강 여부·제외 개념 형식이 틀리면 저장 없이 422로 거부되는지 검증
+     * - 이름 같은 개인정보를 코드 자리에 넣는 실수를 막음
+     */
     void invalidCreateRejected() throws Exception {
         for (var request : List.of(
                 new ExperimentController.CreateRequest("홍길동", 3, "taken", List.of()),
@@ -271,7 +284,7 @@ class ExperimentControllerTests {
     }
 
     @Test
-    // 역할: 사후 시험·설문 제출이 단계를 넘기고, 제출 뒤 수정·단계 건너뛰기를 막는지 검증
+    /** @brief 사후 시험·설문 제출이 단계를 넘기고, 제출 뒤 수정·단계 건너뛰기를 막는지 검증 */
     void posttestAndSurveyFinishSession() throws Exception {
         var id = create("S2", List.of()).path("id").asString();
         submitPretest(id, Map.of());
@@ -299,7 +312,7 @@ class ExperimentControllerTests {
     }
 
     @Test
-    // 역할: 내보내기가 로컬 요청에만 열리고, 기록에 이름 같은 개인정보 필드가 없는지 검증
+    /** @brief 내보내기가 로컬 요청에만 열리고, 기록에 이름 같은 개인정보 필드가 없는지 검증 */
     void exportHasNoNames() throws Exception {
         var id = create("S1", List.of()).path("id").asString();
         submitPretest(id, Map.of());

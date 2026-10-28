@@ -1,4 +1,7 @@
-// 파일 역할: 막힘 세션 중계 API의 버전 체크포인트·오류 매핑·내부 상태 비공개 규칙 검증
+/**
+ * @file
+ * @brief 막힘 세션 중계 API의 버전 체크포인트·오류 매핑·내부 상태 비공개 규칙 검증
+ */
 package com.csagent.backend;
 
 import com.sun.net.httpserver.HttpServer;
@@ -35,7 +38,7 @@ class StuckSessionControllerTests {
     private StuckSessionController controller;
 
     @BeforeEach
-    // 역할: /stuck/step을 흉내 내는 AI core를 띄움; 성공 시 진단 문항 화면과 내부 기록(log·probes·frontier)을 함께 돌려줌
+    /** @brief /stuck/step을 흉내 내는 AI core를 띄움; 성공 시 진단 문항 화면과 내부 기록(log·probes·frontier)을 함께 돌려줌 */
     void startUpstream() throws Exception {
         upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         upstream.setExecutor(Executors.newCachedThreadPool());
@@ -64,7 +67,7 @@ class StuckSessionControllerTests {
     @AfterEach
     void stopUpstream() { upstream.stop(0); }
 
-    // 역할: AI core가 시작 입력으로 만드는 상태 흉내; 브라우저에 보내면 안 되는 내부 필드 포함
+    /** @brief AI core가 시작 입력으로 만드는 상태 흉내; 브라우저에 보내면 안 되는 내부 필드 포함 */
     private static ObjectNode newState(JsonNode entry) {
         var state = ConversationStore.JSON.createObjectNode();
         state.set("entry", entry);
@@ -98,7 +101,7 @@ class StuckSessionControllerTests {
     private static String message(ResponseEntity<?> response) { return ((Map<?, ?>) response.getBody()).get("message").toString(); }
 
     @Test
-    // 역할: 시작·진행·조회가 같은 저장본을 쓰고, AI core에 계약대로 요청하는지 검증
+    /** @brief 시작·진행·조회가 같은 저장본을 쓰고, AI core에 계약대로 요청하는지 검증 */
     void startsStepsAndResumesFromSavedSession() throws Exception {
         var created = start();
         var id = created.path("id").asText();
@@ -125,7 +128,7 @@ class StuckSessionControllerTests {
     }
 
     @Test
-    // 역할: 세 API 모두 {id, version, stage, view, entry}만 내보내고 log·probes·frontier는 숨기는지 검증
+    /** @brief 세 API 모두 {id, version, stage, view, entry}만 내보내고 log·probes·frontier는 숨기는지 검증 */
     void neverExposesInternalState() throws Exception {
         var created = start();
         var id = created.path("id").asText();
@@ -140,7 +143,7 @@ class StuckSessionControllerTests {
     }
 
     @Test
-    // 역할: 응답 유실 후 낮은 버전 재시도는 재실행 없이 저장본 반환, 맞지 않는 버전은 409, 종료 세션은 저장본 반환
+    /** @brief 응답 유실 후 낮은 버전 재시도는 재실행 없이 저장본 반환, 맞지 않는 버전은 409, 종료 세션은 저장본 반환 */
     void handlesRetriesConflictsAndFinishedSessions() throws Exception {
         var id = start().path("id").asText();
         step(id, 1, "answer");
@@ -160,7 +163,7 @@ class StuckSessionControllerTests {
     }
 
     @Test
-    // 역할: AI core 오류별 상태 코드 매핑과, 어떤 오류에서도 저장본이 바뀌지 않는지 검증
+    /** @brief AI core 오류별 상태 코드 매핑과, 어떤 오류에서도 저장본이 바뀌지 않는지 검증 */
     void mapsUpstreamErrorsWithoutChangingSavedSession() throws Exception {
         var id = start().path("id").asText();
         var before = store.load(id);
@@ -193,7 +196,7 @@ class StuckSessionControllerTests {
     }
 
     @Test
-    // 역할: 시작이 실패하면 세션 파일을 만들지 않고, 진입 정보가 없으면 AI core를 부르지 않는지 검증
+    /** @brief 시작이 실패하면 세션 파일을 만들지 않고, 진입 정보가 없으면 AI core를 부르지 않는지 검증 */
     void doesNotCreateSessionWhenStartFails() throws Exception {
         status.set(503);
         assertEquals(503, controller.create(new StuckSessionController.CreateRequest(entry())).getStatusCode().value());
@@ -203,7 +206,7 @@ class StuckSessionControllerTests {
     }
 
     @Test
-    // 역할: 같은 세션의 진행 요청이 동시에 오면 두 번째를 409로 거부해 같은 단계가 두 번 진행되지 않는지 검증
+    /** @brief 같은 세션의 진행 요청이 동시에 오면 두 번째를 409로 거부해 같은 단계가 두 번 진행되지 않는지 검증 */
     void rejectsConcurrentStepsOnSameSession() throws Exception {
         var id = start().path("id").asText();
         var latch = new CountDownLatch(1);
@@ -225,7 +228,7 @@ class StuckSessionControllerTests {
     }
 
     @Test
-    // 역할: 경로 조작·형식 위반 id와 없는 id를 404로 막고 저장 폴더 밖 파일을 읽지 않는지 검증
+    /** @brief 경로 조작·형식 위반 id와 없는 id를 404로 막고 저장 폴더 밖 파일을 읽지 않는지 검증 */
     void rejectsInvalidAndUnknownIds() throws Exception {
         for (String id : new String[]{"../secret", "A".repeat(32), "a".repeat(31), "a".repeat(32)}) {
             assertEquals(404, controller.get(id).getStatusCode().value());

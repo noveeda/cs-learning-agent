@@ -1,6 +1,9 @@
-// 파일 역할: 비교 실험 세션 API; 사전 시험 채점·개념과 조건 배정·학습 마감·사건 기록·내보내기를 서버 시각 기준으로 처리
-// - 실험 절차와 배정 규칙은 docs/superpowers/plans/2026-10-26-mvp3-experiment-mode.md 1절을 따름
-// - 응답에는 화면에 필요한 필드만 담고 정답 키·채점 결과·사건 기록은 서버에만 둠(내보내기 제외)
+/**
+ * @file
+ * @brief 비교 실험 세션 API; 사전 시험 채점·개념과 조건 배정·학습 마감·사건 기록·내보내기를 서버 시각 기준으로 처리
+ * - 실험 절차와 배정 규칙은 docs/superpowers/plans/2026-10-26-mvp3-experiment-mode.md 1절을 따름
+ * - 응답에는 화면에 필요한 필드만 담고 정답 키·채점 결과·사건 기록은 서버에만 둠(내보내기 제외)
+ */
 package com.csagent.backend;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -44,23 +47,23 @@ public class ExperimentController {
     private final ExperimentStore store;
     private final Clock clock;
 
-    // 역할: 운영용 생성자; 서버 시계(UTC)를 씀
+    /** @brief 운영용 생성자; 서버 시계(UTC)를 씀 */
     @Autowired
     public ExperimentController(ExperimentMaterials materials, ExperimentStore store) {
         this(materials, store, Clock.systemUTC());
     }
-    // 역할: 시계 주입 생성자; 테스트가 15분 마감 전후를 실제로 기다리지 않고 재현할 때 사용
+    /** @brief 시계 주입 생성자; 테스트가 15분 마감 전후를 실제로 기다리지 않고 재현할 때 사용 */
     ExperimentController(ExperimentMaterials materials, ExperimentStore store, Clock clock) {
         this.materials = materials;
         this.store = store;
         this.clock = clock;
     }
 
-    // 역할: 세션 시작 요청; 참가자 코드(S1~S99)·학년(1~4)·자료구조 수강 여부·제외할 개념만 받음
+    /** @brief 세션 시작 요청; 참가자 코드(S1~S99)·학년(1~4)·자료구조 수강 여부·제외할 개념만 받음 */
     public record CreateRequest(String participant, Integer grade, String dsa, List<String> exclude) {}
-    // 역할: 사전·사후 시험과 설문 제출; 문항 ID → 답
+    /** @brief 사전·사후 시험과 설문 제출; 문항 ID → 답 */
     public record AnswersRequest(Map<String, String> answers) {}
-    // 역할: 학습 단계 사건; ref는 막힘 세션·대화 ID처럼 사건이 가리키는 대상
+    /** @brief 학습 단계 사건; ref는 막힘 세션·대화 ID처럼 사건이 가리키는 대상 */
     public record EventRequest(String type, String ref) {}
 
     // 동시 요청 처리: 쓰기 요청은 synchronized로 한 번에 하나씩 처리
@@ -69,7 +72,7 @@ public class ExperimentController {
     // - 참가자 중복 확인과 저장 사이에 다른 생성 요청이 끼어들지 못하게 하는 역할도 함
 
     @PostMapping
-    // 역할: 새 세션을 만들고 사전 시험 화면을 반환; 같은 참가자 코드가 있으면 덮어쓰지 않고 409와 기존 id 반환
+    /** @brief 새 세션을 만들고 사전 시험 화면을 반환; 같은 참가자 코드가 있으면 덮어쓰지 않고 409와 기존 id 반환 */
     public synchronized ResponseEntity<?> create(@RequestBody CreateRequest body) throws IOException {
         if (!materials.available()) return error(503, "실험 자료가 아직 준비되지 않았습니다.");
         if (body == null || body.participant() == null || !body.participant().matches("S[1-9][0-9]?"))
@@ -98,23 +101,27 @@ public class ExperimentController {
         return ok(session);
     }
 
-    // 역할: 참가자 코드에서 번호를 꺼냄(S7 → 7, S12 → 12); 조건 순서·사전 형 배정 규칙의 입력
-    // - 참가자가 9명을 넘을 수 있어 첫 글자 하나가 아니라 S 뒤 숫자 전체를 읽음
+    /**
+     * @brief 참가자 코드에서 번호를 꺼냄(S7 → 7, S12 → 12); 조건 순서·사전 형 배정 규칙의 입력
+     * - 참가자가 9명을 넘을 수 있어 첫 글자 하나가 아니라 S 뒤 숫자 전체를 읽음
+     */
     private static int participantNumber(String participant) {
         return Integer.parseInt(participant.substring(1));
     }
 
     @GetMapping("/{id}")
-    // 역할: 현재 단계와 화면 데이터 반환; 새로고침·브라우저 재시작 뒤 같은 단계와 남은 시간으로 복구할 때 사용
+    /** @brief 현재 단계와 화면 데이터 반환; 새로고침·브라우저 재시작 뒤 같은 단계와 남은 시간으로 복구할 때 사용 */
     public ResponseEntity<?> get(@PathVariable String id) throws IOException {
         var session = store.load(id);
         return session == null ? notFound() : ok(session);
     }
 
     @PostMapping("/{id}/pretest")
-    // 역할: 사전 시험을 키로 채점하고 개념 1·2와 조건을 배정한 뒤 개념 1 학습을 시작
-    // - 점수가 낮은 개념부터 고르고 동점이면 자료 파일 순서(안정 정렬)를 따름
-    // - 고른 개념 중 만점이 있으면(모르는 개념이 2개 미만) pretest_high로 표시해 보고서에서 따로 봄
+    /**
+     * @brief 사전 시험을 키로 채점하고 개념 1·2와 조건을 배정한 뒤 개념 1 학습을 시작
+     * - 점수가 낮은 개념부터 고르고 동점이면 자료 파일 순서(안정 정렬)를 따름
+     * - 고른 개념 중 만점이 있으면(모르는 개념이 2개 미만) pretest_high로 표시해 보고서에서 따로 봄
+     */
     public synchronized ResponseEntity<?> pretest(@PathVariable String id, @RequestBody AnswersRequest body) throws IOException {
         var session = store.load(id);
         if (session == null) return notFound();
@@ -155,9 +162,11 @@ public class ExperimentController {
     }
 
     @PostMapping("/{id}/events")
-    // 역할: 학습 단계 사건을 서버 시각으로 기록; continue_reading이면 2부 글을 열어 줌
-    // - 마감 뒤 사건은 409로 거부해 늦게 도착한 요청이 O2(시간 안 복귀)·O3(걸린 시간)를 바꾸지 못하게 함
-    // - timeout만 예외: 화면이 마감 순간에 보내는 기록이라 마감 뒤에만 받고 한 번만 남김
+    /**
+     * @brief 학습 단계 사건을 서버 시각으로 기록; continue_reading이면 2부 글을 열어 줌
+     * - 마감 뒤 사건은 409로 거부해 늦게 도착한 요청이 O2(시간 안 복귀)·O3(걸린 시간)를 바꾸지 못하게 함
+     * - timeout만 예외: 화면이 마감 순간에 보내는 기록이라 마감 뒤에만 받고 한 번만 남김
+     */
     public synchronized ResponseEntity<?> event(@PathVariable String id, @RequestBody EventRequest body) throws IOException {
         if (body == null || !EVENT_TYPES.contains(body.type())) return error(422, "알 수 없는 사건 종류입니다.");
         if (body.ref() != null && body.ref().length() > 64) return error(422, "사건 대상 ID가 너무 깁니다.");
@@ -183,8 +192,10 @@ public class ExperimentController {
     }
 
     @PostMapping("/{id}/next")
-    // 역할: learn1 → learn2 → posttest로 넘김; 2부를 읽었거나 마감이 지났을 때만 허용
-    // - posttest·survey는 답 제출 요청이 다음 단계로 넘기므로 여기서는 409
+    /**
+     * @brief learn1 → learn2 → posttest로 넘김; 2부를 읽었거나 마감이 지났을 때만 허용
+     * - posttest·survey는 답 제출 요청이 다음 단계로 넘기므로 여기서는 409
+     */
     public synchronized ResponseEntity<?> next(@PathVariable String id) throws IOException {
         var session = store.load(id);
         if (session == null) return notFound();
@@ -203,7 +214,7 @@ public class ExperimentController {
     }
 
     @PostMapping("/{id}/posttest")
-    // 역할: 사후 시험 답을 저장하고 자동 채점 문항 점수를 계산한 뒤 설문 단계로 넘김; 서술 답은 눈가림 채점용으로 원문 보관
+    /** @brief 사후 시험 답을 저장하고 자동 채점 문항 점수를 계산한 뒤 설문 단계로 넘김; 서술 답은 눈가림 채점용으로 원문 보관 */
     public synchronized ResponseEntity<?> posttest(@PathVariable String id, @RequestBody AnswersRequest body) throws IOException {
         var session = store.load(id);
         if (session == null) return notFound();
@@ -229,7 +240,7 @@ public class ExperimentController {
     }
 
     @PostMapping("/{id}/survey")
-    // 역할: 설문 답을 저장하고 실험을 끝냄
+    /** @brief 설문 답을 저장하고 실험을 끝냄 */
     public synchronized ResponseEntity<?> survey(@PathVariable String id, @RequestBody AnswersRequest body) throws IOException {
         var session = store.load(id);
         if (session == null) return notFound();
@@ -245,7 +256,7 @@ public class ExperimentController {
     }
 
     @GetMapping("/export")
-    // 역할: 모든 세션 기록을 결과 계산용 JSON으로 반환; 답 원문이 있어 이 서버 컴퓨터(loopback)에서 온 요청만 허용
+    /** @brief 모든 세션 기록을 결과 계산용 JSON으로 반환; 답 원문이 있어 이 서버 컴퓨터(loopback)에서 온 요청만 허용 */
     public ResponseEntity<?> export(HttpServletRequest request) throws IOException {
         if (!loopback(request.getRemoteAddr()) || forwarded(request)) return error(403, "실험 기록 내보내기는 서버 컴퓨터에서만 할 수 있습니다.");
         var body = ConversationStore.JSON.createObjectNode();
@@ -254,14 +265,14 @@ public class ExperimentController {
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(body);
     }
 
-    // 역할: 학습 단계 시작 시각과 마감 시각을 서버 시계로 기록; 화면은 이 마감에서 남은 시간을 받아 새로고침해도 늘어나지 않음
+    /** @brief 학습 단계 시작 시각과 마감 시각을 서버 시계로 기록; 화면은 이 마감에서 남은 시간을 받아 새로고침해도 늘어나지 않음 */
     private void startLearning(ObjectNode learn) {
         Instant now = now();
         learn.put("started_at", iso(now)).put("deadline", iso(now.plus(LEARN_LIMIT)));
         learn.putArray("events");
     }
 
-    // 역할: 한 개념의 해당 형 자동 채점 문항 중 맞힌 수; 답하지 않은 문항은 오답
+    /** @brief 한 개념의 해당 형 자동 채점 문항 중 맞힌 수; 답하지 않은 문항은 오답 */
     private int score(String concept, String form, ObjectNode answers) {
         return (int) materials.concept(concept).autoItems(form).stream().filter(item -> {
             var answer = answers.path(item.path("id").asString());
@@ -269,7 +280,7 @@ public class ExperimentController {
         }).count();
     }
 
-    // 역할: 현재 학습 단계 기록 반환; 학습 단계가 아니면 null
+    /** @brief 현재 학습 단계 기록 반환; 학습 단계가 아니면 null */
     private static ObjectNode currentLearn(ObjectNode session) {
         return switch (session.path("stage").asString()) {
             case "learn1" -> (ObjectNode) session.path("learn").get(0);
@@ -278,7 +289,7 @@ public class ExperimentController {
         };
     }
 
-    // 역할: 제출된 답에서 이 단계 문항 ID만 남김; 다른 단계 문항이나 알 수 없는 ID는 버리고, 너무 긴 답은 null(422)
+    /** @brief 제출된 답에서 이 단계 문항 ID만 남김; 다른 단계 문항이나 알 수 없는 ID는 버리고, 너무 긴 답은 null(422) */
     private static ObjectNode answers(AnswersRequest body, Set<String> allowed) {
         var answers = ConversationStore.JSON.createObjectNode();
         if (body == null || body.answers() == null) return answers;
@@ -290,8 +301,10 @@ public class ExperimentController {
         return answers;
     }
 
-    // 역할: 저장본에서 현재 단계 화면에 필요한 필드만 골라 응답 생성
-    // - pretest·posttest: 화면용 문항(키 없음) / learn: 개념·조건·글·마감·남은 시간 / survey: 설문 문항
+    /**
+     * @brief 저장본에서 현재 단계 화면에 필요한 필드만 골라 응답 생성
+     * - pretest·posttest: 화면용 문항(키 없음) / learn: 개념·조건·글·마감·남은 시간 / survey: 설문 문항
+     */
     private ResponseEntity<?> ok(ObjectNode session) {
         var body = ConversationStore.JSON.createObjectNode();
         String stage = session.path("stage").asString();
@@ -328,25 +341,25 @@ public class ExperimentController {
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(body);
     }
 
-    // 역할: 시각을 기록 형식(예: 2026-10-27T03:04:05.000Z) 문자열로 바꿈; Instant.parse로 다시 읽을 수 있음
+    /** @brief 시각을 기록 형식(예: 2026-10-27T03:04:05.000Z) 문자열로 바꿈; Instant.parse로 다시 읽을 수 있음 */
     private static String iso(Instant instant) { return TIME.format(instant); }
 
-    // 역할: 기록용 서버 시각; 밀리초까지만 남겨 내보낸 JSON을 읽기 쉽게 함
+    /** @brief 기록용 서버 시각; 밀리초까지만 남겨 내보낸 JSON을 읽기 쉽게 함 */
     private Instant now() { return clock.instant().truncatedTo(ChronoUnit.MILLIS); }
 
-    // 역할: 요청 주소가 이 컴퓨터(127.0.0.1·::1)인지 확인; 서블릿이 주는 원격 주소는 IP 문자열이라 DNS 조회 없이 해석됨
+    /** @brief 요청 주소가 이 컴퓨터(127.0.0.1·::1)인지 확인; 서블릿이 주는 원격 주소는 IP 문자열이라 DNS 조회 없이 해석됨 */
     private static boolean loopback(String address) {
         try { return address != null && InetAddress.getByName(address).isLoopbackAddress(); }
         catch (java.net.UnknownHostException e) { return false; }
     }
-    // 역할: 프록시·터널을 거친 요청인지 확인; 이런 헤더가 하나라도 있으면 원래 요청자가 이 컴퓨터라고 보장할 수 없음
+    /** @brief 프록시·터널을 거친 요청인지 확인; 이런 헤더가 하나라도 있으면 원래 요청자가 이 컴퓨터라고 보장할 수 없음 */
     private static boolean forwarded(HttpServletRequest request) {
         for (String header : FORWARD_HEADERS) if (request.getHeader(header) != null) return true;
         return false;
     }
-    // 역할: 없는 세션과 형식이 틀린 ID를 같은 404로 응답해 저장 경로 정보를 드러내지 않음
+    /** @brief 없는 세션과 형식이 틀린 ID를 같은 404로 응답해 저장 경로 정보를 드러내지 않음 */
     private static ResponseEntity<?> notFound() { return error(404, "실험 세션을 찾을 수 없습니다. 진행자 화면에서 다시 시작해 주세요."); }
-    // 역할: 상태 코드와 한국어 오류 안내를 통일된 응답 형태로 반환
+    /** @brief 상태 코드와 한국어 오류 안내를 통일된 응답 형태로 반환 */
     private static ResponseEntity<?> error(int status, String message) {
         return ResponseEntity.status(status).header("Cache-Control", "no-store").body(Map.of("message", message));
     }

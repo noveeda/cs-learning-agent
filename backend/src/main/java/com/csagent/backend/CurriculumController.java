@@ -1,4 +1,7 @@
-// 파일 역할: 생성 작업 API; 서버 상태·버전을 기준으로 단계 진행과 재시도 처리
+/**
+ * @file
+ * @brief 생성 작업 API; 서버 상태·버전을 기준으로 단계 진행과 재시도 처리
+ */
 package com.csagent.backend;
 
 import java.io.IOException;
@@ -22,7 +25,7 @@ public class CurriculumController {
     // Uvicorn 중계에서 HTTP/2 업그레이드 문제가 발생해 HTTP/1.1로 고정
     private final HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(5)).build();
-    // 역할: AI core 연결 주소와 생성 상태 저장소 주입
+    /** @brief AI core 연결 주소와 생성 상태 저장소 주입 */
     public CurriculumController(@Value("${ai-core.base-url:http://127.0.0.1:8001}") String coreUrl, CurriculumStore store) {
         this.coreUrl = coreUrl;
         this.store = store;
@@ -31,7 +34,7 @@ public class CurriculumController {
     public record StepRequest(int version) {}
 
     @PostMapping
-    // 역할: 입력을 검사하고 버전 0의 개요 생성 작업을 저장
+    /** @brief 입력을 검사하고 버전 0의 개요 생성 작업을 저장 */
     public ResponseEntity<?> create(@RequestBody DraftRequest body) throws IOException {
         if (!valid(body.topic()) || !valid(body.goal()) || !valid(body.level()))
             return error(422, "주제·학습 목적·현재 수준을 각각 1~300자로 입력해 주세요.");
@@ -46,11 +49,11 @@ public class CurriculumController {
     }
 
     @GetMapping("/{id}")
-    // 역할: 저장된 체크포인트 조회; 없는 작업은 저장소에서 404 처리
+    /** @brief 저장된 체크포인트 조회; 없는 작업은 저장소에서 404 처리 */
     public ResponseEntity<?> get(@PathVariable String id) throws IOException { return ok(store.load(id)); }
 
     @PostMapping("/{id}/step")
-    // 역할: 버전을 확인하고 AI core의 다음 상태를 저장한 뒤 반환; 이전 버전 재시도는 재실행하지 않음
+    /** @brief 버전을 확인하고 AI core의 다음 상태를 저장한 뒤 반환; 이전 버전 재시도는 재실행하지 않음 */
     public ResponseEntity<?> step(@PathVariable String id, @RequestBody StepRequest body) throws IOException {
         store.acquire(id);
         try {
@@ -88,13 +91,13 @@ public class CurriculumController {
             return error(502, "처리 중 오류가 발생했습니다. 마지막 저장 상태를 다시 불러와 주세요.");
         } finally { store.release(id); }
     }
-    // 역할: 주제·목적·수준의 공백 및 길이 제한 확인
+    /** @brief 주제·목적·수준의 공백 및 길이 제한 확인 */
     private static boolean valid(String value) { return value != null && !value.isBlank() && value.length() <= 300; }
-    // 역할: 최신 작업 상태가 캐시되지 않도록 성공 응답 구성
+    /** @brief 최신 작업 상태가 캐시되지 않도록 성공 응답 구성 */
     private static ResponseEntity<?> ok(ObjectNode job) {
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(job);
     }
-    // 역할: 상태 코드와 한국어 오류 안내를 통일된 응답 형태로 반환
+    /** @brief 상태 코드와 한국어 오류 안내를 통일된 응답 형태로 반환 */
     private static ResponseEntity<?> error(int status, String message) {
         return ResponseEntity.status(status).header("Cache-Control", "no-store").body(Map.of("message", message));
     }

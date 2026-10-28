@@ -1,4 +1,7 @@
-// 파일 역할: 개념 지도 중계가 정상 지도는 그대로 전달하고 상류 오류·깨진 응답은 내용 없이 막는지 검증
+/**
+ * @file
+ * @brief 개념 지도 중계가 정상 지도는 그대로 전달하고 상류 오류·깨진 응답은 내용 없이 막는지 검증
+ */
 package com.csagent.backend;
 
 import com.sun.net.httpserver.HttpServer;
@@ -12,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ConceptMapControllerTests {
     @Test
-    // 역할: 정상 지도 전달, 상류 오류·깨진 형식의 내용 비노출 검증
+    /** @brief 정상 지도 전달, 상류 오류·깨진 형식의 내용 비노출 검증 */
     void relaysValidMapAndHidesUpstreamFailures() throws Exception {
         var upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         var status = new AtomicInteger(200);
@@ -44,7 +47,7 @@ class ConceptMapControllerTests {
     }
 
     @Test
-    // 역할: AI core가 꺼져 있을 때 연결 오류를 502 안내로 바꾸는지 검증
+    /** @brief AI core가 꺼져 있을 때 연결 오류를 502 안내로 바꾸는지 검증 */
     void returnsBadGatewayWhenCoreIsDown() {
         assertEquals(502, new ConceptMapController("http://127.0.0.1:1").conceptMap().getStatusCode().value());
     }
