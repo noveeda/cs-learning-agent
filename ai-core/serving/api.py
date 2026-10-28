@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, model_validator
 from serving.concept_map import load_concept_map
 from serving.harness_chat import build_retriever, chat_events, harness_enabled
 from serving.harness_llm import HarnessGateway
+from serving.harness_stuck import HarnessStuckGateway
 from serving.harness_log import HarnessLog
 from serving.curriculum import JobState, ModelGateway, step
 from serving.item_bank import load_item_bank
@@ -134,12 +135,15 @@ class StuckRequest(BaseModel):
 
 ## @brief 막힘 세션을 한 단계 진행한 새 상태 반환; 저장·버전 관리는 호출한 Spring이 담당
 # - LLM이 필요한 단계는 채팅·커리큘럼과 같은 모델 잠금(BUSY)을 그 호출 동안만 잡음; 바쁘거나 모델이 실패하면 503, 상태는 바뀌지 않음
+#   - 스위치 CS_HARNESS=1이면 근거 검사 하네스판 게이트웨이를 씀. 잠금 방식은 같음(요청 전체가 아니라 모델 호출마다 BUSY)
 # - 현재 단계와 맞지 않는 입력(오래된 화면의 답 등)은 409로 거부해 상태가 꼬이지 않게 함
 @app.post('/stuck/step', response_model=StuckState)
 def stuck_session_step(body: StuckRequest):
     concept_map, items = load_concept_map(), load_item_bank()
+    gateway = (HarnessStuckGateway(concept_map, BUSY, build_retriever()) if harness_enabled()
+               else StuckModelGateway(concept_map, BUSY))
     try:
-        return stuck_step(body.state, body.input, StuckModelGateway(concept_map, BUSY), concept_map, items, time.time())
+        return stuck_step(body.state, body.input, gateway, concept_map, items, time.time())
     except LLMUnavailable as exc:
         raise HTTPException(503, str(exc)) from None
     except ValueError as exc:

@@ -263,14 +263,19 @@ class StuckModelGateway:
         return self._call('animate', user, parse, _schema('animate', scene_schema(kinds, limits)))
 
     ## @brief S5·S6 서술 채점; 루브릭 항목마다 충족 여부를 같은 순서의 list[bool]로 반환
+    def grade_explanation(self, item: Item, answer: str) -> list[bool]:
+        return [c['met'] for c in self._grade_criteria(item, answer)]
+
+    ## @brief 서술 채점 호출; 루브릭 항목마다 {'evidence': 답에서 옮긴 근거, 'met': 충족 여부}를 같은 순서로 반환
     # - criteria 배열 길이를 루브릭 항목 수로 고정(minItems·maxItems)해 항목 누락·추가를 형식 단계에서 막고, 응답 후에도 다시 확인
     # - evidence는 200자 이내: 답안을 길게 옮겨 적다 출력 상한에 걸리지 않게 하기 위함
+    #   - 하네스판(harness_stuck)은 이 근거가 학생 답에 글자 그대로 있는지 다시 확인하므로 met와 함께 돌려줌
     # - 모범 근거(rationale)는 채점 정확도를 위해 모델에만 넘김; 응답·세션 상태에는 담지 않음
     # - 빈 답은 모델을 부르지 않고 모두 미충족: 결과가 분명한 경우에 모델 시간을 쓰지 않기 위함
-    def grade_explanation(self, item: Item, answer: str) -> list[bool]:
+    def _grade_criteria(self, item: Item, answer: str) -> list[dict]:
         rubric = item.rubric or []
         if not answer.strip():
-            return [False] * len(rubric)
+            return [{'evidence': '', 'met': False} for _ in rubric]
         judgment = {'type': 'object', 'additionalProperties': False, 'required': ['evidence', 'met'],
                     'properties': {'evidence': {'type': 'string', 'maxLength': 200}, 'met': {'type': 'boolean'}}}
         schema = {'type': 'object', 'additionalProperties': False, 'required': ['criteria'],
@@ -281,7 +286,9 @@ class StuckModelGateway:
             criteria = json.loads(content)['criteria']
             if len(criteria) != len(rubric) or not all(isinstance(c.get('met'), bool) for c in criteria):
                 raise ValueError('채점 결과가 루브릭 항목과 맞지 않습니다.')
-            return [c['met'] for c in criteria]
+            # 근거 모양은 검사하지 않던 기존 동작을 유지하고, 문자열이 아니면 빈 근거로 둠(하네스판에서는 미충족이 됨)
+            return [{'evidence': c['evidence'] if isinstance(c.get('evidence'), str) else '', 'met': c['met']}
+                    for c in criteria]
 
         user = {'question': item.question, 'reference': item.rationale, 'rubric': rubric, 'answer': answer}
         return self._call('grade_explanation', user, parse, _schema('grade', schema))
