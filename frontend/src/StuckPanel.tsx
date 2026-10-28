@@ -3,7 +3,7 @@
  * @brief [막혔어요]·붙여넣기 진입 버튼과 막힘 패널; 엔진이 만든 view.kind별 화면(진단·결과·보충·확인·복귀)을 그리고 입력을 한 단계씩 보냄
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import Markdown from "react-markdown";
+import { LearningMarkdown } from "./markdown";
 import { LoaderCircle, RotateCcw, X } from "lucide-react";
 import type { Concept } from "./roadmap";
 import { remediationParts } from "./animation";
@@ -522,7 +522,7 @@ export function StuckPanel({
               {view.attempt > 1 ? ` · ${view.attempt}번째 설명` : ""}
             </span>
             <div className="message-content stuck-text">
-              <Markdown>{text}</Markdown>
+              <LearningMarkdown>{text}</LearningMarkdown>
             </div>
             {/* 다시 설명(attempt)이나 다른 개념으로 넘어가면 첫 단계부터 보여 주도록 key를 바꿈 */}
             {animation && (
@@ -635,7 +635,7 @@ export function StuckPanel({
           <section>
             <span className="badge">복귀 요약</span>
             <div className="message-content stuck-text">
-              <Markdown>{view.text}</Markdown>
+              <LearningMarkdown>{view.text}</LearningMarkdown>
             </div>
             <ul className="stuck-results">
               {view.results.map((row) => (
