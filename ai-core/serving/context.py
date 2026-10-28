@@ -25,8 +25,9 @@ def history_messages(history):
     messages = []
     for turn in history:
         content = turn['content']
-        if turn.get('artifacts'):
-            data = [artifact_data(a) for a in turn['artifacts']]
+        # 하네스 답의 근거 기록·교재 그림은 모델이 다시 그리거나 고칠 데이터가 아니라서 넘기지 않음
+        data = [artifact_data(a) for a in turn.get('artifacts') or [] if a.get('kind') not in ('grounding', 'figure')]
+        if data:
             content += '\n\n[생성한 도식 데이터]\n' + json.dumps(data, ensure_ascii=False)
         messages.append({'role': turn['role'], 'content': content})
     if len(messages) % 2 or any(m['role'] != ('user' if i % 2 == 0 else 'assistant')
