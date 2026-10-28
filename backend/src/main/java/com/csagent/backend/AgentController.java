@@ -146,16 +146,25 @@ public class AgentController {
     }
 
     @GetMapping("/artifacts/{id}")
-    /** @brief 도식 ID를 검증하고 SVG 응답과 브라우저 보안 헤더 중계 */
+    /**
+     * @brief 그림 ID를 검증하고 도식 SVG 또는 교재 그림 PNG를 브라우저 보안 헤더와 함께 중계
+     * - Content-Type은 AI core가 준 값 중 image/png·image/svg+xml만 그대로 씀. 그 밖의 형식은 404
+     *   - 같은 출처(/api)로 HTML 같은 문서가 열리지 않게 하려는 허용 목록
+     */
     public ResponseEntity<byte[]> artifact(@PathVariable String id) {
         if (!id.matches("[0-9a-f]{32}")) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         try {
             var request = HttpRequest.newBuilder(URI.create(coreUrl + "/artifacts/" + id))
                     .timeout(Duration.ofSeconds(10)).GET().build();
             var response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            // "image/svg+xml; charset=utf-8"처럼 매개변수가 붙어도 형식 이름만 비교
+            var type = response.headers().firstValue("Content-Type").orElse("").split(";")[0].trim();
+            if (response.statusCode() == 200 && !type.equals("image/png") && !type.equals("image/svg+xml"))
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND);
             return ResponseEntity.status(response.statusCode())
-                    .header("Content-Type", response.statusCode() == 200 ? "image/svg+xml" : "application/json")
-                    .header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; font-src data:; sandbox")
+                    .header("Content-Type", response.statusCode() == 200 ? type : "application/json")
+                    .header("Content-Security-Policy", type.equals("image/png") ? "default-src 'none'; sandbox"
+                            : "default-src 'none'; style-src 'unsafe-inline'; font-src data:; sandbox")
                     .header("X-Content-Type-Options", "nosniff").body(response.body());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
