@@ -69,12 +69,34 @@ class ValidateSentencesTests(unittest.TestCase):
 
     # 검증 목적: 한 답의 분량 상한(문장 8개, 문장당 200자)을 넘는 출력이 그대로 화면에 나가지 않는지 확인
     def test_validate_rejects_over_8_sentences_and_over_200_chars(self):
-        self.assertEqual(len(validate_sentences(sentences(*[(f'문장 {i}', ['p1']) for i in range(8)]), KEYS)), 8)
+        self.assertEqual(len(validate_sentences(sentences(*[(f'{i}번 문장은 통과한다.', ['p1']) for i in range(8)]), KEYS)), 8)
         with self.assertRaises(ValueError):
-            validate_sentences(sentences(*[(f'문장 {i}', ['p1']) for i in range(9)]), KEYS)
+            validate_sentences(sentences(*[(f'{i}번 문장은 통과한다.', ['p1']) for i in range(9)]), KEYS)
         validate_sentences(sentences(('가' * 200, ['p1'])), KEYS)
         with self.assertRaises(ValueError):
             validate_sentences(sentences(('가' * 201, ['p1'])), KEYS)
+
+    # 검증 목적: 모델이 본문에 직접 쓴 근거 키 표기('(p3)', '[p1]', 단독 'p2')가 화면 각주([^p3])와 겹치지 않게 지워지는지 확인
+    # - 실측(Task 7)에서 26B가 문장 끝에 '(p3)'를 써 각주와 중복됨. 지운 결과가 이후 판정·표시에 쓰이는 문장임
+    # - 'p3에 따르면'처럼 낱말에 붙은 것과 근거 키가 아닌 표기('(p9)')는 건드리지 않음
+    def test_validate_strips_source_key_markers(self):
+        cases = [('스택은 마지막 원소를 먼저 꺼낸다(p3).', '스택은 마지막 원소를 먼저 꺼낸다.'),
+                 ('스택은 마지막 원소를 먼저 꺼낸다 [p1].', '스택은 마지막 원소를 먼저 꺼낸다.'),
+                 ('스택은 p2 마지막 원소를 먼저 꺼낸다.', '스택은 마지막 원소를 먼저 꺼낸다.'),
+                 ('스택은 마지막 원소를 먼저 꺼낸다 (p1, p2).', '스택은 마지막 원소를 먼저 꺼낸다.'),
+                 ('스택은 마지막 원소를 먼저 꺼낸다[^p1][p2].', '스택은 마지막 원소를 먼저 꺼낸다.'),
+                 ('p3에 따르면 스택은 LIFO다 (p9).', 'p3에 따르면 스택은 LIFO다 (p9).')]
+        for raw, cleaned in cases:
+            with self.subTest(raw=raw):
+                self.assertEqual(validate_sentences(sentences((raw, ['p1'])), KEYS), [(cleaned, ('p1',))])
+
+    # 검증 목적: 근거 키 표기를 지우고 나면 내용이 없는 문장, 문장부호뿐인 문장(실측의 ':'), 너무 짧은 문장을 거부해 재시도하게 함
+    # - 기준: 한글·영문 글자가 하나 이상이고, 한글·영문·숫자가 모두 5자 이상
+    def test_validate_rejects_empty_or_punctuation_only_sentences(self):
+        for bad in (':', '(p3).', '...', '- ', '1 2 3', '큐다.', 'O(1)'):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_sentences(sentences(('스택은 마지막 원소를 먼저 꺼낸다.', ['p1']), (bad, ['p1'])), KEYS)
+        self.assertEqual(validate_sentences(sentences(('삽입은 O(1)이다.', ['p1'])), KEYS), [('삽입은 O(1)이다.', ('p1',))])
 
     # 검증 목적: 검증을 통과한 문장의 자료형이 다음 단계(판정)에서 쓸 상태 값을 담는지 확인
     def test_sentence_holds_status(self):
