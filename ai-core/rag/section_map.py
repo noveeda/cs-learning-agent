@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from rag.fetch import DATA_DIR
+from rag.index import load_sections
+from rag.parse import Section
 from serving.concept_map import load_concept_map
 
 MAP_PATH = Path(__file__).resolve().parents[1] / 'content' / 'rag' / 'section-map.json'
@@ -61,14 +63,6 @@ def load_section_map(path: Path | None = None) -> SectionMap:
         gaps=tuple(Gap(g['concept'], g['reason']) for g in data['gaps']))
 
 
-## @brief sections.jsonl을 (책, 절 ID) → {'title', 'text'} 사전으로 읽음. 파일이 없으면 빈 사전
-def load_sections(path: Path = DATA_DIR / 'sections.jsonl') -> dict[tuple[str, str], dict]:
-    if not path.exists():
-        return {}
-    rows = map(json.loads, path.read_text(encoding='utf-8').splitlines())
-    return {(r['book'], r['section_id']): {'title': r['title'], 'text': r['text']} for r in rows}
-
-
 ## @brief 마크다운 표 칸에 넣을 수 있게 줄바꿈을 공백으로 바꾸고 칸 구분자(|)를 이스케이프
 def _cell(text):
     return ' '.join(text.split()).replace('|', '\\|')
@@ -82,9 +76,9 @@ def _section_label(section_id, title):
 
 
 ## @brief 검수 시트(마크다운)를 out에 씀: 개념별 절 수 요약표 → 빈칸 목록 → 개념별 절 표
-# - sections: load_sections 결과. 아직 받지 않은 책의 절은 '(절 목록에 없음)'으로 표시
+# - sections: (책, 절 ID) → Section. 아직 받지 않은 책의 절은 '(절 목록에 없음)'으로 표시
 # - 개념 순서와 한국어 제목은 합친 개념 지도를 따름(사용자는 영어 원문을 읽으므로 한국어 제목을 머리에 붙임)
-def write_review(section_map: SectionMap, sections: dict[tuple[str, str], dict], out: Path) -> None:
+def write_review(section_map: SectionMap, sections: dict[tuple[str, str], Section], out: Path) -> None:
     concepts = load_concept_map().concepts
     gaps = {g.concept: g.reason for g in section_map.gaps}
     lines = ['# 교재 절↔개념 대응표 검수 시트', '',
@@ -105,10 +99,10 @@ def write_review(section_map: SectionMap, sections: dict[tuple[str, str], dict],
             if section is None:
                 lines.append(f'| {book} | {_cell(section_id)} | (절 목록에 없음) | |')
                 continue
-            text = ' '.join(section['text'].split())
+            text = ' '.join(section.text.split())
             preview = text[:PREVIEW_CHARS] + ('…' if len(text) > PREVIEW_CHARS else '')
-            label = _section_label(section_id, section['title'])
-            lines.append(f'| {book} | {_cell(label)} | {_cell(section["title"])} | {_cell(preview)} |')
+            label = _section_label(section_id, section.title)
+            lines.append(f'| {book} | {_cell(label)} | {_cell(section.title)} | {_cell(preview)} |')
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
@@ -120,7 +114,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--review', type=Path, required=True, help='검수 시트(마크다운) 저장 경로')
     args = parser.parse_args(argv)
     section_map = load_section_map()
-    write_review(section_map, load_sections(), args.review)
+    source = DATA_DIR / 'sections.jsonl'
+    sections = {(s.book, s.section_id): s for s in load_sections(source)} if source.exists() else {}
+    write_review(section_map, sections, args.review)
     print(f'{args.review}: 대응 {len(section_map.entries)}절, 빈칸 {len(section_map.gaps)}개념')
     return 0
 

@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from rag.fetch import DATA_DIR
+from rag.parse import Section
 from rag.section_map import MAX_SECTIONS_PER_CONCEPT, load_section_map, write_review
 from rag.sources import BOOKS
 from serving.concept_map import load_concept_map
@@ -87,7 +88,7 @@ class ReviewSheetTests(unittest.TestCase):
             map_path.write_text(json.dumps({'version': 1, 'entries': [
                 {'book': 'ods', 'section_id': 'a#1.2', 'concepts': ['stack']},
             ], 'gaps': [{'concept': 'join-algorithms', 'reason': '공개 교재 없음'}]}), encoding='utf-8')
-            sections = {('ods', 'a#1.2'): {'title': 'Stacks | Queues', 'text': 'x' * 300}}
+            sections = {('ods', 'a#1.2'): Section('ods', 'a#1.2', 'Stacks | Queues', 'x' * 300, ())}
             write_review(load_section_map(map_path), sections, out)
             sheet = out.read_text(encoding='utf-8')
         self.assertIn('| 스택 | stack | 1 |', sheet)
