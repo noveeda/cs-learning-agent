@@ -31,6 +31,8 @@ htmlcov/
 /ai-core/data/raw/
 /ai-core/data/processed/
 /ai-core/outputs/
+# Open-textbook sources, figures and section/index files for RAG (rebuilt by python -m rag.fetch)
+/ai-core/data/rag/
 /ai-core/**/*.bin
 /ai-core/**/*.safetensors
 /ai-core/**/*.pt
