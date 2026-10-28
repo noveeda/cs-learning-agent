@@ -3,27 +3,13 @@
  * @brief 학습·로드맵 화면의 공통 내비게이션·헤더와 질문 보조 패널 구성
  */
 import { useRef, type ReactNode } from "react";
-import {
-  BookOpen,
-  Code2,
-  FileText,
-  History,
-  Home,
-  Layers,
-  Map,
-  Menu,
-  Plus,
-  Settings,
-  X,
-} from "lucide-react";
+import { BookOpen, Layers, Map, Menu, Plus, X } from "lucide-react";
 
-const upcoming = [
-  { label: "문제 풀이", icon: Code2 },
-  { label: "에이전트 기록", icon: History },
-  { label: "복습 노트", icon: FileText },
-];
-
-/** @brief 구현된 화면 이동 메뉴와 준비 중 메뉴를 구분해 표시 */
+/**
+ * @brief 구현된 화면(로드맵·학습하기)으로 이동하는 메뉴 표시
+ * - 대시보드·문제 풀이·에이전트 기록·복습 노트·설정은 범위에서 빠져(장기 학습 보조 제외 결정) 메뉴에 두지 않음
+ * - 동작하지 않는 메뉴가 발표·실험에서 혼란을 주지 않게 하기 위함
+ */
 function Navigation({
   page,
   busy,
@@ -35,11 +21,6 @@ function Navigation({
 }) {
   return (
     <nav className="navigation" aria-label="주 메뉴">
-      <button disabled>
-        <Home size={17} aria-hidden="true" />
-        <span>대시보드</span>
-        <small>준비 중</small>
-      </button>
       <button
         className={page === "roadmap" ? "nav-current" : ""}
         aria-current={page === "roadmap" ? "page" : undefined}
@@ -57,18 +38,6 @@ function Navigation({
       >
         <BookOpen size={17} aria-hidden="true" />
         <span>학습하기</span>
-      </button>
-      {upcoming.map(({ label, icon: Icon }) => (
-        <button key={label} disabled>
-          <Icon size={17} aria-hidden="true" />
-          <span>{label}</span>
-          <small>준비 중</small>
-        </button>
-      ))}
-      <button disabled>
-        <Settings size={17} aria-hidden="true" />
-        <span>설정</span>
-        <small>준비 중</small>
       </button>
     </nav>
   );

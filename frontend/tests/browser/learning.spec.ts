@@ -51,16 +51,17 @@ async function mockConversation(page: Page, messages: unknown[] = []) {
   );
 }
 
-test("준비 중 메뉴와 추천 질문, 모바일 메뉴의 닫기·초점 복원", async ({
+test("구현된 메뉴만 표시, 추천 질문, 모바일 메뉴의 닫기·초점 복원", async ({
   page,
 }) => {
   await mockConversation(page);
   await page.goto("/");
   await expect(page.getByLabel("질문", { exact: true })).toBeEnabled();
-  await expect(page.locator(".sidebar button:disabled")).toHaveCount(5);
-  await expect(page.locator(".sidebar small")).toHaveText(
-    Array(5).fill("준비 중"),
-  );
+  // 발표·실험에서 동작하지 않는 메뉴로 혼란이 없게, 구현된 화면(로드맵·학습하기)만 메뉴에 보임
+  await expect(
+    page.getByRole("navigation", { name: "주 메뉴" }).first().getByRole("button"),
+  ).toHaveText(["로드맵", "학습하기"]);
+  await expect(page.locator(".sidebar small")).toHaveCount(0);
   await page
     .getByRole("button", {
       name: "프로세스와 스레드는 어떻게 달라?",
@@ -74,7 +75,8 @@ test("준비 중 메뉴와 추천 질문, 모바일 메뉴의 닫기·초점 복
   await page.getByRole("button", { name: "메뉴 열기" }).click();
   const menu = page.getByRole("dialog", { name: "주 메뉴", exact: true });
   await expect(menu).toBeVisible();
-  await expect(menu.locator("button:disabled")).toHaveCount(5);
+  await expect(menu.getByRole("button", { name: "준비 중" })).toHaveCount(0);
+  await expect(menu.getByText("준비 중")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(menu).not.toBeVisible();
   await expect(page.getByRole("button", { name: "메뉴 열기" })).toBeFocused();
