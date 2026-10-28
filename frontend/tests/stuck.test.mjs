@@ -1,4 +1,7 @@
-// 파일 역할: 막힘 세션 API 호출·오류 분류(409 다시 불러오기, 503 재시도)·진행 중 세션 저장과 복구를 UI 없이 검증
+/**
+ * @file
+ * @brief 막힘 세션 API 호출·오류 분류(409 다시 불러오기, 503 재시도)·진행 중 세션 저장과 복구를 UI 없이 검증
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -24,7 +27,7 @@ const question = {
 const session = (version, view = question, stage = 'diagnose') => ({ id, version, stage, view, entry });
 const storageKey = 'cs-stuck-sessions-v1';
 
-// 역할: 요청 순서대로 응답을 돌려주고 보낸 요청을 기록하는 가짜 fetch
+/** @brief 요청 순서대로 응답을 돌려주고 보낸 요청을 기록하는 가짜 fetch */
 function mockFetch(t, ...responses) {
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url, init = {}) => {

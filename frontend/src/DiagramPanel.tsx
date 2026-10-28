@@ -1,9 +1,12 @@
-// 파일 역할: 생성된 SVG의 확대·저장·실패 안내; 작은 화면에서는 모달로 도식 표시
+/**
+ * @file
+ * @brief 생성된 SVG의 확대·저장·실패 안내; 작은 화면에서는 모달로 도식 표시
+ */
 import { useEffect, useRef, useState } from "react";
 import { Download, X } from "lucide-react";
 import type { Artifact } from "./api";
 
-// 역할: 현재 도식과 화면 너비에 따라 데스크톱 패널 또는 모바일 대화상자 구성
+/** @brief 현재 도식과 화면 너비에 따라 데스크톱 패널 또는 모바일 대화상자 구성 */
 export function DiagramPanel({
   artifact,
   onClose,

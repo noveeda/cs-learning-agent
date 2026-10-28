@@ -1,4 +1,7 @@
-// 파일 역할: 모의 API를 사용하는 실제 브라우저에서 대화·도식·오류·커리큘럼 전환을 검증
+/**
+ * @file
+ * @brief 모의 API를 사용하는 실제 브라우저에서 대화·도식·오류·커리큘럼 전환을 검증
+ */
 import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 
@@ -31,7 +34,7 @@ const restored = [
   },
 ];
 
-// 역할: 실제 모델 생성 없이 고정 SVG 응답을 제공해 도식 UI만 검증
+/** @brief 실제 모델 생성 없이 고정 SVG 응답을 제공해 도식 UI만 검증 */
 async function mockDiagram(page: Page) {
   await page.route("**/api/artifacts/diagram", (route) =>
     route.fulfill({
@@ -41,7 +44,7 @@ async function mockDiagram(page: Page) {
   );
 }
 
-// 역할: 원하는 문답 이력을 API 응답으로 주입해 화면 복구 시나리오 구성
+/** @brief 원하는 문답 이력을 API 응답으로 주입해 화면 복구 시나리오 구성 */
 async function mockConversation(page: Page, messages: unknown[] = []) {
   await page.route("**/api/conversations/*", (route) =>
     route.fulfill({ json: { messages } }),

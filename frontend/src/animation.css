@@ -1,4 +1,7 @@
-/* 파일 역할: 단계별 애니메이션 재생기 배치와 상자·화살표 모양; 막힘 패널 폭(모바일 375px 포함)에 맞춰 SVG를 축소 */
+/**
+ * @file
+ * @brief 단계별 애니메이션 재생기 배치와 상자·화살표 모양; 막힘 패널 폭(모바일 375px 포함)에 맞춰 SVG를 축소
+ */
 .animation-player { margin: var(--space-4) 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); }
 .animation-player:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .animation-title { margin: 0 0 var(--space-2); font-weight: 600; }

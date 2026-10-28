@@ -1,4 +1,7 @@
-// 파일 역할: 모의 막힘 세션 API로 [막혔어요]·붙여넣기 진입, 진단→결과→보충→확인→서술→요약→복귀, 새로고침 재개, 503 재시도·409 복구를 브라우저에서 검증
+/**
+ * @file
+ * @brief 모의 막힘 세션 API로 [막혔어요]·붙여넣기 진입, 진단→결과→보충→확인→서술→요약→복귀, 새로고침 재개, 503 재시도·409 복구를 브라우저에서 검증
+ */
 import { readFileSync } from "node:fs";
 import { test, expect, type Page, type Route } from "@playwright/test";
 
@@ -253,7 +256,7 @@ const graphBfs = {
 type Reply =
   { stage: string; view: object } | { status: number; message: string };
 
-// 역할: Spring 막힘 세션 API를 흉내 냄; 버전이 맞을 때만 다음 화면으로 넘기고 오류 응답은 상태를 바꾸지 않음
+/** @brief Spring 막힘 세션 API를 흉내 냄; 버전이 맞을 때만 다음 화면으로 넘기고 오류 응답은 상태를 바꾸지 않음 */
 async function mockStuck(page: Page, start: Reply, steps: Reply[]) {
   const calls: { method: string; body?: any }[] = [];
   let session: {
@@ -263,7 +266,7 @@ async function mockStuck(page: Page, start: Reply, steps: Reply[]) {
     view: object;
     entry: object;
   } | null = null;
-  // 역할: 오류 응답 또는 새 세션 상태를 돌려줌
+  /** @brief 오류 응답 또는 새 세션 상태를 돌려줌 */
   const fulfill = (
     route: Route,
     reply: Reply,
@@ -313,7 +316,7 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-// 역할: 로드맵에서 스택을 골라 학습 화면으로 들어감(개념별 대화 저장 후 이동)
+/** @brief 로드맵에서 스택을 골라 학습 화면으로 들어감(개념별 대화 저장 후 이동) */
 async function openStackLesson(page: Page) {
   await page.goto("/#/roadmap");
   await page

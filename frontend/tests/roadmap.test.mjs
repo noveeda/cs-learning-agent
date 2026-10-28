@@ -1,4 +1,7 @@
-// 파일 역할: 개념 지도 응답 해석·선수 관계 단계 배치·손상된 브라우저 저장값 복구를 검증
+/**
+ * @file
+ * @brief 개념 지도 응답 해석·선수 관계 단계 배치·손상된 브라우저 저장값 복구를 검증
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -11,7 +14,7 @@ const storageKey = 'cs-dsa-roadmap-v1';
 const emptyState = { selectedId: '', statuses: {}, conversationIds: {} };
 const stored = value => ({ getItem: () => JSON.stringify(value) });
 
-// 역할: 테스트마다 /api/concept-map 응답을 바꿔 끼우고 요청 주소 확인
+/** @brief 테스트마다 /api/concept-map 응답을 바꿔 끼우고 요청 주소 확인 */
 function mockMap(t, response) {
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     assert.equal(url, '/api/concept-map');
@@ -31,8 +34,10 @@ test('converts the API concept map into roadmap concepts with objectives and rea
   assert.ok(linked.prerequisites.every(p => p.reason.trim()));
 });
 
-// 역할: 여러 과목을 합친 지도 응답(AI core MVP 4 형식) 생성; 자료구조 지도 뒤에 운영체제 개념 2개를 붙임
-// - process-state → queue는 과목 사이 선수 관계, fcfs → process-state는 같은 과목 안 관계
+/**
+ * @brief 여러 과목을 합친 지도 응답(AI core MVP 4 형식) 생성; 자료구조 지도 뒤에 운영체제 개념 2개를 붙임
+ * - process-state → queue는 과목 사이 선수 관계, fcfs → process-state는 같은 과목 안 관계
+ */
 function mixedMap() {
   const os = (id, title, prerequisite) => ({
     id, title, description: title, objectives: [`${title}을 설명할 수 있다.`],

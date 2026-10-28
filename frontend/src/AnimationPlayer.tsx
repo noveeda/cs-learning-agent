@@ -1,5 +1,8 @@
-// 파일 역할: AI core가 계산한 애니메이션 프레임을 SVG로 그리고 이전·다음 단계로 넘기는 재생기; 막힘 보충 화면에서 사용
-// - 새 라이브러리 없이 SVG + CSS transition만 씀; 상자 id가 같으면 위치가 바뀔 때 transition으로 움직임을 보여 줌
+/**
+ * @file
+ * @brief AI core가 계산한 애니메이션 프레임을 SVG로 그리고 이전·다음 단계로 넘기는 재생기; 막힘 보충 화면에서 사용
+ * - 새 라이브러리 없이 SVG + CSS transition만 씀; 상자 id가 같으면 위치가 바뀔 때 transition으로 움직임을 보여 줌
+ */
 import { useId, useState, type KeyboardEvent } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
@@ -19,7 +22,7 @@ const BOX_WIDTH = 52;
 const NODE_WIDTH = 44;
 const BOX_HEIGHT = 40;
 
-// 역할: 상자 중심에서 테두리까지의 반 폭·반 높이; label은 테두리가 없어 글자 크기만큼만 둠
+/** @brief 상자 중심에서 테두리까지의 반 폭·반 높이; label은 테두리가 없어 글자 크기만큼만 둠 */
 const half = (box: Box) =>
   box.shape === "label"
     ? { w: 16, h: 10 }
@@ -28,14 +31,16 @@ const half = (box: Box) =>
         h: BOX_HEIGHT / 2,
       };
 
-// 역할: 상자 중심의 SVG 좌표
+/** @brief 상자 중심의 SVG 좌표 */
 const center = (box: Box) => ({
   x: box.x * CELL_WIDTH + CELL_WIDTH / 2,
   y: box.y * CELL_HEIGHT + CELL_HEIGHT / 2,
 });
 
-// 역할: 두 상자 중심을 잇되 상자 테두리에서 시작·끝나는 화살표 선분 계산
-// - 중심끼리 이으면 화살촉이 상자 안에 묻히므로, 방향을 따라 각 상자의 반 폭·반 높이만큼 안쪽에서 끊음
+/**
+ * @brief 두 상자 중심을 잇되 상자 테두리에서 시작·끝나는 화살표 선분 계산
+ * - 중심끼리 이으면 화살촉이 상자 안에 묻히므로, 방향을 따라 각 상자의 반 폭·반 높이만큼 안쪽에서 끊음
+ */
 function arrowLine(source: Box, target: Box) {
   const from = center(source);
   const to = center(target);
@@ -60,9 +65,11 @@ function arrowLine(source: Box, target: Box) {
   };
 }
 
-// 역할: 단계별 애니메이션 재생기; animation을 받아 현재 단계 프레임·한 줄 설명·이전/다음 버튼을 그림
-// - 단계 상태는 이 컴포넌트 안에만 있음; 다른 애니메이션으로 바뀔 때는 부모가 key를 바꿔 첫 단계부터 다시 보여 줌
-// - 키보드 ←·→는 재생기에 초점이 있을 때만 받음(보충 화면의 답 입력창 커서 이동과 겹치지 않게 함)
+/**
+ * @brief 단계별 애니메이션 재생기; animation을 받아 현재 단계 프레임·한 줄 설명·이전/다음 버튼을 그림
+ * - 단계 상태는 이 컴포넌트 안에만 있음; 다른 애니메이션으로 바뀔 때는 부모가 key를 바꿔 첫 단계부터 다시 보여 줌
+ * - 키보드 ←·→는 재생기에 초점이 있을 때만 받음(보충 화면의 답 입력창 커서 이동과 겹치지 않게 함)
+ */
 export function AnimationPlayer({ animation }: { animation: AnimationData }) {
   const [step, setStep] = useState(0);
   const markerId = useId();

@@ -1,15 +1,18 @@
-// 파일 역할: 막힘 세션 API 호출·오류 분류와 진행 중 세션 ID의 브라우저 저장; 패널 화면과 통신·저장 처리를 분리
-// - 화면 내용(view)은 AI core 엔진이 만들고 Spring이 저장한 체크포인트를 그대로 받음; 정답 키는 오지 않음
+/**
+ * @file
+ * @brief 막힘 세션 API 호출·오류 분류와 진행 중 세션 ID의 브라우저 저장; 패널 화면과 통신·저장 처리를 분리
+ * - 화면 내용(view)은 AI core 엔진이 만들고 Spring이 저장한 체크포인트를 그대로 받음; 정답 키는 오지 않음
+ */
 import type { AnimationData } from "./animation";
 
-// 역할: 막힘이 시작된 곳; return_to는 복귀할 해시 경로(예: #/learn?concept=stack)
+/** @brief 막힘이 시작된 곳; return_to는 복귀할 해시 경로(예: #/learn?concept=stack) */
 export type Entry =
   | { kind: "roadmap"; concept: string; return_to: string }
   | { kind: "excerpt"; excerpt: string; return_to: string };
 
 export type ConceptRef = { id: string; title: string };
 
-// 역할: 화면용 문항; 선택형은 A~D 보기, 단답·서술은 입력창으로 답함
+/** @brief 화면용 문항; 선택형은 A~D 보기, 단답·서술은 입력창으로 답함 */
 export type ItemView = {
   id: string;
   format: "multiple_choice" | "short_exact" | "explanation";
@@ -17,7 +20,7 @@ export type ItemView = {
   options?: Record<string, string>;
 };
 
-// 역할: 진단 결과의 판정 근거 한 줄; 학습자가 본 문항과 낸 답(건너뛰기·문항 없음이면 null)
+/** @brief 진단 결과의 판정 근거 한 줄; 학습자가 본 문항과 낸 답(건너뛰기·문항 없음이면 null) */
 export type Evidence = {
   concept: string;
   item: string | null;
@@ -27,7 +30,7 @@ export type Evidence = {
   options?: Record<string, string>;
 };
 
-// 역할: 엔진 view.kind별 화면 내용(stuck.py와 같은 필드 이름)
+/** @brief 엔진 view.kind별 화면 내용(stuck.py와 같은 필드 이름) */
 export type StuckView =
   | {
       kind: "question";
@@ -70,7 +73,7 @@ export type StuckView =
     }
   | { kind: "out_of_scope"; return_to: string };
 
-// 역할: Spring이 브라우저에 공개하는 세션; version은 다음 step 요청에 그대로 돌려보내는 체크포인트 번호
+/** @brief Spring이 브라우저에 공개하는 세션; version은 다음 step 요청에 그대로 돌려보내는 체크포인트 번호 */
 export type StuckSession = {
   id: string;
   version: number;
@@ -85,7 +88,7 @@ export type StepInput =
   | { type: "opt_out" }
   | { type: "continue" };
 
-// 역할: HTTP 상태와 한국어 안내를 함께 담은 오류; status 0은 서버에 닿지 못한 경우
+/** @brief HTTP 상태와 한국어 안내를 함께 담은 오류; status 0은 서버에 닿지 못한 경우 */
 export class StuckError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -94,8 +97,10 @@ export class StuckError extends Error {
   }
 }
 
-// 역할: 같은 요청을 다시 보내도 되는 일시적 실패인지 판단
-// - 502·503·504·연결 실패: Spring이 상태를 바꾸지 않았으므로 같은 version으로 재전송 가능
+/**
+ * @brief 같은 요청을 다시 보내도 되는 일시적 실패인지 판단
+ * - 502·503·504·연결 실패: Spring이 상태를 바꾸지 않았으므로 같은 version으로 재전송 가능
+ */
 export function canRetry(error: unknown) {
   return (
     error instanceof StuckError && [0, 502, 503, 504].includes(error.status)
@@ -106,14 +111,14 @@ export function isFinished(stage: string) {
   return stage === "complete" || stage === "out_of_scope";
 }
 
-// 역할: 진행 중 세션을 개념·진입별로 구분하는 저장 키; 붙여넣기는 시작한 학습 화면별로 하나
+/** @brief 진행 중 세션을 개념·진입별로 구분하는 저장 키; 붙여넣기는 시작한 학습 화면별로 하나 */
 export function entryKey(entry: Entry) {
   return entry.kind === "roadmap"
     ? `roadmap:${entry.concept}`
     : `excerpt:${entry.return_to}`;
 }
 
-// 역할: JSON 요청을 보내고 실패하면 서버의 message(없으면 기본 안내)로 StuckError 발생
+/** @brief JSON 요청을 보내고 실패하면 서버의 message(없으면 기본 안내)로 StuckError 발생 */
 async function request(url: string, body?: unknown): Promise<StuckSession> {
   let response: Response;
   try {
@@ -153,7 +158,7 @@ export function getSession(id: string) {
   return request(`/api/stuck/sessions/${id}`);
 }
 
-// 역할: 한 단계 진행; 409(다른 탭 진행·동시 요청)면 저장된 최신 단계를 다시 불러와 reloaded로 알림
+/** @brief 한 단계 진행; 409(다른 탭 진행·동시 요청)면 저장된 최신 단계를 다시 불러와 reloaded로 알림 */
 export async function stepSession(
   session: StuckSession,
   input: StepInput,
@@ -170,7 +175,7 @@ export async function stepSession(
   }
 }
 
-// 역할: 진행 중 세션 목록과 열려 있던 패널; 새로고침·재접속 후 GET으로 같은 단계를 복구하는 기준
+/** @brief 진행 중 세션 목록과 열려 있던 패널; 새로고침·재접속 후 GET으로 같은 단계를 복구하는 기준 */
 export type StuckStore = {
   sessions: Record<string, string>;
   active: string | null;
@@ -178,7 +183,7 @@ export type StuckStore = {
 
 const storageKey = "cs-stuck-sessions-v1";
 
-// 역할: 형식이 맞는 키(roadmap:·excerpt:)와 Spring 세션 ID(32자리 16진수)만 복구; 손상값은 빈 목록
+/** @brief 형식이 맞는 키(roadmap:·excerpt:)와 Spring 세션 ID(32자리 16진수)만 복구; 손상값은 빈 목록 */
 export function loadStuckStore(storage?: Pick<Storage, "getItem">): StuckStore {
   const store: StuckStore = { sessions: {}, active: null };
   try {
@@ -208,7 +213,7 @@ export function loadStuckStore(storage?: Pick<Storage, "getItem">): StuckStore {
   return store;
 }
 
-// 역할: 저장 실패 예외는 호출 화면이 안내하도록 그대로 전달
+/** @brief 저장 실패 예외는 호출 화면이 안내하도록 그대로 전달 */
 export function saveStuckStore(
   store: StuckStore,
   storage: Pick<Storage, "setItem"> = localStorage,
@@ -216,7 +221,7 @@ export function saveStuckStore(
   storage.setItem(storageKey, JSON.stringify({ version: 1, ...store }));
 }
 
-// 역할: 새로 시작한 세션을 진행 중 목록에 넣고 열린 패널로 표시
+/** @brief 새로 시작한 세션을 진행 중 목록에 넣고 열린 패널로 표시 */
 export function rememberStuckSession(
   key: string,
   id: string,
@@ -229,7 +234,7 @@ export function rememberStuckSession(
   );
 }
 
-// 역할: 끝난 세션(complete·out_of_scope)을 진행 중 목록에서 빼고 패널 열림 표시도 지움
+/** @brief 끝난 세션(complete·out_of_scope)을 진행 중 목록에서 빼고 패널 열림 표시도 지움 */
 export function finishStuckSession(
   key: string,
   storage: Pick<Storage, "getItem" | "setItem"> = localStorage,

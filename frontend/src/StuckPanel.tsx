@@ -1,4 +1,7 @@
-// 파일 역할: [막혔어요]·붙여넣기 진입 버튼과 막힘 패널; 엔진이 만든 view.kind별 화면(진단·결과·보충·확인·복귀)을 그리고 입력을 한 단계씩 보냄
+/**
+ * @file
+ * @brief [막혔어요]·붙여넣기 진입 버튼과 막힘 패널; 엔진이 만든 view.kind별 화면(진단·결과·보충·확인·복귀)을 그리고 입력을 한 단계씩 보냄
+ */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import { LoaderCircle, RotateCcw, X } from "lucide-react";
@@ -22,7 +25,7 @@ import {
 } from "./stuck";
 import "./stuck.css";
 
-// 역할: 패널을 여는 방법; 진행 중 세션 재개·새 세션 시작·붙여넣기 입력부터 시작
+/** @brief 패널을 여는 방법; 진행 중 세션 재개·새 세션 시작·붙여넣기 입력부터 시작 */
 export type StuckRequest =
   | { mode: "resume"; key: string; id: string }
   | { mode: "start"; entry: Entry }
@@ -45,7 +48,7 @@ const outcomeLabels: Record<string, string> = {
   pending: "진행 전",
 };
 
-// 역할: 개념 학습 화면·로드맵 상세의 [막혔어요]; 확인·서술 문항이 아직 없는 개념은 버튼 대신 안내 문구
+/** @brief 개념 학습 화면·로드맵 상세의 [막혔어요]; 확인·서술 문항이 아직 없는 개념은 버튼 대신 안내 문구 */
 export function StuckButton({
   concept,
   inProgress,
@@ -69,7 +72,7 @@ export function StuckButton({
   );
 }
 
-// 역할: 문항 형식에 맞는 답 입력(선택형 보기·단답·서술)과 제출; 같은 단계에서 재시도해도 입력값을 유지
+/** @brief 문항 형식에 맞는 답 입력(선택형 보기·단답·서술)과 제출; 같은 단계에서 재시도해도 입력값을 유지 */
 function AnswerForm({
   item,
   disabled,
@@ -151,9 +154,11 @@ function AnswerForm({
   );
 }
 
-// 역할: 막힘 세션 하나를 열어 단계별 화면을 그림
-// - 세션 ID는 처음 받은 순간 브라우저에 저장하고, 끝나면 진행 중 목록에서 뺌(새로고침 재개 기준)
-// - 요청은 한 번에 하나만 보냄(inFlight): 연속 클릭으로 같은 단계를 두 번 진행하지 않게 함
+/**
+ * @brief 막힘 세션 하나를 열어 단계별 화면을 그림
+ * - 세션 ID는 처음 받은 순간 브라우저에 저장하고, 끝나면 진행 중 목록에서 뺌(새로고침 재개 기준)
+ * - 요청은 한 번에 하나만 보냄(inFlight): 연속 클릭으로 같은 단계를 두 번 진행하지 않게 함
+ */
 export function StuckPanel({
   request,
   concepts,
@@ -189,7 +194,7 @@ export function StuckPanel({
   const titleOf = (id: string) =>
     concepts.find((concept) => concept.id === id)?.title ?? id;
 
-  // 역할: 받은 세션을 화면에 반영하고 진행 중 목록 저장·정리; 저장 실패는 진행을 막지 않고 안내만 함
+  /** @brief 받은 세션을 화면에 반영하고 진행 중 목록 저장·정리; 저장 실패는 진행을 막지 않고 안내만 함 */
   function accept(next: StuckSession) {
     setSession(next);
     const key = entryKey(next.entry);
@@ -205,9 +210,11 @@ export function StuckPanel({
     onSessionsChange();
   }
 
-  // 역할: 요청 하나를 실행하고 오류 종류별로 안내
-  // - 일시적 실패(502·503·504·연결)는 같은 요청(같은 version)을 다시 보내는 버튼 제공; 화면 상태는 그대로 둠
-  // - 404는 저장된 세션이 사라진 것이므로 진행 중 목록에서 빼고 다시 시작하도록 안내
+  /**
+   * @brief 요청 하나를 실행하고 오류 종류별로 안내
+   * - 일시적 실패(502·503·504·연결)는 같은 요청(같은 version)을 다시 보내는 버튼 제공; 화면 상태는 그대로 둠
+   * - 404는 저장된 세션이 사라진 것이므로 진행 중 목록에서 빼고 다시 시작하도록 안내
+   */
   async function run(
     label: string,
     action: () => Promise<{ session: StuckSession; reloaded?: boolean }>,
@@ -250,12 +257,12 @@ export function StuckPanel({
     }
   }
 
-  // 역할: 현재 세션에 입력 하나를 보냄; LLM 단계는 오래 걸릴 수 있어 진행 문구를 함께 넘김
+  /** @brief 현재 세션에 입력 하나를 보냄; LLM 단계는 오래 걸릴 수 있어 진행 문구를 함께 넘김 */
   function send(input: StepInput, label: string) {
     if (session) run(label, () => stepSession(session, input));
   }
 
-  // 역할: 붙여넣은 문장으로 새 세션 시작; return_to는 패널을 연 학습 화면
+  /** @brief 붙여넣은 문장으로 새 세션 시작; return_to는 패널을 연 학습 화면 */
   function startExcerpt(returnTo: string) {
     const text = excerpt.trim();
     if (!text) return;
@@ -271,9 +278,11 @@ export function StuckPanel({
     );
   }
 
-  // 역할: "처음부터 다시"(확인 후); 브라우저의 진행 중 목록에서만 빼고 서버 세션 파일은 그대로 둠
-  // - 개념 진입은 같은 entry로 바로 새 세션을 시작
-  // - 붙여넣기는 다른 문장으로 바꿀 수 있게 이전 문장을 채운 입력창으로 돌아감
+  /**
+   * @brief "처음부터 다시"(확인 후); 브라우저의 진행 중 목록에서만 빼고 서버 세션 파일은 그대로 둠
+   * - 개념 진입은 같은 entry로 바로 새 세션을 시작
+   * - 붙여넣기는 다른 문장으로 바꿀 수 있게 이전 문장을 채운 입력창으로 돌아감
+   */
   function restart() {
     if (!session || inFlight.current) return;
     const entry = session.entry;
@@ -326,7 +335,7 @@ export function StuckPanel({
   const continueLabel =
     "다음 단계를 준비하고 있어요. 설명을 만드는 단계는 수십 초 걸릴 수 있어요.";
 
-  // 역할: view.kind별 본문; 정답 키는 받지 않으므로 정답을 표시하지 않고 학습자 답과 판정만 보여 줌
+  /** @brief view.kind별 본문; 정답 키는 받지 않으므로 정답을 표시하지 않고 학습자 답과 판정만 보여 줌 */
   function body() {
     if (!session || !view) {
       if (pasteTo === null) return null;

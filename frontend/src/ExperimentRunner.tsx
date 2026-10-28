@@ -1,7 +1,10 @@
-// 파일 역할: #/experiment 비교 실험 화면; 진행자 시작 화면과 참가자 단계 화면(사전 시험·학습 2회·사후 시험·설문)
-// - 실험 중에는 로드맵·메뉴를 그리지 않고 단계 제목과 서버 기준 남은 시간만 보여 줌
-// - 제안 시스템 조건은 기존 StuckPanel(붙여넣기 진입), 채팅 조건은 기존 ChatSession을 그대로 씀
-// - 조건이 섞이지 않게 채팅 조건에는 막힘 진입을, 제안 시스템 조건에는 자유 채팅 입력을 두지 않음
+/**
+ * @file
+ * @brief #/experiment 비교 실험 화면; 진행자 시작 화면과 참가자 단계 화면(사전 시험·학습 2회·사후 시험·설문)
+ * - 실험 중에는 로드맵·메뉴를 그리지 않고 단계 제목과 서버 기준 남은 시간만 보여 줌
+ * - 제안 시스템 조건은 기존 StuckPanel(붙여넣기 진입), 채팅 조건은 기존 ChatSession을 그대로 씀
+ * - 조건이 섞이지 않게 채팅 조건에는 막힘 진입을, 제안 시스템 조건에는 자유 채팅 입력을 두지 않음
+ */
 import { useEffect, useMemo, useState } from "react";
 import { loadConceptMap } from "./api";
 import { ChatSession } from "./ChatSession";
@@ -31,9 +34,11 @@ import {
 } from "./experiment";
 import "./experiment.css";
 
-// 역할: 같은 사건을 새로고침 뒤에 다시 보내지 않도록, 기록에 성공한 사건을 세션·단계별로 브라우저에 남김
-// - 보내는 중인 사건도 기억해 StrictMode의 effect 이중 실행·연속 클릭으로 두 번 보내지 않음
-// - 실패하면 표시를 남기지 않아 다음 기회에 다시 보냄. 저장이 안 되는 환경이면 화면이 켜져 있는 동안만 기억
+/**
+ * @brief 같은 사건을 새로고침 뒤에 다시 보내지 않도록, 기록에 성공한 사건을 세션·단계별로 브라우저에 남김
+ * - 보내는 중인 사건도 기억해 StrictMode의 effect 이중 실행·연속 클릭으로 두 번 보내지 않음
+ * - 실패하면 표시를 남기지 않아 다음 기회에 다시 보냄. 저장이 안 되는 환경이면 화면이 켜져 있는 동안만 기억
+ */
 const sentInMemory = new Set<string>();
 const sending = new Set<string>();
 const sentKey = (key: string) => `cs-experiment-sent:${key}`;
@@ -59,7 +64,7 @@ async function sendOnce(key: string, action: () => Promise<boolean>) {
   }
 }
 
-// 역할: 학습 단계별 채팅 대화 id; 새로고침해도 같은 대화를 이어 보도록 브라우저에 보관
+/** @brief 학습 단계별 채팅 대화 id; 새로고침해도 같은 대화를 이어 보도록 브라우저에 보관 */
 function chatConversationId(session: string, stage: string): string {
   const key = `cs-experiment-chat:${session}:${stage}`;
   try {
@@ -73,7 +78,7 @@ function chatConversationId(session: string, stage: string): string {
   }
 }
 
-// 역할: 실험 화면 전체; 세션이 없으면 진행자 시작 화면, 있으면 서버가 알려 준 단계 화면
+/** @brief 실험 화면 전체; 세션이 없으면 진행자 시작 화면, 있으면 서버가 알려 준 단계 화면 */
 export function ExperimentRunner() {
   const [id, setId] = useState(() => loadExperimentId());
   const [view, setView] = useState<ExperimentView | null>(null);
@@ -106,7 +111,7 @@ export function ExperimentRunner() {
     };
   }, [id]);
 
-  // 역할: 진행할 세션을 정하고 새로고침 복구용으로 저장
+  /** @brief 진행할 세션을 정하고 새로고침 복구용으로 저장 */
   function open(next: ExperimentView | string) {
     const nextId = typeof next === "string" ? next : next.id;
     saveExperimentId(nextId);
@@ -115,7 +120,7 @@ export function ExperimentRunner() {
     setView(typeof next === "string" ? null : next);
   }
 
-  // 역할: 단계 화면의 POST 뒤 다시 읽은 상태를 반영; 실패하면 화면을 그대로 두고 안내
+  /** @brief 단계 화면의 POST 뒤 다시 읽은 상태를 반영; 실패하면 화면을 그대로 두고 안내 */
   async function apply(action: () => Promise<ExperimentView>) {
     setError("");
     try {
@@ -200,7 +205,7 @@ export function ExperimentRunner() {
   );
 }
 
-// 역할: 서버가 준 남은 초에서 1초마다 줄여 보여 줌; 새로고침하면 서버 값으로 다시 시작하므로 시간이 늘지 않음
+/** @brief 서버가 준 남은 초에서 1초마다 줄여 보여 줌; 새로고침하면 서버 값으로 다시 시작하므로 시간이 늘지 않음 */
 function Countdown({ seconds }: { seconds: number }) {
   const [deadline] = useState(() => Date.now() + seconds * 1000);
   const [now, setNow] = useState(Date.now);
@@ -219,8 +224,10 @@ function Countdown({ seconds }: { seconds: number }) {
   );
 }
 
-// 역할: 진행자 시작 화면; 참가자 코드·학년·수강 여부·제외할 개념을 받아 세션을 만듦
-// - 같은 코드가 이미 있으면 서버가 409로 막고 기존 세션 id를 주므로 재개를 고르게 함
+/**
+ * @brief 진행자 시작 화면; 참가자 코드·학년·수강 여부·제외할 개념을 받아 세션을 만듦
+ * - 같은 코드가 이미 있으면 서버가 409로 막고 기존 세션 id를 주므로 재개를 고르게 함
+ */
 function SetupScreen({
   onOpen,
 }: {
@@ -352,7 +359,7 @@ function SetupScreen({
   );
 }
 
-// 역할: 시험·설문 문항을 한 화면 목록으로 보여 주고 한 번에 제출; 제출 후에는 고칠 수 없으므로 확인을 한 번 더 받음
+/** @brief 시험·설문 문항을 한 화면 목록으로 보여 주고 한 번에 제출; 제출 후에는 고칠 수 없으므로 확인을 한 번 더 받음 */
 function ItemsForm({
   items,
   intro,
@@ -414,7 +421,7 @@ function ItemsForm({
   );
 }
 
-// 역할: 문항 형식별 입력(보기 선택·1~5 척도·단답·서술)
+/** @brief 문항 형식별 입력(보기 선택·1~5 척도·단답·서술) */
 function ItemInput({
   item,
   value,
@@ -469,9 +476,11 @@ function ItemInput({
   );
 }
 
-// 역할: 학습 단계 화면; 왼쪽 읽기 글, 오른쪽 배정된 도구 하나
-// - 마감(서버 남은 시간 0)이 되면 도구를 닫고 timeout을 보낸 뒤 "계속 읽기"를 막고 다음 단계 버튼만 남김
-// - 사건(help_open·stuck_session·chat_conversation)은 처음 한 번만 보내고 시각은 서버가 붙임
+/**
+ * @brief 학습 단계 화면; 왼쪽 읽기 글, 오른쪽 배정된 도구 하나
+ * - 마감(서버 남은 시간 0)이 되면 도구를 닫고 timeout을 보낸 뒤 "계속 읽기"를 막고 다음 단계 버튼만 남김
+ * - 사건(help_open·stuck_session·chat_conversation)은 처음 한 번만 보내고 시각은 서버가 붙임
+ */
 function LearnScreen({
   view,
   concepts,
@@ -513,7 +522,7 @@ function LearnScreen({
     if (!part2) sendOnce(eventKey("timeout"), () => send("timeout"));
   }, [expired]);
 
-  // 역할: 사건 하나 기록하고 성공 여부를 돌려줌; 실패해도 학습은 막지 않고 안내만 함
+  /** @brief 사건 하나 기록하고 성공 여부를 돌려줌; 실패해도 학습은 막지 않고 안내만 함 */
   async function send(type: Parameters<typeof postEvent>[1], ref?: string) {
     try {
       await postEvent(view.id, type, ref);
@@ -528,7 +537,7 @@ function LearnScreen({
     sendOnce(eventKey("help_open"), () => send("help_open"));
   }
 
-  // 역할: 제안 시스템의 [막혔어요]; 이 단계에서 진행 중인 막힘 세션이 있으면 이어서 엶
+  /** @brief 제안 시스템의 [막혔어요]; 이 단계에서 진행 중인 막힘 세션이 있으면 이어서 엶 */
   function openStuck() {
     helpOpened();
     const id = loadStuckStore().sessions[stuckKey];
@@ -537,13 +546,13 @@ function LearnScreen({
     );
   }
 
-  // 역할: 막힘 패널이 세션을 저장할 때마다 이 단계 세션 id를 읽어 처음 본 id만 stuck_session으로 보냄
+  /** @brief 막힘 패널이 세션을 저장할 때마다 이 단계 세션 id를 읽어 처음 본 id만 stuck_session으로 보냄 */
   function sessionsChanged() {
     const id = loadStuckStore().sessions[stuckKey];
     if (id) sendOnce(eventKey(`stuck:${id}`), () => send("stuck_session", id));
   }
 
-  // 역할: 패널을 닫으면 메인 학습 화면에서 자동으로 다시 열리지 않도록 열림 표시를 지움
+  /** @brief 패널을 닫으면 메인 학습 화면에서 자동으로 다시 열리지 않도록 열림 표시를 지움 */
   function closeStuck() {
     try {
       saveStuckStore({ ...loadStuckStore(), active: null });
@@ -553,7 +562,7 @@ function LearnScreen({
     setStuck(null);
   }
 
-  // 역할: 2부 열기(O2 기록); 응답이 2부가 든 서버 상태라 그대로 그리고, 마감과 겹쳐 거부되면 서버 상태를 다시 읽어 그림
+  /** @brief 2부 열기(O2 기록); 응답이 2부가 든 서버 상태라 그대로 그리고, 마감과 겹쳐 거부되면 서버 상태를 다시 읽어 그림 */
   async function continueReading() {
     setBusy(true);
     try {

@@ -1,4 +1,7 @@
-/* 파일 역할: 선수 관계 단계 지도(노드·선·단계 이름)의 위치와 탐색 강조, 과목 표식·필터, 상세 패널, 모바일 단계별 목록 배치 */
+/**
+ * @file
+ * @brief 선수 관계 단계 지도(노드·선·단계 이름)의 위치와 탐색 강조, 과목 표식·필터, 상세 패널, 모바일 단계별 목록 배치
+ */
 .primary { background: var(--color-primary); color: #fff; }
 .primary:hover { background: var(--color-primary-hover); }
 .app-notice { flex-shrink: 0; width: calc(100% - 48px); max-width: none; margin: 0 var(--space-5) var(--space-3); }

@@ -1,4 +1,7 @@
-// 파일 역할: 애니메이션 재생기의 순수 계산(고정 화면 크기·단계 범위)과 보충 화면 분기를 UI 없이 검증
+/**
+ * @file
+ * @brief 애니메이션 재생기의 순수 계산(고정 화면 크기·단계 범위)과 보충 화면 분기를 UI 없이 검증
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CELL_HEIGHT, CELL_WIDTH, clampStep, fitViewBox, remediationParts, squeezesLabel } from '../src/animation.ts';
