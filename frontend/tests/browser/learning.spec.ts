@@ -355,3 +355,92 @@ test("개념 대화와 로드맵을 유지하며 커리큘럼 입력을 보존�
   await expect(question).toBeVisible();
   await expect(page.getByLabel("학습 주제", { exact: true })).toBeHidden();
 });
+
+// 하네스(CS_HARNESS=1) 답과 같은 모양: 문장마다 각주 [^p1], 확인 필요 문장 끝 ⚠️, 각주 정의는 원문 인용 + 출처
+const harnessAnswer = [
+  "단일 연결 리스트는 각 노드가 다음 노드를 가리킨다.[^p1] 맨 앞 삽입은 상수 시간에 끝난다.[^p1] ⚠️ **확인 필요**",
+  "",
+  "[^p1]: > A singly-linked list is a sequence of nodes. Each node stores a data value and a reference to the next node.",
+  "",
+  "    Open Data Structures, Pat Morin, 3.1 SLList, [CC BY 2.5](https://creativecommons.org/licenses/by/2.5/), 발췌",
+  "",
+  "**출처**",
+  "",
+  "- Open Data Structures, Pat Morin, 3.1 SLList, [CC BY 2.5](https://creativecommons.org/licenses/by/2.5/), 발췌",
+].join("\n");
+const figureId = "c".repeat(32);
+const figure = {
+  type: "artifact", kind: "figure", artifact_id: figureId, url: `/api/artifacts/${figureId}`,
+  figure: {
+    title: "Open Data Structures · 3.1",
+    caption: "Figure 3.1: A sequence of operations on an SLList",
+    source: "Open Data Structures, Pat Morin, 3.1, CC BY 2.5, 발췌",
+  },
+};
+// 1×1 PNG; 그림 패널이 PNG를 오류 없이 띄우는지만 확인하면 되므로 내용은 상관없음
+const pixelPng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+
+// 검증 목적: 하네스 진행 단계가 스트림 도중 문구로 보이고, 완료 답의 각주·⚠️ 확인 필요·교재 그림(캡션·출처·PNG 저장)이 보이며
+// 마지막에 오는 grounding artifact가 그림을 가리지 않는지 확인
+test("근거 하네스 답: 진행 단계 표시, 각주·확인 필요, 교재 그림 캡션·출처", async ({ page }) => {
+  await mockConversation(page);
+  await page.route(`**/api/artifacts/${figureId}`, (route) =>
+    route.fulfill({ contentType: "image/png", body: pixelPng }),
+  );
+  // route.fulfill은 본문을 한 번에 보내므로, 진행 단계를 하나씩 보려면 /api/chat 응답 스트림을 테스트가 직접 흘려보냄
+  await page.addInitScript(() => {
+    const original = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      if (String(input) !== "/api/chat") return original(input, init);
+      return new Response(new ReadableStream({
+        start(controller) {
+          (window as unknown as { chat: ReadableStreamDefaultController }).chat = controller;
+        },
+      }));
+    };
+  });
+  /** @brief 이벤트 몇 개를 NDJSON 줄로 스트림에 넣음; close면 스트림을 닫음 */
+  const push = (events: unknown[], close = false) =>
+    page.evaluate(([lines, end]) => {
+      const chat = (window as unknown as { chat: ReadableStreamDefaultController }).chat;
+      chat.enqueue(new TextEncoder().encode(lines as string));
+      if (end) chat.close();
+    }, [events.map((e) => JSON.stringify(e) + "\n").join(""), close] as const);
+
+  await page.goto("/");
+  const input = page.getByLabel("질문", { exact: true });
+  await input.fill("연결 리스트를 설명해줘");
+  await input.press("Enter");
+  await expect.poll(() => page.evaluate(() => "chat" in window)).toBe(true);
+  await push([{ type: "status", stage: "scope" }]);
+  await expect(page.locator(".status")).toHaveText("질문 범위 확인 중");
+  await push([{ type: "status", stage: "search" }, { type: "status", stage: "write" },
+    { type: "status", stage: "check", index: 2, total: 2 }]);
+  await expect(page.locator(".status")).toHaveText("확인 중 (2/2)");
+  await push([
+    { type: "text_start" },
+    { type: "text_delta", text: harnessAnswer.split("\n")[0] },
+    figure,
+    { type: "artifact", kind: "grounding", artifact_id: "b".repeat(32),
+      grounding: { concepts: ["linked-list"], passage_ids: ["ods#3.1#p1"], verified: [] } },
+    { type: "answer", text: harnessAnswer },
+    { type: "done" },
+  ], true);
+
+  const answer = page.locator(".message.assistant").last();
+  await expect(answer.locator("sup a[data-footnote-ref]")).toHaveCount(2);
+  await expect(answer.locator("section[data-footnotes] blockquote")).toContainText("A singly-linked list");
+  await expect(answer).toContainText("⚠️ 확인 필요");
+  await expect(answer.getByRole("link", { name: "CC BY 2.5" }).first()).toBeVisible();
+  const panel = page.getByRole("complementary", { name: "교재 그림" });
+  await expect(panel.getByRole("heading", { name: figure.figure.title })).toBeVisible();
+  await expect(panel).toContainText(figure.figure.caption);
+  await expect(panel).toContainText(figure.figure.source);
+  await expect(panel.getByRole("img", { name: figure.figure.title })).toBeVisible();
+  const download = page.waitForEvent("download");
+  await panel.getByRole("link", { name: "PNG 저장" }).click();
+  expect((await download).suggestedFilename()).toBe(`${figure.figure.title}.png`);
+  // 답 아래 artifact 단추가 grounding이 아니라 그림을 가리킴
+  await expect(answer.locator(".artifact-chip")).toHaveText(figure.figure.title);
+});

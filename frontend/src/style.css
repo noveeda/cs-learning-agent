@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief 공통 학습 화면·채팅·마크다운 표/수식·도식·커리큘럼 스타일과 반응형 배치
+ * @brief 공통 학습 화면·채팅·마크다운 표/수식/근거 각주·도식/교재 그림·커리큘럼 스타일과 반응형 배치
  */
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
 @import './tokens.css';
@@ -85,6 +85,13 @@ textarea::placeholder { color: var(--color-muted); }
 .message-content th, .message-content td { min-width: 8rem; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; overflow-wrap: normal; }
 .message-content .katex { font-size: 1.1em; }
 .message-content .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+/* 근거 하네스 답의 각주(remark-gfm): 본문 번호는 작게, 각주 정의(교재 원문 인용 + 출처)는 본문과 구분되는 옅은 바탕에 */
+.message-content a[data-footnote-ref] { text-decoration: none; font-size: 0.8em; padding: 0 1px; }
+.message-content section[data-footnotes] { margin-top: var(--space-4); padding: var(--space-3) var(--space-4); background: var(--color-background); border-radius: var(--radius-control); font-size: var(--text-small); }
+.message-content section[data-footnotes] ol { margin: 0; padding-left: var(--space-5); }
+.message-content section[data-footnotes] li + li { margin-top: var(--space-3); }
+.message-content section[data-footnotes] blockquote { margin: 0 0 var(--space-2); padding-left: var(--space-3); border-left: 3px solid var(--color-border); }
+.message-content a[data-footnote-backref] { text-decoration: none; }
 
 .artifact-chip { border: 1px solid var(--color-border); border-radius: var(--radius-control); padding: var(--space-3); font-size: var(--text-small); color: var(--color-primary); margin-top: var(--space-3); background: var(--color-primary-soft); max-width: 100%; text-align: left; overflow-wrap: anywhere; }
 .artifact-chip svg { flex-shrink: 0; }
@@ -111,6 +118,10 @@ textarea::placeholder { color: var(--color-muted); }
 .diagram-stage.zoomed img { width: 940px; min-width: 940px; max-height: none; }
 .panel-footer { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); padding: var(--space-4); font-size: var(--text-small); }
 .panel-footer a, .panel-footer > button { min-height: 40px; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-control); }
+/* 교재 그림 캡션·출처: 그림 바로 아래, 출처는 한 단계 옅게 */
+.figure-caption { padding: var(--space-3) var(--space-4) 0; font-size: var(--text-small); line-height: 1.6; }
+.figure-caption p { margin: 0; }
+.figure-caption .figure-source { color: var(--color-muted); margin-top: var(--space-1); }
 .spin { animation: spin 1.2s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

@@ -1,10 +1,10 @@
 /**
  * @file
- * @brief 네트워크 조각 경계와 중단·도식 이벤트 및 대화 복구를 UI 없이 검증
+ * @brief 네트워크 조각 경계와 중단·도식 이벤트, 근거 하네스 진행·그림 artifact 및 대화 복구를 UI 없이 검증
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { artifactNoun, artifactTitle, isAnimationArtifact, requestChat, loadConversation, toolProgress } from '../src/api.ts';
+import { artifactNoun, artifactTitle, harnessProgress, isAnimationArtifact, requestChat, loadConversation, toolProgress } from '../src/api.ts';
 
 /** @brief 일부러 응답을 조각내 한글 바이트와 JSON 줄 경계 처리 검증 */
 function stream(text) {
@@ -147,4 +147,52 @@ test('describes tool progress by tool name', () => {
   assert.match(toolProgress('create_diagram', false), /도식/);
   assert.match(toolProgress('create_diagram', true), /도식/);
   assert.doesNotMatch(toolProgress('show_animation', false), /도식/);
+});
+
+// AI core 하네스(harness.py _figure_event → harness_chat.py)가 보내는 교재 그림 artifact와 근거 기록 artifact
+const figureArtifact = {
+  type: 'artifact', kind: 'figure', artifact_id: 'c'.repeat(32), url: `/api/artifacts/${'c'.repeat(32)}`,
+  figure: { title: 'Open Data Structures · 3.1', caption: 'Figure 3.1: A singly-linked list', source: 'Open Data Structures, Pat Morin, 3.1, CC BY 2.5, 발췌' },
+};
+const groundingArtifact = {
+  type: 'artifact', kind: 'grounding', artifact_id: 'b'.repeat(32),
+  grounding: { concepts: ['linked-list'], passage_ids: ['ods#3.1#p1'], verified: ['연결 리스트는 노드를 잇는다.'] },
+};
+
+// 검증 목적: 하네스의 status 단계가 사용자 진행 문구로 바뀌고, 문장 확인 단계는 몇 번째 문장인지 보이는지 확인
+test('describes harness status stages', () => {
+  assert.equal(harnessProgress({ type: 'status', stage: 'scope' }), '질문 범위 확인 중');
+  assert.equal(harnessProgress({ type: 'status', stage: 'search' }), '근거 찾는 중');
+  assert.equal(harnessProgress({ type: 'status', stage: 'write' }), '설명 쓰는 중');
+  assert.equal(harnessProgress({ type: 'status', stage: 'check', index: 2, total: 3 }), '확인 중 (2/3)');
+  assert.equal(harnessProgress({ type: 'status', stage: 'check' }), '확인 중');
+});
+
+// 검증 목적: 마지막에 오는 grounding artifact가 앞선 그림을 덮어 화면 artifact가 되거나 화면 이벤트로 전달되지 않는지 확인
+test('ignores grounding artifacts in the stream and keeps the figure', async (t) => {
+  const events = [
+    { type: 'status', stage: 'scope' }, { type: 'text_delta', text: '연결 리스트는 노드를 잇는다.[^p1]' },
+    figureArtifact, groundingArtifact, { type: 'answer', text: '연결 리스트는 노드를 잇는다.[^p1]' }, { type: 'done' },
+  ];
+  t.mock.method(globalThis, 'fetch', async () => stream(events.map(e => JSON.stringify(e)).join('\n')));
+  const observed = [];
+  const result = await requestChat('연결 리스트', 'session', e => observed.push(e));
+  assert.equal(result.artifact.kind, 'figure');
+  assert.equal(observed.some(e => e.kind === 'grounding'), false);
+  assert.deepEqual(observed.find(e => e.type === 'status'), { type: 'status', stage: 'scope' });
+});
+
+// 검증 목적: 저장된 답의 artifacts 마지막이 grounding이어도 복구 화면은 그림을 보이고, 그림 이름·제목을 종류에 맞게 고르는지 확인
+test('restores figures and skips stored grounding artifacts', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ messages: [
+    { role: 'user', content: '연결 리스트', status: 'complete' },
+    { role: 'assistant', content: '답', status: 'complete', artifacts: [figureArtifact, groundingArtifact] },
+    { role: 'user', content: '더 쉽게', status: 'complete' },
+    { role: 'assistant', content: '답', status: 'complete', artifacts: [groundingArtifact] },
+  ] }));
+  const [, first, , second] = await loadConversation('session');
+  assert.equal(first.artifact.kind, 'figure');
+  assert.equal(second.artifact, undefined);
+  assert.equal(artifactNoun(first.artifact), '그림');
+  assert.equal(artifactTitle(first.artifact), 'Open Data Structures · 3.1');
 });
