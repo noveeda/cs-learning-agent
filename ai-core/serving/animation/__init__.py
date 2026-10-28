@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from serving.tools.diagram import inline_schema
 
+from .call_stack import simulate_call_stack
 from .graph import simulate_graph_traversal, simulate_tree_traversal
 from .hierarchical import simulate_bst, simulate_hash_table, simulate_heap
 from .linear import simulate_array, simulate_linked_list, simulate_queue, simulate_stack
@@ -28,6 +29,7 @@ SIMULATORS = {
     'sort': simulate_sort,
     'tree_traversal': simulate_tree_traversal,
     'cpu_schedule': simulate_cpu_schedule,
+    'call_stack': simulate_call_stack,
 }
 
 
@@ -36,9 +38,11 @@ SIMULATORS = {
 CONCEPT_SCENES: dict[str, tuple[str, ...]] = {
     'array': ('array',), 'dynamic-array': ('array',), 'memory-address': ('array',),
     'reference': ('linked_list',), 'linked-list': ('linked_list',),
-    'stack': ('stack',),
+    'stack': ('stack',), 'recursion': ('call_stack',),
     'queue': ('queue',),
     'hash-function': ('hash_table',), 'hash-table': ('hash_table',),
+    # 해시 인덱스의 버킷 배치·체이닝·실제 키 비교 원리를 보여 줌(디스크 페이지 동작은 다루지 않음)
+    'hash-index': ('hash_table',),
     'binary-tree': ('bst',), 'bst': ('bst',), 'tree-traversal': ('tree_traversal',),
     'heap': ('heap',), 'priority-queue': ('heap',), 'heap-sort': ('heap',),
     'graph': ('graph_traversal',), 'bfs': ('graph_traversal',), 'dfs': ('graph_traversal',),
@@ -68,6 +72,7 @@ CONCEPT_SCENE_LIMITS: dict[str, dict[str, tuple[str, ...]]] = {
 #   (실측 2026-10-26: 예시 없이 90건 중 null 81건 → 예시를 넣자 null 31건 → schema에서 null 분기도 뺌)
 # - 값은 일부러 짧고 평범하게 둠: 모델이 예시를 그대로 베끼지 않고 학습 목표에 맞게 새로 고르게 하기 위함
 SCENE_FORMATS = {
+    'call_stack': {'kind': 'call_stack', 'function': 'factorial', 'n': 4},
     'array': {'kind': 'array', 'values': [2, 4, 6], 'ops': [{'op': 'access', 'index': 1}, {'op': 'insert', 'index': 0, 'value': 1},
                                                              {'op': 'delete', 'index': 2}]},
     'linked_list': {'kind': 'linked_list', 'values': [2, 4], 'ops': [{'op': 'insert_head', 'value': 1},
@@ -179,7 +184,7 @@ INTEGER = {'type': 'integer', 'description': 'Integer from -99 to 999.'}
 # - 연산 개수 상한은 한 장면을 학생이 따라갈 수 있는 교육적 분량 제한(model.py와 같은 값)
 ANIMATION_TOOL = {'type': 'function', 'function': {
     'name': 'show_animation',
-    'description': ('Show a step-by-step animation of data structure operations or CPU scheduling. The server runs the '
+    'description': ('Show a step-by-step animation of data structure operations, recursive calls or CPU scheduling. The server runs the '
                     'operations and draws every step, so choose only the scene kind and its inputs. '
                     'Omit fields that do not belong to the chosen kind.'),
     'parameters': {
@@ -197,7 +202,12 @@ ANIMATION_TOOL = {'type': 'function', 'function': {
                 'sort: algorithm + values (no ops). '
                 'tree_traversal: values inserted into a BST, order preorder|inorder|postorder (no ops). '
                 'cpu_schedule: algorithm fcfs|sjf|rr|priority + processes, quantum for rr (no ops); '
-                'non-preemptive sjf/priority, total time with idle gaps at most 12.')},
+                'non-preemptive sjf/priority, total time with idle gaps at most 12. '
+                'call_stack: function factorial|fib + n (no ops). factorial n=0..6, fib n=0..3; '
+                'example {kind:call_stack,function:factorial,n:4}.')},
+            'function': {'type': 'string', 'enum': ['factorial', 'fib'], 'description': 'call_stack only. Recursive function.'},
+            'n': {'type': 'integer', 'minimum': 0, 'maximum': 6,
+                  'description': 'call_stack only. factorial: 0-6; fib: 0-3. All calls and returns fit in 16 frames.'},
             'values': {'type': 'array', 'items': INTEGER,
                        'description': ('Initial values. array: 1-8 items, linked_list: 0-6 items, sort: 2-8 items, '
                                        'tree_traversal: 1-9 distinct items. Other kinds: omit.')},

@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief 공통 학습 화면·채팅·도식·커리큘럼 스타일과 반응형 배치
+ * @brief 공통 학습 화면·채팅·마크다운 표/수식·도식·커리큘럼 스타일과 반응형 배치
  */
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
 @import './tokens.css';
@@ -78,6 +78,14 @@ textarea::placeholder { color: var(--color-muted); }
 .message-content pre { overflow: auto; background: var(--color-background); padding: var(--space-4); border-radius: var(--radius-control); }
 .message-content code { font-size: var(--text-small); }
 .message-content a { color: var(--color-primary); text-decoration: underline; }
+/* 표·블록 수식만 내부에서 가로 스크롤해 좁은 대화·막힘 패널의 폭을 유지 */
+.message-content .markdown-table { max-width: 100%; overflow-x: auto; margin: var(--space-3) 0; }
+.message-content .markdown-table:focus-visible { outline: 3px solid var(--color-primary); outline-offset: -3px; }
+.message-content table { width: 100%; border-collapse: collapse; }
+.message-content th, .message-content td { min-width: 8rem; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; overflow-wrap: normal; }
+.message-content .katex { font-size: 1.1em; }
+.message-content .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+
 .artifact-chip { border: 1px solid var(--color-border); border-radius: var(--radius-control); padding: var(--space-3); font-size: var(--text-small); color: var(--color-primary); margin-top: var(--space-3); background: var(--color-primary-soft); max-width: 100%; text-align: left; overflow-wrap: anywhere; }
 .artifact-chip svg { flex-shrink: 0; }
 .status, .error { max-width: 760px; margin: var(--space-4) auto; font-size: var(--text-small); line-height: 1.8; }
