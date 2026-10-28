@@ -1,0 +1,44 @@
+/** @file
+ * @brief 반 막힘 요약의 빈도 막대·집계 표·모바일 배치; CS Studio의 기존 색·글꼴 유지
+ */
+.class-summary { padding: 24px 28px 32px; font-size: 14px; line-height: 1.6; color: var(--color-text); }
+.class-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.class-toolbar p, .class-sample p { margin: 0; }
+.class-toolbar, .class-caption, .class-concept small, .class-footnote { color: #586159; }
+.class-sample { padding: 20px 0 16px; }
+.class-sample .class-sample-count { font-size: 26px; font-weight: 600; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.class-sample p + p { margin-top: 4px; }
+.class-notice, .class-error { padding: 12px 16px; background: var(--color-primary-soft); border-radius: 6px; margin: 0 0 24px; }
+.class-error p { margin: 0 0 8px; }
+/* 동일한 두 열과 24px 간격으로 전체 너비를 채움: (너비 - 24px) / 2 × 2 + 24px */
+.class-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }
+.class-section { min-width: 0; }
+.class-section h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+.class-caption { font-size: 13px; margin: 0 0 8px; }
+.class-frequencies { padding: 0; margin: 16px 0 0; list-style: none; }
+.class-frequencies li { margin-bottom: 16px; }
+.class-frequency-label { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.class-concept { display: inline-flex; flex-direction: column; overflow-wrap: anywhere; }
+.class-concept small { display: block; font-size: 13px; font-weight: 400; }
+.class-number { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.class-track { height: 6px; margin-top: 8px; background: var(--color-primary-soft); border-radius: 3px; overflow: hidden; }
+.class-track > span { display: block; height: 100%; background: var(--color-primary); }
+.class-table-wrap { width: 100%; overflow-x: auto; }
+.class-summary table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.class-summary th { font-size: 13px; font-weight: 400; color: #586159; text-align: left; }
+.class-summary td, .class-summary th { padding: 10px 8px; vertical-align: top; }
+.class-summary td:first-child, .class-summary th:first-child { padding-left: 0; }
+.class-summary td:last-child, .class-summary th:last-child { padding-right: 0; }
+.class-summary th.class-number { text-align: right; }
+.class-summary tbody tr + tr { border-top: 1px solid var(--color-border); }
+.class-cross { display: block; font-size: 13px; color: var(--color-primary); }
+.class-empty { padding: 12px; margin: 12px 0 0; border: 1px dashed var(--color-border); border-radius: 6px; color: #586159; }
+.class-footnote { font-size: 13px; margin: 24px 0 0; }
+@media (max-width: 1100px) { .class-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .class-summary { padding: 16px; }
+  .class-toolbar p { max-width: 200px; }
+  .class-toolbar .button { min-height: 44px; }
+  .class-sample .class-sample-count { font-size: 22px; }
+  .class-summary td, .class-summary th { padding: 10px 4px; }
+}

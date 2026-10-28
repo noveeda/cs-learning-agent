@@ -1,39 +1,52 @@
 /**
  * @file
- * @brief 단계별 애니메이션 재생기 배치와 상자·화살표 모양; 막힘 패널 폭(모바일 375px 포함)에 맞춰 SVG를 축소
+ * @brief 공통 재생기의 짧은 이동·등장·퇴장, 고대비 강조와 모바일 제어 배치
+ * - 과목 색(청록·자주) 대신 강조는 파랑·새 원소는 호박색·제거는 빨강과 점선으로 구별
  */
 .animation-player { margin: var(--space-4) 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); }
 .animation-player:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .animation-title { margin: 0 0 var(--space-2); font-weight: 600; }
-/* 채팅 artifact 패널(가로 flex인 diagram-stage) 안에서는 남은 폭을 모두 써서 SVG가 0 폭으로 줄지 않게 함 */
-/* 무대는 도식 이미지에 맞춰 세로 가운데 정렬이라, 재생기는 위쪽에 붙여 짧은 장면 위로 빈 점무늬 영역이 크게 남지 않게 함 */
+/* artifact 무대의 가로 flex 폭을 채우고, 짧은 장면도 위쪽에 붙여 빈 공간을 줄임 */
 .diagram-stage .animation-player { flex: 1; min-width: 0; align-self: flex-start; }
-/* 패널 머리글이 이미 같은 제목을 보여 주므로 재생기 안 제목은 숨김(재생기 aria-label에는 제목이 남아 있음) */
+/* 패널 머리글의 제목과 중복 제거; 재생기 aria-label에는 제목 유지 */
 .diagram-stage .animation-title { display: none; }
-/* width 100%로 패널 폭에 맞추고 높이는 viewBox 비율을 따름; 가로 스크롤이 생기지 않게 함 */
 .animation-canvas { display: block; width: 100%; height: auto; margin: 0 auto; overflow: visible; }
-.animation-box { transition: transform 300ms ease; }
-.animation-box rect { fill: var(--color-surface); stroke: var(--color-text); stroke-width: 2; transition: fill 300ms ease, stroke 300ms ease, opacity 300ms ease; }
-/* 글자 크기는 viewBox 단위라 화면이 좁으면 함께 줄어듦; 가장 넓은 12칸 장면을 344~375px 패널에 줄여도 약 10px 이상으로 읽히도록 크게 둠 */
+.animation-box { transition: transform var(--animation-duration) cubic-bezier(.65, 0, .35, 1); }
+/* 위치 이동은 바깥 g, 나타남·사라짐은 안쪽 g에서 처리해 빠른 왕복에도 transform이 서로 덮이지 않음 */
+.animation-box-content { transform-box: fill-box; transform-origin: center; }
+.animation-box.motion-enter .animation-box-content { animation: animation-enter var(--animation-duration) ease-out both; }
+.animation-box.motion-exit { pointer-events: none; }
+.animation-box.motion-exit .animation-box-content { animation: animation-exit var(--animation-duration) ease-out both; }
+.animation-box rect { fill: var(--color-surface); stroke: var(--color-text); stroke-width: 2; }
+/* viewBox 글자 크기: 모바일에서도 정점 이름과 숫자를 읽을 수 있도록 유지 */
 .animation-box text { font-size: 26px; text-anchor: middle; dominant-baseline: central; fill: var(--color-text); }
 .animation-box.shape-slot rect { stroke-dasharray: 4 3; stroke: var(--color-muted); }
-/* 이름표(top·front·방문·queue)는 테두리가 없어 칸 폭을 다 쓸 수 있음; 9칸 그래프 장면을 막힘 패널 폭(약 300px)으로 줄여도 10px 이상이 되게 함 */
 .animation-box.shape-label text { font-size: 20px; fill: var(--color-muted); }
-.animation-box.tone-active rect { fill: var(--color-primary-soft); stroke: var(--color-primary); }
-.animation-box.tone-new rect { fill: var(--color-primary-soft); stroke: var(--color-primary); stroke-width: 2.5; }
-.animation-box.tone-removed rect { stroke: var(--color-error); stroke-dasharray: 4 3; opacity: .55; }
-.animation-box.tone-removed text { fill: var(--color-error); }
-.animation-arrows { animation: animation-fade 300ms ease; }
+/* 축소 SVG에서도 실제 테두리 굵기 3.5px 유지; 칠·테두리는 즉시 바꿔 현재 상태가 항상 분명하게 보이게 함 */
+.animation-box.tone-active rect { fill: #bfdbfe; stroke: #1e40af; stroke-width: 3.5; stroke-dasharray: none; vector-effect: non-scaling-stroke; }
+.animation-box.tone-active text { fill: #172554; font-weight: 600; }
+.animation-box.tone-new rect { fill: #fcd34d; stroke: #854d0e; stroke-width: 3.5; stroke-dasharray: none; vector-effect: non-scaling-stroke; }
+.animation-box.tone-new text { fill: #422006; font-weight: 600; }
+/* removed는 엔진이 설명 중인 제거 대상이라 흐리게 숨기지 않음; 프레임에서 빠지는 퇴장과 구별 */
+.animation-box.tone-removed rect { fill: #fee2e2; stroke: #991b1b; stroke-width: 3; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; }
+.animation-box.tone-removed text { fill: #7f1d1d; }
+.animation-arrows { animation: animation-fade var(--animation-duration) ease-out; }
 .animation-arrows line { stroke: var(--color-muted); stroke-width: 2; }
 .animation-arrowhead { fill: var(--color-muted); }
 .animation-arrow-label { font-size: 14px; text-anchor: middle; fill: var(--color-muted); }
 .animation-caption { margin: var(--space-2) 0; min-height: 1.8em; }
-.animation-controls { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-.animation-controls .button { display: inline-flex; align-items: center; gap: var(--space-1); }
-.animation-step { color: var(--color-muted); font-variant-numeric: tabular-nums; }
+/* 이전·진행·다음을 한 줄, 자동 재생은 다음 줄에 두어 좁은 패널에서도 버튼이 잘리지 않게 함 */
+.animation-controls { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--space-2); }
+.animation-controls .button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); min-height: 44px; }
+.animation-controls .animation-play { grid-column: 1 / -1; justify-self: center; }
+.animation-play[aria-pressed="true"] { background: var(--color-primary-soft); color: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+.animation-step { color: var(--color-muted); font-variant-numeric: tabular-nums; text-align: center; }
 @keyframes animation-fade { from { opacity: 0; } }
-/* 움직임 줄이기 설정이면 이동·색 변화·화살표 등장 효과를 모두 끄고 단계 결과만 바로 보여 줌 */
+@keyframes animation-enter { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: scale(1); } }
+@keyframes animation-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(.94); } }
+/* OS 설정 변경 직후에도 CSS가 먼저 움직임을 끄고, React가 퇴장 DOM을 즉시 정리 */
 @media (prefers-reduced-motion: reduce) {
-  .animation-box, .animation-box rect { transition: none; }
-  .animation-arrows { animation: none; }
+  .animation-box { transition: none; }
+  .animation-box-content, .animation-arrows { animation: none !important; }
+  .animation-box.motion-exit { display: none; }
 }

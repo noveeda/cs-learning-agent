@@ -1,12 +1,12 @@
 /**
  * @file
- * @brief 학습·로드맵 화면의 공통 내비게이션·헤더와 질문 보조 패널 구성
+ * @brief 학습·로드맵·반 요약 화면의 공통 내비게이션·헤더와 질문 보조 패널 구성
  */
 import { useRef, type ReactNode } from "react";
-import { BookOpen, Layers, Map, Menu, Plus, X } from "lucide-react";
+import { BookOpen, ChartNoAxesColumn, Layers, Map, Menu, Plus, X } from "lucide-react";
 
 /**
- * @brief 구현된 화면(로드맵·학습하기)으로 이동하는 메뉴 표시
+ * @brief 구현된 화면(로드맵·학습하기·반 요약)으로 이동하는 메뉴 표시
  * - 대시보드·문제 풀이·에이전트 기록·복습 노트·설정은 범위에서 빠져(장기 학습 보조 제외 결정) 메뉴에 두지 않음
  * - 동작하지 않는 메뉴가 발표·실험에서 혼란을 주지 않게 하기 위함
  */
@@ -15,9 +15,9 @@ function Navigation({
   busy,
   onNavigate,
 }: {
-  page: "roadmap" | "learn";
+  page: "roadmap" | "learn" | "class";
   busy: boolean;
-  onNavigate: (page: "roadmap" | "learn") => void;
+  onNavigate: (page: "roadmap" | "learn" | "class") => void;
 }) {
   return (
     <nav className="navigation" aria-label="주 메뉴">
@@ -38,6 +38,15 @@ function Navigation({
       >
         <BookOpen size={17} aria-hidden="true" />
         <span>학습하기</span>
+      </button>
+      <button
+        className={page === "class" ? "nav-current" : ""}
+        aria-current={page === "class" ? "page" : undefined}
+        disabled={busy}
+        onClick={() => onNavigate("class")}
+      >
+        <ChartNoAxesColumn size={17} aria-hidden="true" />
+        <span>반 요약</span>
       </button>
     </nav>
   );
@@ -70,8 +79,8 @@ export function LearningShell({
   busy: boolean;
   onNew: () => void;
   onAsk: () => void;
-  page: "roadmap" | "learn";
-  onNavigate: (page: "roadmap" | "learn") => void;
+  page: "roadmap" | "learn" | "class";
+  onNavigate: (page: "roadmap" | "learn" | "class") => void;
 }) {
   const menu = useRef<HTMLDialogElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -128,9 +137,11 @@ export function LearningShell({
             <Menu size={20} />
           </button>
           <div className="page-heading">
-            <h1>{page === "roadmap" ? "로드맵" : "개념 학습"}</h1>
+            <h1>{page === "class" ? "반 막힘 요약" : page === "roadmap" ? "로드맵" : "개념 학습"}</h1>
             <p>
-              {page === "roadmap"
+              {page === "class"
+                ? "선수 개념의 빈틈과 보충 결과를 함께 살펴봐요"
+                : page === "roadmap"
                 ? "연결된 개념을 따라 학습해요"
                 : "개념을 그림으로 연결해요"}
             </p>

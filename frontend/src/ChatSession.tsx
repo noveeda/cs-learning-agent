@@ -3,7 +3,7 @@
  * @brief 대화 한 세션의 복구·질문 입력·실시간 답변·도식/애니메이션 표시와 실패 후 재시도, 막힘 진입 버튼 담당
  */
 import { useEffect, useRef, useState } from "react";
-import Markdown from "react-markdown";
+import { LearningMarkdown } from "./markdown";
 import {
   ArrowUp,
   ArrowUpRight,
@@ -343,7 +343,7 @@ export function ChatSession({
                   )}
                   <div className="message-content">
                     {m.role === "assistant" ? (
-                      <Markdown>{m.content}</Markdown>
+                      <LearningMarkdown>{m.content}</LearningMarkdown>
                     ) : (
                       m.content
                     )}
@@ -371,7 +371,7 @@ export function ChatSession({
                 <Layers aria-hidden="true" size={16} /> CS Studio
               </div>
               <div className="message-content">
-                <Markdown>{draft}</Markdown>
+                <LearningMarkdown>{draft}</LearningMarkdown>
               </div>
             </article>
           )}

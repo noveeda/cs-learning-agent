@@ -1,5 +1,5 @@
 ## @file
-# @brief 모델 응답을 모사해 도구 결과 전달·스트리밍 순서·잘린 호출 실행 방지·애니메이션 도구 분기를 검증
+# @brief 모델 응답을 모사해 도구 결과 전달·스트리밍 순서·도구 전 설명 보존·잘린 호출 실행 방지·애니메이션 도구 분기를 검증
 import json
 import tempfile
 import unittest
@@ -36,6 +36,93 @@ def response(message):
 
 
 class AgentTests(unittest.TestCase):
+    ## @brief 애니메이션·도식 호출 전 설명이 최종 답과 초기화 뒤의 화면·저장용 스트림에 보존되는지 확인
+    def test_pre_tool_text_is_preserved_in_answer_and_restarted_stream(self):
+        examples = [
+            ('show_animation', {'kind': 'call_stack', 'function': 'factorial', 'n': 4}),
+            ('create_diagram', {'title': '재귀', 'nodes': [{'id': 'a', 'label': 'n', 'column': 0, 'row': 0}], 'edges': []}),
+        ]
+        prefix = '재귀는 자기 자신을 호출합니다.\n\n### 1. 기저 사례\n1에서 멈춥니다.\n\n### 2. 예시\nfactorial(4)'
+        tail = '### 3. 실행 과정\n24를 반환합니다.'
+        expected = prefix + '\n\n' + tail
+        for name, request in examples:
+            with self.subTest(tool=name), tempfile.TemporaryDirectory() as folder:
+                call = ChatCompletionMessage(role='assistant', content=prefix, tool_calls=[{
+                    'id': 'call_1', 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(request)}}])
+                client = Mock()
+                client.chat.completions.create.side_effect = [response(call), response(
+                    ChatCompletionMessage(role='assistant', content=tail))]
+                events = list(run_agent(client, 'test', '재귀를 설명해줘', Path(folder)))
+                answer = next(e['text'] for e in events if e['type'] == 'answer')
+                self.assertEqual(answer, expected)
+                # 화면·백엔드의 공개 이벤트 처리 규칙을 재현: reset 후 delta를 합쳐도 앞 설명이 남아야 함
+                draft = ''
+                for event in events:
+                    if event['type'] in ('text_start', 'tool_started'):
+                        draft = ''
+                    elif event['type'] == 'text_delta':
+                        draft += event['text']
+                    elif event['type'] == 'answer':
+                        self.assertEqual(draft, expected)
+                self.assertEqual(len([e for e in events if e['type'] == 'artifact']), 1)
+                messages = client.chat.completions.create.call_args.kwargs['messages']
+                self.assertEqual(next(m['content'] for m in messages if m['role'] == 'assistant'), prefix)
+
+    ## @brief 도구를 두 번 거쳐도 앞 설명을 중복하지 않고 문단 경계를 하나만 두어 이어 붙이는지 확인
+    def test_multiple_tool_rounds_preserve_text_without_duplicate_paragraphs(self):
+        for ending in ('', '\n', '\n\n'):
+            with self.subTest(ending=repr(ending)):
+                messages = [ChatCompletionMessage(role='assistant', content=part, tool_calls=[{
+                    'id': f'call_{i}', 'type': 'function', 'function': {
+                        'name': 'show_animation', 'arguments': json.dumps({'kind': 'stack', 'ops': [{'op': 'push', 'value': i}]})}}])
+                    for i, part in enumerate(('앞 설명' + ending, '중간 설명\n\n'))]
+                client = Mock()
+                client.chat.completions.create.side_effect = [*(response(m) for m in messages), response(
+                    ChatCompletionMessage(role='assistant', content='뒤 설명'))]
+                events = list(run_agent(client, 'test', '설명', Path('/tmp/unused')))
+                answer = next(e['text'] for e in events if e['type'] == 'answer')
+                self.assertEqual(answer, '앞 설명\n\n중간 설명\n\n뒤 설명')
+                model_messages = client.chat.completions.create.call_args.kwargs['messages']
+                self.assertEqual([m['content'] for m in model_messages if m['role'] == 'assistant'],
+                                 ['앞 설명' + ending, '중간 설명\n\n'])
+
+    ## @brief 도구 오류 뒤 텍스트 없이 재시도해도 첫 설명이 사라지지 않는지 확인
+    def test_prefix_survives_tool_retry_without_intermediate_text(self):
+        calls = [ChatCompletionMessage(role='assistant', content=content, tool_calls=[{
+            'id': f'call_{i}', 'type': 'function', 'function': {'name': 'show_animation', 'arguments': json.dumps(request)}}])
+            for i, (content, request) in enumerate([
+                ('앞 설명', {'kind': 'stack', 'ops': [{'op': 'pop'}]}),
+                (None, {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}]}),
+            ])]
+        client = Mock()
+        client.chat.completions.create.side_effect = [*(response(c) for c in calls), response(
+            ChatCompletionMessage(role='assistant', content='뒤 설명'))]
+        events = list(run_agent(client, 'test', '설명', Path('/tmp/unused')))
+        self.assertEqual(next(e['text'] for e in events if e['type'] == 'answer'), '앞 설명\n\n뒤 설명')
+        self.assertEqual(len([e for e in events if e['type'] == 'tool_error']), 1)
+        self.assertEqual(len([e for e in events if e['type'] == 'artifact']), 1)
+
+    ## @brief 도구 후 첫 글자가 도착하면 앞 설명부터 즉시 재전달해 마지막 answer를 기다리지 않아도 읽을 수 있는지 확인
+    def test_prefix_is_replayed_before_first_post_tool_chunk(self):
+        call = ChatCompletionMessage(role='assistant', content='앞 설명', tool_calls=[{
+            'id': 'call_1', 'type': 'function', 'function': {
+                'name': 'show_animation', 'arguments': json.dumps({'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}]})}}])
+        client = Mock()
+        client.chat.completions.create.side_effect = [response(call), stream([
+            chunk('뒤 '), chunk('설명'), chunk(finish='stop')])]
+        events = run_agent(client, 'test', '설명', Path('/tmp/unused'))
+        self.assertEqual(next(events)['type'], 'text_start')
+        self.assertEqual(next(events), {'type': 'text_delta', 'text': '앞 설명'})
+        for event in events:
+            if event['type'] == 'text_start':
+                break
+        self.assertEqual(next(events), {'type': 'text_delta', 'text': '앞 설명\n\n'})
+        self.assertEqual(next(events), {'type': 'text_delta', 'text': '뒤 '})
+        self.assertEqual(next(events), {'type': 'text_delta', 'text': '설명'})
+        self.assertEqual(next(events), {'type': 'answer', 'text': '앞 설명\n\n뒤 설명'})
+        self.assertEqual(next(events)['type'], 'done')
+        list(events)
+
     # 검증 목적: 도구 결과가 다음 모델 호출에 포함되는지 확인
     def test_tool_result_is_returned_to_model(self):
         arguments = json.dumps({'title': 'test', 'nodes': [
