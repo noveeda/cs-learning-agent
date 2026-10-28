@@ -178,3 +178,35 @@ export async function requestChat(
     controller.abort();
   }
 }
+
+/** @brief 세션 집계에 쓰는 공개 개념·과목 정보; 학습자 식별 필드는 없음 */
+export type SummaryConcept = { id: string; title: string; subject: string; subjectTitle: string };
+/** @brief 한 개념이 관찰된 세션 수 */
+export type ConceptCount = { concept: SummaryConcept; count: number };
+/** @brief 교수자 반 요약 계약; 날짜는 Unix 초, 빈 기간은 null */
+export type ClassSummaryData = {
+  totalSessions: number; diagnosedSessions: number; earliestAt: number | null; latestAt: number | null;
+  targets: ConceptCount[]; gaps: ConceptCount[];
+  pairs: { target: SummaryConcept; gap: SummaryConcept; count: number; crossSubject: boolean }[];
+  crossSubjectPairs: number;
+  outcomes: { concept: SummaryConcept; passed: number; unresolved: number }[];
+};
+
+/** @brief 읽기 전용 집계를 조회하고 분모·필수 배열을 확인; 실패를 빈 통계로 바꾸지 않음 */
+export async function loadClassSummary(): Promise<ClassSummaryData> {
+  let response: Response;
+  try {
+    response = await fetch('/api/stuck/summary', { cache: 'no-store' });
+  } catch {
+    throw new Error('서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.');
+  }
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.message === 'string' ? body.message : '반 요약을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+  if (!body || !Number.isInteger(body.totalSessions) || body.totalSessions < 0 ||
+      !Number.isInteger(body.diagnosedSessions) || body.diagnosedSessions < 0 || body.diagnosedSessions > body.totalSessions ||
+      !Number.isInteger(body.crossSubjectPairs) || body.crossSubjectPairs < 0 ||
+      !['targets', 'gaps', 'pairs', 'outcomes'].every(key => Array.isArray(body[key])) ||
+      !['earliestAt', 'latestAt'].every(key => body[key] === null || (typeof body[key] === 'number' && Number.isFinite(body[key]))))
+    throw new Error('집계 응답 형식이 올바르지 않습니다. 잠시 후 다시 시도해 주세요.');
+  return body as ClassSummaryData;
+}

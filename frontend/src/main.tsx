@@ -5,6 +5,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { loadConceptMap, newConversation } from "./api";
+import { ClassSummary } from "./ClassSummary";
 import { ChatSession } from "./ChatSession";
 import { CurriculumDraft } from "./CurriculumDraft";
 import { ExperimentRunner } from "./ExperimentRunner";
@@ -32,7 +33,7 @@ function readRoute() {
   const [path, query] = hash.slice(1).split("?");
   const conceptId = new URLSearchParams(query).get("concept") ?? "";
   return {
-    page: path === "/roadmap" ? "roadmap" : "learn",
+    page: path === "/class" ? "class" : path === "/roadmap" ? "roadmap" : "learn",
     conceptId:
       path === "/learn" && /^[a-z][a-z0-9-]{1,40}$/.test(conceptId)
         ? conceptId
@@ -249,16 +250,16 @@ function App() {
   );
   return (
     <LearningShell
-      page={isRoadmap ? "roadmap" : "learn"}
+      page={route.page === "class" ? "class" : isRoadmap ? "roadmap" : "learn"}
       busy={busy}
-      headerExtra={
+      headerExtra={route.page !== "class" && (
         <button
           className="button secondary"
           onClick={() => setCurriculumOpen((open) => !open)}
         >
           {curriculumOpen ? (isRoadmap ? "로드맵으로" : "학습 대화로") : "커리큘럼 초안"}
         </button>
-      }
+      )}
       onNavigate={(page) => {
         setCurriculumOpen(false);
         window.location.hash = `/${page}`;
@@ -299,7 +300,9 @@ function App() {
         <CurriculumDraft />
       </div>
       <div hidden={curriculumOpen}>
-        {waitingForMap ? (
+        {route.page === "class" ? (
+          <ClassSummary />
+        ) : waitingForMap ? (
           mapStatus
         ) : isRoadmap ? (
           conceptMap.status === "ready" ? (
@@ -346,7 +349,7 @@ function App() {
           />
         )}
       </div>
-      {stuck && (
+      {stuck && route.page !== "class" && (
         <StuckPanel
           key={stuckOpening}
           request={stuck}

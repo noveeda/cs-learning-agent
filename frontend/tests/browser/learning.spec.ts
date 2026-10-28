@@ -57,10 +57,10 @@ test("구현된 메뉴만 표시, 추천 질문, 모바일 메뉴의 닫기·초
   await mockConversation(page);
   await page.goto("/");
   await expect(page.getByLabel("질문", { exact: true })).toBeEnabled();
-  // 발표·실험에서 동작하지 않는 메뉴로 혼란이 없게, 구현된 화면(로드맵·학습하기)만 메뉴에 보임
+  // 발표·실험에서 동작하지 않는 메뉴로 혼란이 없게, 구현된 화면(로드맵·학습하기·반 요약)만 메뉴에 보임
   await expect(
     page.getByRole("navigation", { name: "주 메뉴" }).first().getByRole("button"),
-  ).toHaveText(["로드맵", "학습하기"]);
+  ).toHaveText(["로드맵", "학습하기", "반 요약"]);
   await expect(page.locator(".sidebar small")).toHaveCount(0);
   await page
     .getByRole("button", {
