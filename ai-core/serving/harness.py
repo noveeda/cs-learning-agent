@@ -31,6 +31,12 @@ NO_SOURCE_TEXT = '교재에서 이 질문의 근거를 찾지 못했습니다.'
 FAILED_TEXT = '설명을 만들지 못했습니다. 아래 교재 원문을 확인해 주세요.'
 NEEDS_CHECK_MARK = ' ⚠️ **확인 필요**'
 
+# 문장으로 인정하는 최소 내용: 한글·영문·숫자 5자 이상이고 한글·영문 글자가 하나 이상
+# - 실측에서 작은 모델이 ':' 같은 빈 문장을 냄. 이런 문장은 판정할 사실이 없어 화면만 흐리므로 형식 오류로 보고 재시도하게 함
+MIN_SENTENCE_LETTERS = 5
+_WORD_CHAR = re.compile('[가-힣A-Za-z0-9]')
+_LETTER = re.compile('[가-힣A-Za-z]')
+
 # 서술 채점 근거 대조 전에 지우는 문장부호; 영문 기호와 한국어 답에 자주 나오는 가운뎃점·말줄임표·따옴표·낫표
 GRADING_PUNCTUATION = set(string.punctuation + '·…“”‘’「」『』')
 
@@ -50,8 +56,20 @@ def has_han(text: str) -> bool:
     return HAN.search(text) is not None
 
 
+## @brief 모델이 본문에 직접 쓴 근거 키 표기('(p3)', '[p1]', '[^p1]', '(p1, p2)', 단독 'p2')를 지움
+# - 근거 키는 sources 필드로 받고 화면 각주([^p1])는 코드가 붙이므로, 본문 표기는 각주와 겹치기만 함
+# - 실제 근거 키(source_keys)만 지움. 낱말에 붙은 'p3에'나 근거 키가 아닌 '(p9)'는 본문 내용일 수 있어 남김
+# - 지운 자리의 공백을 하나로 줄이고 문장부호 앞 공백을 없앰('꺼낸다 (p1).' → '꺼낸다.')
+def _strip_source_keys(text: str, source_keys: set[str]) -> str:
+    key = r'\^?(?:' + '|'.join(re.escape(k) for k in sorted(source_keys, key=len, reverse=True)) + ')'
+    group = rf'{key}(?:\s*[,，]\s*{key})*'
+    marker = re.compile(rf'[(\[（]\s*{group}\s*[)\]）]|(?<!\w){group}(?!\w)')
+    return re.sub(r'\s+([.,!?;:])', r'\1', ' '.join(marker.sub(' ', text).split()))
+
+
 ## @brief 생성 출력 {sentences: [{text, sources}]}를 검사해 (문장, 근거 키 묶음) 목록으로 반환
 # - 문장 1~8개, 각 200자 이하, 근거 키가 하나 이상이고 모두 source_keys 안에 있어야 하며 한자가 섞이면 안 됨
+# - 본문의 근거 키 표기는 지운 뒤 검사하고, 지운 문장을 돌려줌. 지운 뒤 내용이 MIN_SENTENCE_LETTERS 미만이면 거부
 # - 어기면 ValueError: 게이트웨이의 _call이 이를 잘못된 출력으로 보고 재시도함
 # - 모양이 다른 JSON(목록 대신 객체 등)도 ValueError로 바꿔, 호출한 쪽이 한 가지 예외만 다루게 함
 def validate_sentences(raw: dict, source_keys: set[str]) -> list[tuple[str, tuple[str, ...]]]:
@@ -62,13 +80,16 @@ def validate_sentences(raw: dict, source_keys: set[str]) -> list[tuple[str, tupl
     for item in items:
         text = item.get('text') if isinstance(item, dict) else None
         sources = item.get('sources') if isinstance(item, dict) else None
-        if not isinstance(text, str) or not text.strip() or len(text) > MAX_SENTENCE_CHARS:
-            raise ValueError(f'문장은 비어 있지 않고 {MAX_SENTENCE_CHARS}자 이하여야 합니다: {text!r}')
+        if not isinstance(text, str) or len(text) > MAX_SENTENCE_CHARS:
+            raise ValueError(f'문장은 {MAX_SENTENCE_CHARS}자 이하의 글이어야 합니다: {text!r}')
         if not isinstance(sources, list) or not sources or not all(s in source_keys for s in sources):
             raise ValueError(f'근거 번호가 없거나 검색되지 않은 근거입니다: {sources!r}')
+        text = _strip_source_keys(text, source_keys)
+        if len(_WORD_CHAR.findall(text)) < MIN_SENTENCE_LETTERS or not _LETTER.search(text):
+            raise ValueError(f'내용이 없거나 너무 짧은 문장입니다: {text!r}')
         if has_han(text):
             raise ValueError(f'한자가 섞인 문장입니다: {text!r}')
-        result.append((text.strip(), tuple(sources)))
+        result.append((text, tuple(sources)))
     return result
 
 
