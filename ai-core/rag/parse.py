@@ -3,6 +3,7 @@
 # - 절(section)이 근거 문단 색인(Task 3)과 절 대응표(Task 2)의 기본 단위. section_id는 책 안에서 안정적인 경로
 # - 그림은 FigureRef로 소속 절에 붙이고, 책별 라이선스 정책(sources.Book.figures)에 맞지 않는 그림은 여기서 뺌
 # - 형식별 파서는 표준 라이브러리만 쓰고, PDF 텍스트 추출만 서버의 Ghostscript(gs)를 호출함
+import html
 import posixpath
 import re
 import subprocess
@@ -310,7 +311,7 @@ def _parse_rst_book(book, root):
 
 
 ## @brief XHTML 한 파일을 (제목·문단·그림) 사건 목록으로 바꾸는 파서
-# - h1·h2는 절 경계, h3 이하는 본문 문단으로 둠
+# - h1·h2는 절 경계, h3 이하는 본문 문단으로 둠. 제목의 class(Pressbooks의 chapter-title 등)도 함께 넘김
 # - img는 figure 안 figcaption이 있으면 그것을, 없으면 alt를 캡션으로 씀
 class _XhtmlEvents(HTMLParser):
     _BLOCKS = {'p', 'div', 'li', 'tr', 'br', 'blockquote', 'pre', 'h3', 'h4', 'h5', 'h6', 'section', 'table', 'dd', 'dt'}
@@ -331,7 +332,7 @@ class _XhtmlEvents(HTMLParser):
             self.skip += 1
         elif tag in ('h1', 'h2'):
             self._text()
-            self.heading = (tag, [])
+            self.heading = (tag, attrs.get('class') or '', [])
         elif tag == 'figure':
             self.figure = []
         elif tag == 'figcaption':
@@ -349,7 +350,8 @@ class _XhtmlEvents(HTMLParser):
         if tag in ('script', 'style', 'nav'):
             self.skip = max(0, self.skip - 1)
         elif tag in ('h1', 'h2') and self.heading:
-            self.events.append(('heading', self.heading[0], ' '.join(''.join(self.heading[1]).split())))
+            tag, cls, parts = self.heading
+            self.events.append(('heading', tag, ' '.join(''.join(parts).split()), cls))
             self.heading = None
         elif tag == 'figcaption' and self.caption is not None:
             if self.figure is not None:
@@ -365,7 +367,7 @@ class _XhtmlEvents(HTMLParser):
         if self.skip:
             return
         if self.heading:
-            self.heading[1].append(data)
+            self.heading[2].append(data)
         elif self.caption is not None:
             self.caption.append(data)
         else:
@@ -376,8 +378,18 @@ class _XhtmlEvents(HTMLParser):
         self._text()
 
 
-## @brief EPUB 한 권: container.xml → OPF spine 순서로 XHTML을 읽고 h1·h2로 절을 나눔
-# - section_id는 '<OPF 기준 XHTML 경로>#<h1 순번>[.<h2 순번>]'
+# 장 단위 제목의 class. Pressbooks는 장 제목을 h2.chapter-title, 부록을 h1.back-matter-title로 씀
+_EPUB_CHAPTER_CLASS = re.compile(r'-title\b')
+# 장 제목의 'Chapter 8 ...'·'Appendix C ...'에서 장 번호와 나머지 제목을 나눔
+_EPUB_CHAPTER_TITLE = re.compile(r'(?:Chapter|Appendix)\s+(\d+|[A-Z])\b[\s.:–-]*(.*)')
+
+
+## @brief EPUB 한 권: container.xml → OPF spine 순서로 XHTML을 읽고 장·절 제목으로 나눔
+# - 장 단위 제목: class가 '-title'로 끝나는 제목(Pressbooks), 그런 제목이 없는 파일에서는 h1
+#   - 'Chapter 8 ...'·'Appendix C ...'이면 그 번호를 쓰고 제목에서 뗌. 아니면 파일 안 순번
+#   - 장 제목 바로 뒤 본문(장 도입)은 장 제목을 단 '<파일>#<장>' 절이 됨
+# - 절 단위 제목: 나머지 h1·h2. section_id는 '<OPF 기준 XHTML 경로>#<장>.<절 순번>'(예: chapter-008-...html#8.3)
+# - 저자 머리글(h2.chapter-author)은 절 경계로 쓰지 않음. 예전에는 저자 이름이 장 첫 절 제목이 됨
 # - 그림 경로는 OPF 폴더 기준으로 정규화해 FigureRef.file에 둠
 def parse_epub(book_id, path):
     sections = []
@@ -394,24 +406,30 @@ def parse_epub(book_id, path):
             parser = _XhtmlEvents()
             parser.feed(epub.read(posixpath.join(opf_dir, href)).decode('utf-8', errors='replace'))
             parser.close()
-            h1 = h2 = 0
+            classed = any(e[0] == 'heading' and _EPUB_CHAPTER_CLASS.search(e[3]) for e in parser.events)
+            chapter, ordinal, number = '0', 0, 0
             title, body, figures = None, [], []
 
             def flush():
                 text = _tidy(''.join(body))
                 if title is not None and (text or figures):
-                    number = f'{h1}.{h2}' if h2 else str(h1)
-                    sections.append(Section(book_id, f'{href}#{number}', title, text, tuple(figures)))
+                    section_id = f'{href}#{chapter}.{number}' if number else f'{href}#{chapter}'
+                    sections.append(Section(book_id, section_id, title, text, tuple(figures)))
 
             for event in parser.events:
                 if event[0] == 'heading':
+                    _, tag, heading, cls = event
+                    if 'chapter-author' in cls:
+                        continue
                     flush()
                     body, figures = [], []
-                    if event[1] == 'h1':
-                        h1, h2 = h1 + 1, 0
+                    if _EPUB_CHAPTER_CLASS.search(cls) or (tag == 'h1' and not classed):
+                        ordinal, number = ordinal + 1, 0
+                        match = _EPUB_CHAPTER_TITLE.match(heading)
+                        chapter = match.group(1) if match else str(ordinal)
+                        title = match.group(2) if match and match.group(2) else heading
                     else:
-                        h2 += 1
-                    title = event[2]
+                        number, title = number + 1, heading
                 elif event[0] == 'text':
                     body.append(event[1])
                 else:
@@ -421,39 +439,163 @@ def parse_epub(book_id, path):
     return sections
 
 
-## @brief Ghostscript txtwrite로 PDF 본문 텍스트를 뽑음(서버에 다른 PDF 도구가 없음)
-def pdf_text(path):
+# txtwrite 글자 상자 출력(TextFormat=0)의 글꼴(span)·글자(char) 항목과 쪽 경계
+_CHAR_BOX = re.compile(r'<span [^>]*font="([^"]*)" size="([\d.]+)"'
+                       r'|<char bbox="([-\d.]+) ([-\d.]+) ([-\d.]+) [-\d.]+" c="([^"]*)"/>|<page>')
+# 하위 제목 글꼴로만 된 줄 앞에 수준 수만큼 붙이는 표시. 본문에 나오지 않는 제어 문자라 일반 줄과 섞이지 않음
+SUBHEADING_MARK = '\x1f'
+
+
+## @brief txtwrite 글자 상자 출력에서 줄과 단어 공백을 다시 만듦
+# - 기본 텍스트 출력은 공백 글리프 없이 글자 간격만으로 띄운 PDF(Erickson)에서 단어를 붙여 버림
+# - 앞 글자 오른쪽 끝과 다음 글자 왼쪽 끝 사이가 글꼴 크기의 15%를 넘으면 단어 공백으로 봄
+#   (합자·커닝 때문에 같은 단어가 span으로 나뉘어도 간격은 0에 가까움)
+# - 기준선(y)이 글꼴 크기 절반 넘게 바뀌거나 x가 크게 되돌아가면 새 줄로 봄
+# - subheadings: 하위 제목 수준별 '<글꼴 이름> <크기>' 정규식. 모든 글자가 n번째 글꼴인 줄 앞에 SUBHEADING_MARK를 n개 붙임
+def text_from_char_boxes(xml, subheadings=()):
+    lines, chars, size, sub, last = [], [], 10.0, 0, None
+
+    def finish():
+        text = ''.join(c for c, _ in chars)
+        levels = {level for c, level in chars if not c.isspace()}
+        level = levels.pop() if len(levels) == 1 else 0
+        lines.append(SUBHEADING_MARK * level + text)
+        chars.clear()
+
+    for match in _CHAR_BOX.finditer(xml):
+        if match.group(0) == '<page>':
+            finish()
+            last = None
+        elif match.group(1) is not None:
+            size = float(match.group(2))
+            font = f'{match.group(1)} {match.group(2)}'
+            sub = next((n for n, pattern in enumerate(subheadings, 1) if re.search(pattern, font)), 0)
+        else:
+            x0, y, x1 = float(match.group(3)), float(match.group(4)), float(match.group(5))
+            if last and (abs(y - last[1]) > size * 0.5 or x0 < last[0] - size):
+                finish()
+            elif last and x0 - last[0] > size * 0.15:
+                chars.append((' ', sub))
+            chars.append((html.unescape(match.group(6)), sub))
+            last = (x1, y)
+    finish()
+    return '\n'.join(lines)
+
+
+## @brief Ghostscript txtwrite 글자 상자 출력으로 PDF 본문 텍스트를 뽑음(서버에 다른 PDF 도구가 없음)
+def pdf_text(path, subheadings=()):
     with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / 'out.txt'
-        subprocess.run(['gs', '-q', '-dNOPAUSE', '-dBATCH', '-sDEVICE=txtwrite', f'-sOutputFile={out}', str(path)],
-                       check=False, capture_output=True, timeout=600)
-        return out.read_text(errors='replace') if out.exists() else ''
+        out = Path(tmp) / 'out.xml'
+        subprocess.run(['gs', '-q', '-dNOPAUSE', '-dBATCH', '-sDEVICE=txtwrite', '-dTextFormat=0',
+                        f'-sOutputFile={out}', str(path)], check=False, capture_output=True, timeout=600)
+        return text_from_char_boxes(out.read_text(errors='replace'), subheadings) if out.exists() else ''
 
 
-_PDF_HEADING = re.compile(r'^\s*(\d+)\.(\d+)\s+(\S.{1,90}?)\s*$')
+## @brief 책마다 다른 PDF 쪽 구성 규칙
+# - confirm: 진짜 절 제목 바로 다음 줄의 모양. 있으면 순서 검사 대신 이것으로 제목을 확정함
+# - stop: 본문이 끝나고 장 끝 반복 구역(용어·요약·문제)이 시작되는 줄. 다음 절 제목까지 버림
+# - noise: 머리말·꼬리말·쪽 번호처럼 쪽마다 반복되어 본문에서 지울 줄
+# - subheadings: 절 안 하위 제목 글꼴('<글꼴 이름> <크기>' 정규식)을 수준 순서로. 긴 절을 <장>.<절>.<하위>[.<하위>]로 나눔
+@dataclass(frozen=True)
+class PdfLayout:
+    confirm: str | None = None
+    stop: str | None = None
+    noise: str | None = None
+    subheadings: tuple[str, ...] = ()
 
 
-## @brief PDF에서 뽑은 텍스트를 '<장>.<절> 제목' 줄 기준으로 나눔
-# - 목차 줄(점선·쪽 번호로 끝남)은 제목으로 보지 않음
-# - 본문 속 '1.58496' 같은 숫자 줄을 제목으로 오인하지 않도록 번호가 앞 제목 바로 다음(절 +1~3, 또는 다음 장 첫 절)일 때만 받음
-# - 쪽 머리말(장 번호와 제목이 반복되는 줄)은 본문에 섞여도 검색 품질에 큰 영향이 없어 그대로 둠
-def parse_pdf_text(book_id, file, text):
-    sections, last, title, body = [], (0, 0), None, []
-    for line in text.replace('\r', '').splitlines():
-        match = _PDF_HEADING.match(line)
-        if match and match.group(3)[0].isalpha() and not re.search(r'(\. ?){3}|\d$', match.group(3)):
-            number = (int(match.group(1)), int(match.group(2)))
-            same_chapter = number[0] == last[0] and last[1] < number[1] <= last[1] + 3
-            next_chapter = number[0] == last[0] + 1 and number[1] <= 3
-            if same_chapter or next_chapter or (title is None and number[1] == 1):
-                if title is not None:
-                    sections.append(Section(book_id, f'{file}#{last[0]}.{last[1]}', title, _tidy('\n'.join(body)), ()))
-                last, title, body = number, match.group(3), []
+# OpenStax: 목차·장 첫머리 Chapter Outline·장 끝 Summary에 같은 x.y 제목이 반복되지만,
+# 본문 절 제목 바로 다음 줄은 항상 'Learning Objectives'이고 장 끝은 'Chapter Review'로 시작함
+# - 절 제목은 RobotoCondensed-Bold 15.55, 하위 제목은 NotoSans-Bold 12.96과 10.8이라 글꼴로 구분됨
+#   (10.8 글꼴인 'Learning Objectives'는 noise로 먼저 지움)
+PDF_LAYOUTS = {
+    'openstax-cs': PdfLayout(
+        confirm=r'\s*Learning Objectives\s*$',
+        stop=r'\s*Chapter Review\s*$',
+        noise=r'\s*(Access for free at openstax\.org.*|\d+(\.\d+)? • .*\s\d+|\d+\s+\d+ • .*|\d{1,3}'
+              r'|Learning Objectives|By the end of this section, you will be able to:)\s*$',
+        subheadings=(r'NotoSans-Bold 12\.9\d*$', r'NotoSans-Bold 10\.8\d*$')),
+}
+
+_PDF_HEADING = re.compile(r'^\s*(\d+)\.(\d+)(?:\s+(\S.{0,90}?))?\s*$')
+
+
+## @brief 줄 i가 절 제목이면 ((장, 절), 제목, 제목 다음 줄 번호), 아니면 None
+# - 목차 줄(점선·쪽 번호로 끝남)과 글자로 시작하지 않는 제목은 받지 않음
+# - layout.confirm이 없으면(Erickson) 번호 순서로 고름
+#   - 본문 속 '1.58496' 같은 숫자 줄을 제목으로 오인하지 않도록 앞 제목 바로 다음(절 +1~3, 또는 다음 장 첫 절)만 받음
+# - layout.confirm이 있으면 제목 바로 뒤에 그 모양의 줄이 나오는 제목만 받음. 같은 번호가 다시 확정되면 처음 것만 씀
+#   - 제목이 줄을 넘기면 이어 붙임: 번호 줄에 제목이 있으면 1줄, 'x.y'만 있는 줄(12.2)이면 3줄까지
+#   - 그 사이에 다른 번호 줄이 나오면 목차·장 개요 목록이므로 받지 않음
+def _pdf_heading(lines, i, layout, last, first, seen):
+    match = _PDF_HEADING.match(lines[i].lstrip(SUBHEADING_MARK))
+    if not match:
+        return None
+    number, title = (int(match.group(1)), int(match.group(2))), match.group(3)
+    if title and (not title[0].isalpha() or re.search(r'(\. ?){3}|\d$', title)):
+        return None
+    if not layout.confirm:
+        same_chapter = number[0] == last[0] and last[1] < number[1] <= last[1] + 3
+        next_chapter = number[0] == last[0] + 1 and number[1] <= 3
+        accept = title and (same_chapter or next_chapter or (first and number[1] == 1))
+        return (number, title, i + 1) if accept else None
+    parts, limit = ([title], 2) if title else ([], 3)
+    for j in range(i + 1, len(lines)):
+        following = lines[j].lstrip(SUBHEADING_MARK).strip()
+        if re.match(layout.confirm, following):
+            return (number, ' '.join(parts), j) if parts and number not in seen else None
+        if not following:
+            continue
+        if _PDF_HEADING.match(following) or len(parts) >= limit:
+            return None
+        parts.append(following)
+    return None
+
+
+## @brief PDF에서 뽑은 텍스트를 '<장>.<절>' 제목 기준으로 나누고, 하위 제목 표시가 있으면 수준별 번호를 붙여 더 나눔
+# - 예: 6.3(절 도입) → 6.3.2(Concurrency) → 6.3.2.4(Allocation)
+# - layout.stop 줄부터 다음 절 제목까지(장 끝 용어·요약·문제)와 layout.noise 줄은 버림
+# - 여러 줄로 나뉜 하위 제목(본문 없이 같은 수준 표시가 연달아 나옴)은 하나로 이음
+def parse_pdf_text(book_id, file, text, layout=PdfLayout()):
+    lines = text.replace('\r', '').splitlines()
+    sections, seen = [], set()
+    last, counters, title, body = (0, 0), [], None, []
+
+    def flush():
+        joined = _tidy('\n'.join(body))
+        if title is not None and joined:
+            number = '.'.join(map(str, [*last, *counters]))
+            sections.append(Section(book_id, f'{file}#{number}', title, joined, ()))
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        heading = _pdf_heading(lines, i, layout, last, title is None and not sections, seen)
+        if heading:
+            flush()
+            seen.add(heading[0])
+            (last, title, i), counters, body = heading, [], []
+            continue
+        i += 1
+        plain = line.lstrip(SUBHEADING_MARK)
+        level = len(line) - len(plain)
+        if layout.stop and re.match(layout.stop, plain):
+            flush()
+            title, body = None, []
+        elif layout.noise and re.match(layout.noise, plain):
+            continue
+        elif level and title is not None:
+            if len(counters) == level and not body:
+                title += ' ' + plain.strip()
                 continue
-        body.append(line)
-    if title is not None:
-        sections.append(Section(book_id, f'{file}#{last[0]}.{last[1]}', title, _tidy('\n'.join(body)), ()))
-    return [s for s in sections if s.text]
+            flush()
+            counters = (counters + [0] * level)[:level]
+            counters[-1] += 1
+            title, body = plain.strip(), []
+        elif not level:
+            body.append(line)
+    flush()
+    return sections
 
 
 ## @brief MediaWiki 위키 문법을 평문으로 바꿈(틀·각주·파일 링크·표 서식 제거, 링크는 표시 글자만)
@@ -489,6 +631,21 @@ def parse_wikitext(book_id, page, source):
     return sections
 
 
+# 근거 문단으로 쓰지 않는 절 제목: 목차·판권·감사의 글·출처 표기·참고 문헌·더 읽을거리·판 이력, 그리고 제목 없는 상자
+_NON_BODY_TITLE = re.compile(
+    r'(table of )?contents|copyright|acknowledge?ments?|(image )?attributions?|references|bibliography'
+    r'|further reading|see also|external links|notes|versioning history|about the authors?|', re.I)
+# 본문 밖 파일(Pressbooks EPUB의 표지·속표지·목차·판권·머리말 묶음, 저자 소개·판 이력)
+_NON_BODY_FILE = re.compile(r'(^|/)(front-cover|title-page|table-of-contents|copyright|front-matter-[^/#]*'
+                            r'|back-matter-[^/#]*-(versioning-history|about-the-authors?))\.x?html?#')
+
+
+## @brief 절이 교재 본문인지: 목차·감사의 글·출처 표기처럼 개념 설명이 없는 절이면 False
+# - 이런 절이 검색되면 근거로 보이지만 설명할 내용이 없어 답을 흐리므로 모든 책에서 뺌
+def is_body_section(section):
+    return not (_NON_BODY_TITLE.fullmatch(section.title.strip()) or _NON_BODY_FILE.search(section.section_id))
+
+
 ## @brief 책의 그림 정책(all·allowlist·none)에 맞는 그림만 남김
 def allowed_figure(book, file):
     if book.figures == 'none':
@@ -500,7 +657,7 @@ def allowed_figure(book, file):
 
 ## @brief 책 한 권의 원본 폴더(raw_dir/<book.id>/)를 형식에 맞게 읽어 절 목록을 만듦
 # - 원본 폴더가 없으면 빈 목록. 사람이 아직 내려받지 않은 책 때문에 다른 책 수집이 멈추지 않게 함
-# - 라이선스를 확인하지 않은 그림은 여기서 빼므로, 이후 단계(색인·화면)는 결과의 그림을 그대로 써도 됨
+# - 라이선스를 확인하지 않은 그림과 본문이 아닌 절(is_body_section)은 여기서 빼므로, 이후 단계(색인·화면)는 결과를 그대로 써도 됨
 def parse_book(book: Book, raw_dir: Path) -> list[Section]:
     root = Path(raw_dir) / book.id
     if not root.is_dir():
@@ -512,10 +669,13 @@ def parse_book(book: Book, raw_dir: Path) -> list[Section]:
     elif book.kind == 'epub':
         sections = [s for path in sorted(root.glob('*.epub')) for s in parse_epub(book.id, path)]
     elif book.kind == 'pdf':
-        sections = [s for path in sorted(root.glob('*.pdf')) for s in parse_pdf_text(book.id, path.name, pdf_text(path))]
+        layout = PDF_LAYOUTS.get(book.id, PdfLayout())
+        sections = [s for path in sorted(root.glob('*.pdf'))
+                    for s in parse_pdf_text(book.id, path.name, pdf_text(path, layout.subheadings), layout)]
     elif book.kind == 'wikibooks':
         sections = [s for path in sorted(root.glob('*.wiki'))
                     for s in parse_wikitext(book.id, path.stem, path.read_text(errors='replace'))]
     else:
         raise ValueError(f'지원하지 않는 원본 형식: {book.kind}')
-    return [replace(s, figures=tuple(f for f in s.figures if allowed_figure(book, f.file))) for s in sections]
+    return [replace(s, figures=tuple(f for f in s.figures if allowed_figure(book, f.file)))
+            for s in sections if is_body_section(s)]

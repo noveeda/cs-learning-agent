@@ -6,7 +6,8 @@ import zipfile
 from dataclasses import replace
 from pathlib import Path
 
-from rag.parse import FigureRef, parse_book, parse_epub, parse_latex, parse_rst
+from rag.parse import (PDF_LAYOUTS, SUBHEADING_MARK, FigureRef, parse_book, parse_epub, parse_latex, parse_pdf_text,
+                       parse_rst, text_from_char_boxes)
 from rag.sources import BOOKS
 
 
@@ -80,6 +81,118 @@ class EpubTests(unittest.TestCase):
         self.assertEqual([(s.section_id, s.title, s.text) for s in sections],
                          [('text/ch1.xhtml#1', 'Chapter 1', 'Intro.'), ('text/ch1.xhtml#1.1', 'Keys', 'A key is unique.')])
         self.assertEqual(sections[1].figures, (FigureRef(file='images/key.png', caption='Primary key example', label=None),))
+
+
+# OpenStax PDF를 gs txtwrite로 뽑은 모양을 줄인 예
+# - 목차·장 첫머리 Chapter Outline에도 같은 x.y 제목이 나오고, 장 끝 Summary는 절 제목을 다시 나열함
+# - 홀수 쪽 머리말은 'x.y • 제목  쪽', 짝수 쪽은 '쪽  장 • 장 제목', 꼬리말은 'Access for free at openstax.org'
+# - {M}은 하위 제목 글꼴 줄 표시(SUBHEADING_MARK, 수준만큼 반복). 7.1처럼 번호와 제목이 여러 줄로 나뉜 절 제목도 있음
+OPENSTAX_TEXT = """Contents
+6.1 What Is an Operating System?  253
+6.2 Fundamental OS Concepts  255
+Chapter Outline
+6.1 What Is an Operating System?
+6.2 Fundamental OS Concepts
+Introduction
+TechWorks is a start-up company.
+6.1  What Is an Operating System?
+Learning Objectives
+An OS manages hardware.
+Access for free at openstax.org
+6.1 • What Is an Operating System?     253
+More OS text.
+254     6 • Infrastructure Abstraction Layer: Operating Systems
+6.2 Fundamental OS Concepts
+Learning Objectives
+Kernel text.
+{M}Kernel Mode and
+{M}User Mode
+Mode text.
+{M}{M}Rings
+Ring text.
+Chapter Review
+{M}Key Terms
+kernel the core of the OS
+Summary
+6.1 What Is an Operating System?
+Summary text.
+7.1
+Cloud
+Computing
+Learning Objectives
+Cloud text.
+""".format(M=SUBHEADING_MARK)
+
+
+class PdfTests(unittest.TestCase):
+    # 검증 목적: 목차·장 개요·장 끝 요약에 반복되는 x.y 제목을 절로 오인하지 않고, 머리말·꼬리말이 본문에 섞이지 않는지 확인
+    # - 장 개요의 6.1~6.6을 제목으로 받으면 순서 검사 때문에 실제 절 제목이 모두 버려져 한 절이 13만 자가 되던 문제
+    # - 하위 제목 표시 줄은 <장>.<절>.<하위> 절이 되어 긴 절이 나뉘고, 여러 줄 제목은 하나로 이어짐
+    def test_openstax_layout_splits_sections_and_drops_repeated_zones(self):
+        sections = parse_pdf_text('openstax-cs', 'ics.pdf', OPENSTAX_TEXT, PDF_LAYOUTS['openstax-cs'])
+        self.assertEqual([(s.section_id, s.title) for s in sections],
+                         [('ics.pdf#6.1', 'What Is an Operating System?'), ('ics.pdf#6.2', 'Fundamental OS Concepts'),
+                          ('ics.pdf#6.2.1', 'Kernel Mode and User Mode'), ('ics.pdf#6.2.1.1', 'Rings'),
+                          ('ics.pdf#7.1', 'Cloud Computing')])
+        self.assertEqual([s.text for s in sections],
+                         ['An OS manages hardware. More OS text.', 'Kernel text.', 'Mode text.', 'Ring text.', 'Cloud text.'])
+
+    # 검증 목적: 글자 사이 공백 기호가 없는 PDF에서 글자 상자 간격으로 단어 공백을 되살리는지 확인
+    # - txtwrite 기본 출력은 Erickson 책에서 'TowerofHanoi'처럼 단어를 붙여 검색어가 맞지 않았음
+    def test_char_boxes_restore_word_spaces(self):
+        xml = ('<page>\n<span bbox="0 0 0 0" font="F" size="10">\n'
+               '<char bbox="10 100 16 100" c="T"/><char bbox="16 100 22 100" c="o"/>'
+               '<char bbox="22 100 28 100" c="w"/>\n</span>\n<span bbox="0 0 0 0" font="F" size="10">\n'
+               '<char bbox="28 100 34 100" c="e"/><char bbox="34 100 40 100" c="r"/>'
+               '<char bbox="44 100 50 100" c="o"/><char bbox="50 100 54 100" c="f"/>'
+               '<char bbox="10 112 16 112" c="&amp;"/>\n</span>\n</page>\n')
+        self.assertEqual(text_from_char_boxes(xml).strip(), 'Tower of\n&')
+
+    # 검증 목적: 하위 제목 글꼴로만 된 줄에만 표시가 붙고, 본문 글꼴이 섞인 줄에는 붙지 않는지 확인
+    def test_char_boxes_mark_subheading_font_lines(self):
+        xml = ('<page>\n<span bbox="0 0 0 0" font="PX+NotoSans-Bold" size="12.9600">\n'
+               '<char bbox="10 100 18 100" c="K"/><char bbox="18 100 26 100" c="e"/>\n</span>\n'
+               '<span bbox="0 0 0 0" font="PX+NotoSans-Regular" size="9.0000">\n'
+               '<char bbox="10 120 15 120" c="b"/><char bbox="15 120 20 120" c="y"/>\n</span>\n</page>\n')
+        text = text_from_char_boxes(xml, PDF_LAYOUTS['openstax-cs'].subheadings)
+        self.assertEqual(text.strip('\n').split('\n'), [SUBHEADING_MARK + 'Ke', 'by'])
+
+
+## @brief spine 순서대로 XHTML 파일들을 담은 최소 EPUB을 path에 만듦(files: (OPF 기준 경로, 내용) 목록)
+def write_epub(path, files):
+    with zipfile.ZipFile(path, 'w') as epub:
+        epub.writestr('META-INF/container.xml',
+                      '<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>')
+        items = ''.join(f'<item id="i{k}" href="{href}"/>' for k, (href, _) in enumerate(files))
+        refs = ''.join(f'<itemref idref="i{k}"/>' for k in range(len(files)))
+        epub.writestr('OEBPS/content.opf', f'<package><manifest>{items}</manifest><spine>{refs}</spine></package>')
+        for href, body in files:
+            epub.writestr(f'OEBPS/{href}', f'<html><body>{body}</body></html>')
+
+
+class PressbooksTests(unittest.TestCase):
+    # 검증 목적: Pressbooks EPUB(Watt)의 장 제목·저자 머리글을 장 도입 절로 바꾸고, 본문이 아닌 절을 빼는지 확인
+    # - 장 제목이 h2.chapter-title이라 예전에는 저자 이름('Adrienne Watt')이 첫 절 제목이 되고 번호가 '#0.N'이었음
+    # - 표지·목차 파일과 장 끝 Attribution·제목 없는 상자는 근거 문단으로 쓰지 않음
+    def test_pressbooks_chapter_numbers_titles_and_non_body_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'watt-db').mkdir()
+            write_epub(Path(tmp) / 'watt-db' / 'book.epub', [
+                ('title-page.html', '<h1 class="title">Database Design</h1><p>Adrienne Watt</p>'),
+                ('chapter-008-er.html',
+                 '<h3 class="chapter-number"></h3><h2 class="chapter-title">Chapter 8 The ER Model</h2>'
+                 '<h2 class="chapter-author">Adrienne Watt</h2><p>Intro.</p><h2>Keys</h2><p>Key text.</p>'
+                 '<h3>Primary key</h3><p>Unique.</p><h2> </h2><p>Key Terms box.</p>'
+                 '<h2>Attribution</h2><p>This chapter is adapted.</p>'),
+                ('back-matter-003-lab.html', '<h1 class="back-matter-title">Appendix C SQL Lab</h1><p>Lab.</p>'
+                 '<h1>Part 1</h1><p>DDL.</p>'),
+            ])
+            sections = parse_book(BOOKS['watt-db'], Path(tmp))
+        self.assertEqual([(s.section_id, s.title, s.text) for s in sections],
+                         [('chapter-008-er.html#8', 'The ER Model', 'Intro.'),
+                          ('chapter-008-er.html#8.1', 'Keys', 'Key text.\n\nPrimary key\n\nUnique.'),
+                          ('back-matter-003-lab.html#C', 'SQL Lab', 'Lab.'),
+                          ('back-matter-003-lab.html#C.1', 'Part 1', 'DDL.')])
 
 
 class BookTests(unittest.TestCase):
