@@ -39,6 +39,8 @@ CONCEPT_SCENES: dict[str, tuple[str, ...]] = {
     'stack': ('stack',),
     'queue': ('queue',),
     'hash-function': ('hash_table',), 'hash-table': ('hash_table',),
+    # 해시 인덱스의 버킷 배치·체이닝·실제 키 비교 원리를 보여 줌(디스크 페이지 동작은 다루지 않음)
+    'hash-index': ('hash_table',),
     'binary-tree': ('bst',), 'bst': ('bst',), 'tree-traversal': ('tree_traversal',),
     'heap': ('heap',), 'priority-queue': ('heap',), 'heap-sort': ('heap',),
     'graph': ('graph_traversal',), 'bfs': ('graph_traversal',), 'dfs': ('graph_traversal',),
