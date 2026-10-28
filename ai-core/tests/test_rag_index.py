@@ -146,6 +146,15 @@ class IndexSearchTests(unittest.TestCase):
         result = Retriever(self.db, self.embedder).passages(['queue'], 'fifo', exclude={'ods:c#1:0'})
         self.assertEqual([p.id for p in result], ['ods:b#1:0'])
 
+    # 검증 목적: 후속 질문이 직전 답의 문단 id로 같은 문단을 그 순서대로 다시 받고, 사라진 id·없는 색인은 건너뜀
+    def test_by_ids_keeps_order_and_skips_missing(self):
+        self._build([_section('ods', 'b#1', 'queue fifo'), _section('ods', 'c#1', 'queue fifo fifo')],
+                    {('ods', 'b#1'): ('queue',), ('ods', 'c#1'): ('queue',)})
+        result = Retriever(self.db, self.embedder).by_ids(['ods:c#1:0', 'gone:x:0', 'ods:b#1:0'])
+        self.assertEqual([(p.id, p.text) for p in result], [('ods:c#1:0', 'queue fifo fifo'), ('ods:b#1:0', 'queue fifo')])
+        self.assertEqual(Retriever(self.root / 'none.sqlite', self.embedder).by_ids(['ods:b#1:0']), [])
+        self.assertEqual(self.embedder.calls, 0)
+
     # 검증 목적: 한 답의 근거에 CC BY-SA(hailperin)와 CC BY-NC-SA(openstax-cs) 문단이 함께 들어가지 않는지 확인
     # - CC BY(ods)는 어느 계열과도 섞을 수 있어 1등이 by-sa여도 이어서 고를 수 있음
     # - 1등이 CC BY여도 2등으로 고른 계열(여기서는 by-nc-sa)과 충돌하는 by-sa는 건너뜀
