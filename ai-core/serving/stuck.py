@@ -1,4 +1,5 @@
-# 파일 역할: 막힘 세션 흐름(S1~S8) 엔진; 요청 한 번에 한 단계만 실행하고 상태 저장은 Spring이 담당
+## @file
+# @brief 막힘 세션 흐름(S1~S8) 엔진; 요청 한 번에 한 단계만 실행하고 상태 저장은 Spring이 담당
 """Stuck-session flow: diagnose missing prerequisites, remediate bottom-up, check understanding, return."""
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypedDict
@@ -23,7 +24,7 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
-# 역할: 막힘이 시작된 곳; 로드맵 학습(개념이 정해짐) 또는 붙여넣은 문장(개념 특정 필요)
+## @brief 막힘이 시작된 곳; 로드맵 학습(개념이 정해짐) 또는 붙여넣은 문장(개념 특정 필요)
 class Entry(StrictModel):
     kind: Literal['roadmap', 'excerpt']
     concept: str | None = None
@@ -40,7 +41,7 @@ class Entry(StrictModel):
         return self
 
 
-# 역할: 진단한 선수 개념 하나의 결과; 빈틈 판단 근거로 학습자에게 보여 주고 M1·M2 측정에 사용
+## @brief 진단한 선수 개념 하나의 결과; 빈틈 판단 근거로 학습자에게 보여 주고 M1·M2 측정에 사용
 # - answer: 학습자가 낸 답; 진단 결과 화면에서 "어떤 답으로 빈틈이 됐는지" 보여 주기 위해 보관(건너뛰기·문항 없음은 None)
 class Probe(StrictModel):
     concept: str
@@ -50,14 +51,14 @@ class Probe(StrictModel):
     answer: str | None = None
 
 
-# 역할: 보충 대상 하나의 진행 기록; attempts는 설명을 받은 횟수(첫 보충 + 재보충)
+## @brief 보충 대상 하나의 진행 기록; attempts는 설명을 받은 횟수(첫 보충 + 재보충)
 class Fix(StrictModel):
     concept: str
     attempts: int = 0
     outcome: Literal['pending', 'passed', 'unresolved', 'unchecked'] = 'pending'
 
 
-# 역할: 측정 기록(S8) 한 줄; 시각·문항·학습자 답·판정을 남겨 O·M 지표를 계산할 수 있게 함
+## @brief 측정 기록(S8) 한 줄; 시각·문항·학습자 답·판정을 남겨 O·M 지표를 계산할 수 있게 함
 class Event(StrictModel):
     at: float
     kind: str
@@ -69,7 +70,7 @@ class Event(StrictModel):
 Stage = Literal['identify', 'diagnose', 'remediate', 'check', 'explain', 'decide', 'return', 'complete', 'out_of_scope']
 
 
-# 역할: Spring이 체크포인트로 저장하는 세션 전체 상태; 정답 키는 넣지 않고 문항 ID만 보관
+## @brief Spring이 체크포인트로 저장하는 세션 전체 상태; 정답 키는 넣지 않고 문항 ID만 보관
 class StuckState(StrictModel):
     entry: Entry
     stage: Stage
@@ -87,7 +88,7 @@ class StuckState(StrictModel):
     log: list[Event] = Field(default_factory=list)
 
 
-# 역할: 화면에서 보내는 입력 한 건
+## @brief 화면에서 보내는 입력 한 건
 class StepInput(StrictModel):
     type: Literal['start', 'answer', 'skip_known', 'opt_out', 'continue']
     entry: Entry | None = None
@@ -99,7 +100,7 @@ class LLMUnavailable(RuntimeError):
     pass
 
 
-# 역할: 흐름이 쓰는 LLM 역할 5가지의 계약; 실제 구현은 stuck_llm, 테스트는 가짜 구현을 주입
+## @brief 흐름이 쓰는 LLM 역할 5가지의 계약; 실제 구현은 stuck_llm, 테스트는 가짜 구현을 주입
 # - choose_animation: 보충 개념에 보여 줄 장면 요청을 kinds 안에서 고르거나, 알맞은 장면이 없으면 None
 # - explain의 scene: 같은 화면에 보일 장면 요약(_animation 참고, 없으면 None). 글 예시를 장면과 같은 값으로 맞추는 데 씀
 class Gateway(Protocol):
@@ -110,7 +111,7 @@ class Gateway(Protocol):
     def choose_animation(self, concept: Concept, entry: Entry, kinds: tuple[str, ...]) -> AnimationRequest | None: ...
 
 
-# 역할: LLM 역할이 아직 연결되지 않았음을 알리는 기본 구현; 상태를 바꾸지 않고 재시도 가능한 오류로 끝냄
+## @brief LLM 역할이 아직 연결되지 않았음을 알리는 기본 구현; 상태를 바꾸지 않고 재시도 가능한 오류로 끝냄
 class UnavailableGateway:
     def _fail(self, *_):
         raise LLMUnavailable('보충 설명·서술 채점 기능은 아직 연결되지 않았습니다.')
@@ -135,7 +136,7 @@ class _Context:
         return next(i for i in self.items if i.id == item_id)
 
 
-# 역할: 화면용 문항; 정답·근거·루브릭을 빼서 브라우저와 저장소로 정답이 새지 않게 함
+## @brief 화면용 문항; 정답·근거·루브릭을 빼서 브라우저와 저장소로 정답이 새지 않게 함
 def _item_view(item):
     view = {'id': item.id, 'format': item.format, 'question': item.question}
     if item.options:
@@ -151,7 +152,7 @@ def _log(s, ctx, kind, concept=None, item=None, **detail):
     s.log.append(Event(at=ctx.now, kind=kind, concept=concept, item=item, detail=detail))
 
 
-# 역할: 선수 개념이 앞에 오는 전체 개념 순서; 빈틈을 "가장 아래부터" 보충하는 기준
+## @brief 선수 개념이 앞에 오는 전체 개념 순서; 빈틈을 "가장 아래부터" 보충하는 기준
 def _prerequisite_order(concept_map):
     prerequisites = {c.id: [p.id for p in c.prerequisites] for c in concept_map.concepts}
     order, seen = [], set()
@@ -168,7 +169,7 @@ def _prerequisite_order(concept_map):
     return order
 
 
-# 역할: 진단 시작(S3); 막힌 개념의 직접 선수 개념을 깊이 1로 대기열에 넣음
+## @brief 진단 시작(S3); 막힌 개념의 직접 선수 개념을 깊이 1로 대기열에 넣음
 def _start_diagnosis(s, ctx):
     s.stage = 'diagnose'
     s.frontier = [(p.id, 1) for p in ctx.concept(s.target).prerequisites]
@@ -176,7 +177,7 @@ def _start_diagnosis(s, ctx):
     _next_probe(s, ctx)
 
 
-# 역할: 다음 진단 문항을 고르거나 진단을 끝냄
+## @brief 다음 진단 문항을 고르거나 진단을 끝냄
 # - 너비 우선: 직접 선수 개념을 먼저 모두 확인해, 문항 상한에 걸려도 가장 가까운 빈틈은 놓치지 않게 함
 # - 이미 확인한 개념은 다시 묻지 않음(여러 경로로 만나는 공통 선수 개념)
 def _next_probe(s, ctx):
@@ -202,7 +203,7 @@ def _next_probe(s, ctx):
     _start_remediation(s, ctx)
 
 
-# 역할: 진단 결과 화면의 판정 근거 한 줄; 학습자가 본 문항 문장·보기와 학습자 답만 담고 정답 키·근거·루브릭은 넣지 않음
+## @brief 진단 결과 화면의 판정 근거 한 줄; 학습자가 본 문항 문장·보기와 학습자 답만 담고 정답 키·근거·루브릭은 넣지 않음
 def _evidence_view(ctx, probe):
     view = {'concept': probe.concept, 'item': probe.item, 'result': probe.result, 'question': None, 'answer': probe.answer}
     if probe.item:
@@ -213,7 +214,7 @@ def _evidence_view(ctx, probe):
     return view
 
 
-# 역할: 진단 결과로 보충 순서를 정함; 빈틈은 선수 개념이 먼저, 막힌 개념은 마지막(S6 재확인)
+## @brief 진단 결과로 보충 순서를 정함; 빈틈은 선수 개념이 먼저, 막힌 개념은 마지막(S6 재확인)
 def _start_remediation(s, ctx):
     gaps = {p.concept for p in s.probes if p.result == 'gap'}
     ordered = [c for c in _prerequisite_order(ctx.concept_map) if c in gaps]
@@ -238,7 +239,7 @@ def _answer_for(s, ctx):
     return ctx.input.answer
 
 
-# 역할: S2 막힌 개념 특정; 붙여넣은 문장을 지도의 개념 ID 하나로 연결(LLM 1회)
+## @brief S2 막힌 개념 특정; 붙여넣은 문장을 지도의 개념 ID 하나로 연결(LLM 1회)
 def _identify(s, ctx):
     _expect(ctx, 'start', 'continue')
     concept = ctx.gateway.identify(s.entry.excerpt, ctx.concept_map)
@@ -252,7 +253,7 @@ def _identify(s, ctx):
     _start_diagnosis(s, ctx)
 
 
-# 역할: S3 진단 응답 처리; 맞히면 그 아래로 내려가지 않고(가지치기), 틀리면 깊이 상한 안에서 한 단계 더 내려감
+## @brief S3 진단 응답 처리; 맞히면 그 아래로 내려가지 않고(가지치기), 틀리면 깊이 상한 안에서 한 단계 더 내려감
 def _diagnose(s, ctx):
     if s.pending is None:
         _expect(ctx, 'start', 'continue')
@@ -285,7 +286,7 @@ def _diagnose(s, ctx):
     _next_probe(s, ctx)
 
 
-# 역할: 보충 개념의 단계별 애니메이션을 만듦(장면 선택 LLM 1회 + 코드 시뮬레이션)
+## @brief 보충 개념의 단계별 애니메이션을 만듦(장면 선택 LLM 1회 + 코드 시뮬레이션)
 # - 반환: (설명에 넘길 장면 요약, 프레임 dict). 붙일 수 없으면 (None, None)
 #   요약 = 장면 요청(종류·order·buckets·시작 값·연산) + 코드가 계산한 단계 캡션(steps)
 #   캡션까지 넘기는 이유: 모델이 단계별 상태를 직접 계산하면 틀릴 수 있음(실측에서 최대 힙에 없는 교환을 씀). 상태는 코드가 계산한 것만 씀
@@ -307,7 +308,7 @@ def _animation(s, ctx, concept_id):
         return None, None
 
 
-# 역할: S4 보충; 장면이 있으면 먼저 고르고(LLM 1회) 그 장면에 맞춰 설명한 뒤(LLM 1회) 같은 화면에 확인 문항을 붙임
+## @brief S4 보충; 장면이 있으면 먼저 고르고(LLM 1회) 그 장면에 맞춰 설명한 뒤(LLM 1회) 같은 화면에 확인 문항을 붙임
 # - 장면을 먼저 고르는 이유: 설명이 장면 값을 알아야 글 예시와 애니메이션이 같은 예시가 됨(E2E에서 최소 힙 글 + 최대 힙 장면 발견)
 # - 실행에 성공한 장면만 설명에 넘김. 장면이 없거나 실패하면 지금처럼 장면 없이 글만 씀
 # - 설명 실패는 지금처럼 LLMUnavailable(503)로 끝내 상태를 보존하고, 애니메이션 실패는 텍스트만으로 진행
@@ -334,7 +335,7 @@ def _remediate(s, ctx):
     s.view['item'] = _item_view(item)
 
 
-# 역할: S5·S6 혼합형 확인의 첫 단계; 적용 문항을 결정적으로 채점하고 서술 질문으로 넘어감
+## @brief S5·S6 혼합형 확인의 첫 단계; 적용 문항을 결정적으로 채점하고 서술 질문으로 넘어감
 def _check(s, ctx):
     _expect(ctx, 'answer')
     answer = _answer_for(s, ctx)
@@ -350,7 +351,7 @@ def _check(s, ctx):
               'item': _item_view(explanations[0])}
 
 
-# 역할: 혼합형 확인의 두 번째 단계; 서술을 루브릭으로 채점(LLM 1회)하고 두 결과가 모두 통과해야 이해로 인정
+## @brief 혼합형 확인의 두 번째 단계; 서술을 루브릭으로 채점(LLM 1회)하고 두 결과가 모두 통과해야 이해로 인정
 def _explain(s, ctx):
     _expect(ctx, 'answer')
     answer = _answer_for(s, ctx)
@@ -363,7 +364,7 @@ def _explain(s, ctx):
     _conclude(s, ctx, bool(s.check_passed) and all(met), rubric_met=met)
 
 
-# 역할: 확인 결과에 따라 다음 보충 대상으로 넘어가거나, 재보충하거나, 미해결로 학습자 선택을 기다림
+## @brief 확인 결과에 따라 다음 보충 대상으로 넘어가거나, 재보충하거나, 미해결로 학습자 선택을 기다림
 def _conclude(s, ctx, passed, **detail):
     fix = s.fixes[s.cursor]
     s.pending, s.check_passed = None, None
@@ -386,7 +387,7 @@ def _advance(s):
     s.stage = 'remediate' if s.cursor < len(s.fixes) else 'return'
 
 
-# 역할: 미해결·확인 생략 화면에서 학습자가 계속하기를 누르면 다음 보충 대상으로 이동
+## @brief 미해결·확인 생략 화면에서 학습자가 계속하기를 누르면 다음 보충 대상으로 이동
 def _decide(s, ctx):
     _expect(ctx, 'continue')
     _log(s, ctx, 'continued', s.fixes[s.cursor].concept)
@@ -394,7 +395,7 @@ def _decide(s, ctx):
     s.view = {'kind': 'next'}
 
 
-# 역할: S7 복귀; 채운 선수 개념과 원래 학습의 연결을 요약(LLM 1회)하고 복귀 지점을 돌려줌
+## @brief S7 복귀; 채운 선수 개념과 원래 학습의 연결을 요약(LLM 1회)하고 복귀 지점을 돌려줌
 def _return(s, ctx):
     _expect(ctx, 'continue')
     text = ctx.gateway.summarize(s, ctx.concept_map)
@@ -415,7 +416,7 @@ def _node(handler):
     return execute
 
 
-# 역할: 저장된 stage에 맞는 노드 하나만 실행하고 끝내는 그래프; 다음 단계는 다음 요청에서 진행(커리큘럼과 같은 패턴)
+## @brief 저장된 stage에 맞는 노드 하나만 실행하고 끝내는 그래프; 다음 단계는 다음 요청에서 진행(커리큘럼과 같은 패턴)
 def _build_graph():
     graph = StateGraph(_GraphState, context_schema=_Context)
     handlers = {'identify': _identify, 'diagnose': _diagnose, 'remediate': _remediate, 'check': _check,
@@ -431,7 +432,7 @@ def _build_graph():
 _GRAPH = _build_graph()
 
 
-# 역할: 상태와 입력을 받아 한 단계 진행한 새 상태 반환
+## @brief 상태와 입력을 받아 한 단계 진행한 새 상태 반환
 # - 원본은 바꾸지 않음: LLM 실패·잘못된 입력이면 예외를 던지고 Spring은 마지막 저장 상태를 유지
 # - 검수 전(draft) 지도로는 진단하지 않음: 정답 빈틈의 기준이 확정되지 않았기 때문
 def step(original: StuckState | None, step_input: StepInput, gateway: Gateway, concept_map: ConceptMap,

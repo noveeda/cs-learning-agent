@@ -1,4 +1,5 @@
-# 파일 역할: 배열·연결 리스트·스택·큐 장면 요청을 실제 파이썬 리스트로 실행하며 단계별 프레임을 만드는 시뮬레이터
+## @file
+# @brief 배열·연결 리스트·스택·큐 장면 요청을 실제 파이썬 리스트로 실행하며 단계별 프레임을 만드는 시뮬레이터
 # - 프레임 규칙: frames[0]은 초기 상태, 연산 하나마다 프레임 하나(len(frames) == len(ops) + 1)
 # - 원소마다 생성 순서로 id를 붙여, 자리가 바뀌어도 같은 상자로 이어지게 함
 # - 실행할 수 없는 연산(빈 스택 pop, 범위 밖 인덱스 등)은 한국어 ValueError로 거부. 채팅 모델이 고쳐 다시 부를 수 있게 함
@@ -12,12 +13,12 @@ from .model import (GRID_HEIGHT, GRID_WIDTH, Animation, ArrayRequest, Arrow, Box
 STACK_MAX_HEIGHT = GRID_HEIGHT
 
 
-# 역할: 강조 대상 id 집합을 보고 상자의 tone을 고름
+## @brief 강조 대상 id 집합을 보고 상자의 tone을 고름
 def tone_of(box_id: str, active=(), new=()) -> str:
     return 'new' if box_id in new else 'active' if box_id in active else 'normal'
 
 
-# 역할: 배열을 y=0 한 줄의 cell로 그림. 삭제된 원소는 같은 단계에서만 원래 자리 아래(y=1)에 removed로 남김
+## @brief 배열을 y=0 한 줄의 cell로 그림. 삭제된 원소는 같은 단계에서만 원래 자리 아래(y=1)에 removed로 남김
 def array_frame(items, caption, active=(), new=(), removed=None) -> Frame:
     boxes = [Box(id=i, label=str(v), x=x, y=0, shape='cell', tone=tone_of(i, active, new))
              for x, (i, v) in enumerate(items)]
@@ -27,7 +28,7 @@ def array_frame(items, caption, active=(), new=(), removed=None) -> Frame:
     return Frame(boxes=boxes, arrows=[], caption=caption)
 
 
-# 역할: 배열 장면 실행. insert·delete는 뒤 원소를 한 칸씩 옮기는 비용(O(n))이 보이도록 이동한 원소를 active로 표시
+## @brief 배열 장면 실행. insert·delete는 뒤 원소를 한 칸씩 옮기는 비용(O(n))이 보이도록 이동한 원소를 active로 표시
 def simulate_array(req: ArrayRequest) -> Animation:
     ids = count()
     items = [(f'a{next(ids)}', v) for v in req.values]
@@ -63,7 +64,7 @@ def simulate_array(req: ArrayRequest) -> Animation:
     return build_animation('array', '배열 연산', frames)
 
 
-# 역할: 연결 리스트를 head 이름표(0,0)와 y=1 한 줄의 node로 그리고, head·각 노드의 next를 화살표로 이음
+## @brief 연결 리스트를 head 이름표(0,0)와 y=1 한 줄의 node로 그리고, head·각 노드의 next를 화살표로 이음
 # - 삭제된 노드는 같은 단계에서만 원래 자리 아래(y=2)에 화살표 없이 남겨 연결이 끊긴 모습을 보여 줌
 def list_frame(items, caption, active=(), new=(), removed=None) -> Frame:
     boxes = [Box(id='head', label='head', x=0, y=0, shape='label')]
@@ -77,7 +78,7 @@ def list_frame(items, caption, active=(), new=(), removed=None) -> Frame:
     return Frame(boxes=boxes, arrows=arrows, caption=caption)
 
 
-# 역할: 값으로 첫 노드 위치를 찾음. 없으면 연산 이름을 담은 한국어 오류
+## @brief 값으로 첫 노드 위치를 찾음. 없으면 연산 이름을 담은 한국어 오류
 def find_value(items, value: int, op: str) -> int:
     for index, (_, v) in enumerate(items):
         if v == value:
@@ -85,7 +86,7 @@ def find_value(items, value: int, op: str) -> int:
     raise ValueError(f'{op}: {value}{josa(value, "이", "가")} 리스트에 없습니다')
 
 
-# 역할: 단일 연결 리스트 장면 실행. 포인터를 바꾼 노드(앞 노드)를 active로 표시
+## @brief 단일 연결 리스트 장면 실행. 포인터를 바꾼 노드(앞 노드)를 active로 표시
 def simulate_linked_list(req: LinkedListRequest) -> Animation:
     ids = count()
     items = [(f'n{next(ids)}', v) for v in req.values]
@@ -116,7 +117,7 @@ def simulate_linked_list(req: LinkedListRequest) -> Animation:
     return build_animation('linked_list', '단일 연결 리스트 연산', frames)
 
 
-# 역할: 스택 장면 실행
+## @brief 스택 장면 실행
 # - 먼저 모든 단계의 상태를 기록하고, 가장 높았던 높이를 안 뒤에 그림. 바닥을 고정해 프레임마다 화면이 출렁이지 않게 하기 위함
 # - pop한 상자는 그 단계에서만 원래 자리에 removed로 남김
 def simulate_stack(req: StackRequest) -> Animation:
@@ -150,7 +151,7 @@ def simulate_stack(req: StackRequest) -> Animation:
     return build_animation('stack', '스택 push·pop', frames)
 
 
-# 역할: 큐를 y=1 한 줄의 slot으로 그리고, front 이름표는 위(y=0), rear 이름표는 아래(y=2)에서 화살표로 가리킴
+## @brief 큐를 y=1 한 줄의 slot으로 그리고, front 이름표는 위(y=0), rear 이름표는 아래(y=2)에서 화살표로 가리킴
 # - 배열 기반 큐는 원소가 칸을 옮기지 않으므로 slot 상자 자체가 원소 자리이고 id가 고정됨
 # - 큐가 비면 front·rear 이름표를 그리지 않음
 def queue_frame(slots, front, size, caption, new=None, removed=None) -> Frame:
@@ -167,7 +168,7 @@ def queue_frame(slots, front, size, caption, new=None, removed=None) -> Frame:
     return Frame(boxes=boxes, arrows=arrows, caption=caption)
 
 
-# 역할: 배열 기반 큐 장면 실행. front 위치와 원소 수로 상태를 관리하고, rear는 마지막 원소 칸을 가리킴
+## @brief 배열 기반 큐 장면 실행. front 위치와 원소 수로 상태를 관리하고, rear는 마지막 원소 칸을 가리킴
 # - 선형 큐는 rear가 배열 끝에 닿으면 앞쪽 빈칸이 있어도 넣지 못함(원형 큐가 해결하는 문제)
 def simulate_queue(req: QueueRequest) -> Animation:
     slots: list[int | None] = [None] * req.capacity

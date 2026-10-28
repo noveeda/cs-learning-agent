@@ -1,4 +1,5 @@
-# 파일 역할: 모델이 제안한 그래프 JSON을 검증하고 서버가 직접 안전한 SVG를 작성하는 도구
+## @file
+# @brief 모델이 제안한 그래프 JSON을 검증하고 서버가 직접 안전한 SVG를 작성하는 도구
 """Validated graph data -> SVG; never execute model-supplied code."""
 from html import escape
 import base64
@@ -12,7 +13,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-# 역할: 격자 위치와 짧은 라벨을 가진 노드
+## @brief 격자 위치와 짧은 라벨을 가진 노드
 class Node(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     id: str = Field(pattern=r'^[A-Za-z][A-Za-z0-9_]{0,31}$')
@@ -21,21 +22,21 @@ class Node(BaseModel):
     row: int = Field(ge=0, le=7)
 
 
-# 역할: 기존 노드 두 개를 잇는 방향 간선
+## @brief 기존 노드 두 개를 잇는 방향 간선
 class Edge(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     source: str
     target: str
 
 
-# 역할: 제목·노드·간선과 전체 그래프 무결성 검증
+## @brief 제목·노드·간선과 전체 그래프 무결성 검증
 class Diagram(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     title: str = Field(min_length=1, max_length=60)
     nodes: list[Node] = Field(min_length=1, max_length=16)
     edges: list[Edge] = Field(max_length=24)
 
-    # 역할: 노드 ID·배치 중복과 존재하지 않는 연결을 거부해 렌더링 가능한 그래프 보장
+    ## @brief 노드 ID·배치 중복과 존재하지 않는 연결을 거부해 렌더링 가능한 그래프 보장
     @model_validator(mode='after')
     def validate_graph(self):
         ids = [node.id for node in self.nodes]
@@ -57,7 +58,7 @@ CONSTRAINT_NAMES = {'pattern': '정규식', 'minimum': '최솟값', 'maximum': '
                     'maxLength': '최대 길이', 'minItems': '최소 개수', 'maxItems': '최대 개수'}
 
 
-# 역할: Pydantic JSON schema의 $ref를 $defs 내용으로 펼치고, 제약 키워드를 같은 필드 description에 문장으로 덧붙여 반환
+## @brief Pydantic JSON schema의 $ref를 $defs 내용으로 펼치고, 제약 키워드를 같은 필드 description에 문장으로 덧붙여 반환
 # - Gemma 4 채팅 템플릿은 도구 스키마의 $defs·$ref와 pattern·maximum 같은 제약을 렌더링하지 않음
 # - 펼치지 않으면 모델이 노드의 column·row 필드와 격자 범위를 볼 수 없어 도식 호출이 실패함(모델 선택 시험: 도식 성공 0/8 → 펼친 뒤 8/8, 첫 시도 성공 5/8)
 # - 제약 키워드 자체는 지우지 않음: 렌더링하는 템플릿에는 그대로 전달되고, 실제 검증은 서버의 Diagram 모델이 함
@@ -89,7 +90,7 @@ TOOL = {'type': 'function', 'function': {
 }}
 
 
-# 역할: 도식에 필요한 글자만 폰트에 포함해 한글 표시를 보장하고 SVG 크기 절감; 같은 문자열은 캐시 재사용
+## @brief 도식에 필요한 글자만 폰트에 포함해 한글 표시를 보장하고 SVG 크기 절감; 같은 문자열은 캐시 재사용
 @lru_cache(maxsize=32)
 def embedded_font(text: str) -> str:
     font = TTFont(Path(__file__).resolve().parents[1] / 'assets' / 'NotoSansKR.woff2')
@@ -105,7 +106,7 @@ def embedded_font(text: str) -> str:
     return f"<style>@font-face{{font-family:DiagramKR;src:url(data:font/woff2;base64,{data}) format('woff2')}}text{{font-family:DiagramKR,sans-serif}}</style>"
 
 
-# 역할: 검증된 노드·간선을 격자 좌표로 렌더링하고 SVG 경로와 재참조용 구조 데이터 반환
+## @brief 검증된 노드·간선을 격자 좌표로 렌더링하고 SVG 경로와 재참조용 구조 데이터 반환
 def create_diagram(arguments: str, output_dir: Path) -> dict:
     diagram = Diagram.model_validate_json(arguments)
     width = (max(n.column for n in diagram.nodes) + 1) * 300 + 40

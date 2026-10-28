@@ -1,4 +1,5 @@
-# 파일 역할: 개념별 진단·확인 문항과 서술 루브릭을 불러오고, 개념 지도와 맞물리는지 검증
+## @file
+# @brief 개념별 진단·확인 문항과 서술 루브릭을 불러오고, 개념 지도와 맞물리는지 검증
 """Item bank schema; diagnosis/check items are graded deterministically, explanations by rubric."""
 import json
 from pathlib import Path
@@ -11,12 +12,12 @@ from serving.concept_map import ConceptMap, load_concept_map, subject_dirs
 CHOICE_LABELS = ('A', 'B', 'C', 'D')
 
 
-# 역할: 단답 정답 비교 전 표기 차이만 없앰; 공백·대소문자·전각 쉼표가 달라도 같은 답으로 취급
+## @brief 단답 정답 비교 전 표기 차이만 없앰; 공백·대소문자·전각 쉼표가 달라도 같은 답으로 취급
 def normalize_short_answer(value: str) -> str:
     return ''.join(str(value).split()).lower().replace('，', ',')
 
 
-# 역할: 문항 하나
+## @brief 문항 하나
 # - diagnosis: 막힌 개념의 선수 개념을 짧게 확인해 빈틈을 찾는 문항(S3)
 # - check: 보충 뒤 이해를 확인하는 적용 문항(S5·S6), 진단 문항과 다른 상황을 씀
 # - explanation: 자기 말 설명 질문과 루브릭(S5·S6), 채점은 LLM이 루브릭 항목별로 판정
@@ -35,7 +36,7 @@ class Item(BaseModel):
     rationale: str = Field(min_length=1, max_length=400)
     rubric: list[str] | None = None
 
-    # 역할: 목적·형식·정답 필드의 조합을 검증해 결정적 채점이 가능한 문항만 남김
+    ## @brief 목적·형식·정답 필드의 조합을 검증해 결정적 채점이 가능한 문항만 남김
     @model_validator(mode='after')
     def consistent_shape(self):
         prefix, kind = self.id.rsplit('-', 1)[0], self.id.rsplit('-', 1)[1][0]
@@ -62,7 +63,7 @@ class Item(BaseModel):
         return self
 
 
-# 역할: 문항들이 개념 지도와 맞물리는지 검증; 없는 개념·목표를 가리키거나 ID가 겹치면 거부
+## @brief 문항들이 개념 지도와 맞물리는지 검증; 없는 개념·목표를 가리키거나 ID가 겹치면 거부
 def validate_against_map(items: list[Item], concept_map: ConceptMap) -> None:
     ids = [item.id for item in items]
     if len(set(ids)) != len(ids):
@@ -75,7 +76,7 @@ def validate_against_map(items: list[Item], concept_map: ConceptMap) -> None:
             raise ValueError(f'{item.id}: {item.concept}에 없는 학습 목표 순번 {item.objective}입니다.')
 
 
-# 역할: 개념 묶음별 JSONL 파일(items-*.jsonl)을 모두 읽어 검증된 문항 목록 반환
+## @brief 개념 묶음별 JSONL 파일(items-*.jsonl)을 모두 읽어 검증된 문항 목록 반환
 # - directory가 없으면 모든 과목 폴더를 읽고, 기본 지도(모든 과목을 합친 지도)와 맞물리는지 검증
 def load_item_bank(directory: Path | None = None, concept_map: ConceptMap | None = None) -> list[Item]:
     items = []

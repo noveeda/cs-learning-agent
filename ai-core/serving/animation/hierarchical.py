@@ -1,4 +1,5 @@
-# 파일 역할: 해시 테이블·이진 탐색 트리·힙 장면 요청을 실제 자료구조로 실행하며 단계별 프레임을 만드는 시뮬레이터
+## @file
+# @brief 해시 테이블·이진 탐색 트리·힙 장면 요청을 실제 자료구조로 실행하며 단계별 프레임을 만드는 시뮬레이터
 # - 해시 테이블·BST는 연산 하나마다 프레임 하나. 힙만 sift-up·sift-down 교환마다 프레임을 더해 MAX_FRAMES 안에서 허용
 # - 트리는 깊이를 y로, 중위 순서를 x로 둠. 중위 순서는 노드마다 달라 상자가 겹치지 않음
 # - 실행할 수 없는 연산(중복 삽입, 없는 값 삭제, 빈 힙 extract)과 그릴 수 없는 크기는 한국어 ValueError로 거부
@@ -16,7 +17,7 @@ CHAIN_MAX = GRID_HEIGHT - 1
 BST_MAX_NODES = 9
 
 
-# 역할: 버킷을 y=0 줄의 slot으로, 각 체인을 그 버킷 아래 세로 node 줄로 그리고 버킷→첫 노드→다음 노드를 화살표로 이음
+## @brief 버킷을 y=0 줄의 slot으로, 각 체인을 그 버킷 아래 세로 node 줄로 그리고 버킷→첫 노드→다음 노드를 화살표로 이음
 def hash_frame(chains, caption, active=(), new=()) -> Frame:
     boxes, arrows = [], []
     for bucket, chain in enumerate(chains):
@@ -29,7 +30,7 @@ def hash_frame(chains, caption, active=(), new=()) -> Frame:
     return Frame(boxes=boxes, arrows=arrows, caption=caption)
 
 
-# 역할: 체이닝 해시 테이블 장면 실행. 캡션마다 h(k) 계산식을 넣고, 탐색 시 따라간 체인 노드를 active로 표시
+## @brief 체이닝 해시 테이블 장면 실행. 캡션마다 h(k) 계산식을 넣고, 탐색 시 따라간 체인 노드를 active로 표시
 # - 이미 있는 키의 insert는 집합처럼 넣지 않는 단계로 보여 줌(실행 불가가 아니므로 오류로 보지 않음)
 def simulate_hash_table(req: HashTableRequest) -> Animation:
     ids = count()
@@ -57,7 +58,7 @@ def simulate_hash_table(req: HashTableRequest) -> Animation:
     return build_animation('hash_table', f'해시 테이블(체이닝, 버킷 {m}개)', frames)
 
 
-# 역할: BST 노드. id는 생성 순서로 붙여 삭제·대체로 자리가 바뀌어도 같은 상자로 이어지게 함
+## @brief BST 노드. id는 생성 순서로 붙여 삭제·대체로 자리가 바뀌어도 같은 상자로 이어지게 함
 @dataclass(eq=False)
 class TreeNode:
     id: str
@@ -66,7 +67,7 @@ class TreeNode:
     right: 'TreeNode | None' = None
 
 
-# 역할: 트리를 깊이(y)·중위 순서(x)로 배치하고 부모→자식 화살표를 그림
+## @brief 트리를 깊이(y)·중위 순서(x)로 배치하고 부모→자식 화살표를 그림
 # - 삭제된 노드는 같은 단계에서만 원래 깊이에 removed로 남김. 값 순서로 x를 함께 매겨 다른 노드와 겹치지 않음
 def bst_frame(root, caption, active=(), new=(), removed=None) -> Frame:
     placed, arrows = [], []
@@ -86,7 +87,7 @@ def bst_frame(root, caption, active=(), new=(), removed=None) -> Frame:
     return Frame(boxes=boxes, arrows=arrows, caption=caption)
 
 
-# 역할: 값으로 노드를 찾으며 지나간 경로(루트부터 부모까지)와 노드를 반환. 없으면 node는 None
+## @brief 값으로 노드를 찾으며 지나간 경로(루트부터 부모까지)와 노드를 반환. 없으면 node는 None
 def descend(root, value):
     path, node = [], root
     while node and node.value != value:
@@ -95,7 +96,7 @@ def descend(root, value):
     return path, node
 
 
-# 역할: 이진 탐색 트리 장면 실행
+## @brief 이진 탐색 트리 장면 실행
 # - insert: 비교 경로를 active로, 새 노드를 new로 표시
 # - delete: 자식이 둘이면 중위 후속자 노드를 떼어 와 삭제 자리에 붙임. 값만 복사하지 않아 후속자 상자가 올라가는 모습이 보임
 def simulate_bst(req: BSTRequest) -> Animation:
@@ -150,7 +151,7 @@ def simulate_bst(req: BSTRequest) -> Animation:
     return build_animation('bst', '이진 탐색 트리 insert·delete', frames)
 
 
-# 역할: 완전 이진 트리 크기 n에서 배열 인덱스 → 중위 순서(x)를 계산
+## @brief 완전 이진 트리 크기 n에서 배열 인덱스 → 중위 순서(x)를 계산
 def inorder_positions(n: int) -> dict[int, int]:
     order = []
 
@@ -163,7 +164,7 @@ def inorder_positions(n: int) -> dict[int, int]:
     return {i: x for x, i in enumerate(order)}
 
 
-# 역할: 힙 장면 실행. 같은 원소를 트리 노드와 배열 칸 두 상자로 함께 그려 인덱스 관계(부모 (i-1)//2)를 보여 줌
+## @brief 힙 장면 실행. 같은 원소를 트리 노드와 배열 칸 두 상자로 함께 그려 인덱스 관계(부모 (i-1)//2)를 보여 줌
 # - 먼저 모든 단계를 기록하고 최대 깊이를 안 뒤 그림. 배열 줄(y=최대 깊이+2)이 프레임마다 출렁이지 않게 하기 위함
 # - extract는 루트 제거 → 마지막 원소를 루트로 이동 → sift-down 교환 순서로 단계를 나눔
 def simulate_heap(req: HeapRequest) -> Animation:

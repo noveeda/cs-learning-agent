@@ -1,4 +1,5 @@
-# 파일 역할: CPU 스케줄링 장면 요청(FCFS·SJF·우선순위·RR)을 실제로 실행하며 간트 차트 프레임을 만드는 시뮬레이터
+## @file
+# @brief CPU 스케줄링 장면 요청(FCFS·SJF·우선순위·RR)을 실제로 실행하며 간트 차트 프레임을 만드는 시뮬레이터
 # - 화면 배치: y=0 시간 눈금, y=1 간트 칸(프로세스 이름, 유휴는 "-"), y=3·4 준비 큐, y=6 프로세스별 대기 시간
 # - 시간 단위마다 프레임을 만들면 총 12칸 + 처음·끝 프레임이 MAX_FRAMES(16) 안이지만, 학생이 같은 장면을 반복해 넘기지 않게
 #   한 번 꺼내 실행한 구간(RR은 할당량 한 번)마다 프레임 하나로 묶음
@@ -16,7 +17,7 @@ ALGORITHMS = {'fcfs': 'FCFS 스케줄링', 'sjf': 'SJF 스케줄링(비선점)',
 KEYS = {'sjf': lambda p: (p.burst, p.arrival, p.name), 'priority': lambda p: (p.priority, p.arrival, p.name)}
 
 
-# 역할: 스케줄을 계산해 실행 구간 목록을 반환. 구간 = (프로세스 또는 None(유휴), 시작, 끝, 기다리는 준비 큐, 끝났는지)
+## @brief 스케줄을 계산해 실행 구간 목록을 반환. 구간 = (프로세스 또는 None(유휴), 시작, 끝, 기다리는 준비 큐, 끝났는지)
 # - 비선점(FCFS·SJF·우선순위)은 남은 시간을 한 번에, RR은 quantum만큼만 실행
 # - 기다리는 준비 큐: 구간 끝 시각까지 도착한 프로세스를 넣은 뒤의 큐(실행 중인 프로세스는 빼고)
 #   한 구간을 프레임 하나로 묶으므로, 꺼낸 순간의 큐만 그리면 구간 중에 도착해 기다린 프로세스가 화면에서 빠지기 때문
@@ -54,7 +55,7 @@ def schedule(req: CpuScheduleRequest) -> list[tuple]:
     return segments
 
 
-# 역할: 한 프레임을 그림. cells는 지금까지 채운 간트 칸, active는 이번 구간의 칸 번호, waits는 끝난 프로세스의 대기 시간
+## @brief 한 프레임을 그림. cells는 지금까지 채운 간트 칸, active는 이번 구간의 칸 번호, waits는 끝난 프로세스의 대기 시간
 def gantt_frame(req, total, cells, queue, waits, caption, active=()) -> Frame:
     boxes = [Box(id=f't{t}', label=str(t), x=t, y=0, shape='label') for t in range(total)]
     boxes += [Box(id=f'g{t}', label=label, x=t, y=1, shape='cell', tone='active' if t in active else 'normal')
@@ -68,7 +69,7 @@ def gantt_frame(req, total, cells, queue, waits, caption, active=()) -> Frame:
     return Frame(boxes=boxes, arrows=[], caption=caption)
 
 
-# 역할: 구간 하나의 설명. 왜 이 프로세스를 골랐는지(알고리즘별 기준)와 끝났는지를 적음
+## @brief 구간 하나의 설명. 왜 이 프로세스를 골랐는지(알고리즘별 기준)와 끝났는지를 적음
 def describe(req, proc, start, end, done, wait) -> str:
     span = f'{start}~{end}'
     if proc is None:
@@ -83,7 +84,7 @@ def describe(req, proc, start, end, done, wait) -> str:
     return f'{span}: {reason}, 남은 일은 큐 뒤로'
 
 
-# 역할: CPU 스케줄링 장면 실행. 첫 프레임은 입력 소개, 구간마다 한 프레임, 마지막 프레임은 끝 시각과 평균 대기 시간
+## @brief CPU 스케줄링 장면 실행. 첫 프레임은 입력 소개, 구간마다 한 프레임, 마지막 프레임은 끝 시각과 평균 대기 시간
 # - 끝 시각은 마지막 설명에 적음: 눈금(y=0)은 칸의 시작 시각만 적고, 12칸을 다 쓰면 끝 시각 눈금을 둘 칸(x=12)이 없기 때문
 # - 대기 시간 = 끝난 시각 - 도착 시각 - 실행 시간(준비 큐에서 기다린 시간의 합)
 def simulate_cpu_schedule(req: CpuScheduleRequest) -> Animation:

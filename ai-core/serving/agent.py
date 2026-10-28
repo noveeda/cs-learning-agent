@@ -1,4 +1,5 @@
-# 파일 역할: Qwen의 답변과 도구 호출을 중계하고 SVG 도식·단계별 애니메이션 결과를 다시 모델에 전달하는 제한된 에이전트 루프
+## @file
+# @brief Qwen의 답변과 도구 호출을 중계하고 SVG 도식·단계별 애니메이션 결과를 다시 모델에 전달하는 제한된 에이전트 루프
 """Small bounded tool loop for the local Qwen server."""
 import json
 from pathlib import Path
@@ -18,7 +19,7 @@ SYSTEM = '''당신은 CS 학습 조교입니다. 한국어로 정확하게 답�
 완료 후 도식의 관계를 간결하게 설명하세요.'''
 
 
-# 역할: 도구 결과 중 모델에 돌려줄 부분만 고름
+## @brief 도구 결과 중 모델에 돌려줄 부분만 고름
 # - 애니메이션은 프레임 전체(상자 좌표 수백 개) 대신 단계 설명만 넘겨 문맥 토큰을 아끼고, 모델이 실제 계산된 단계를 설명하게 함
 # - 도식과 실패 결과는 지금처럼 그대로 넘김
 def model_view(result: dict) -> dict:
@@ -29,7 +30,7 @@ def model_view(result: dict) -> dict:
             'steps': [frame['caption'] for frame in animation['frames']]}
 
 
-# 역할: 질문·이력·활성 도식을 받아 텍스트·도구 상태·결과 이벤트를 순차 생성; 도구 횟수 제한으로 무한 실행 방지
+## @brief 질문·이력·활성 도식을 받아 텍스트·도구 상태·결과 이벤트를 순차 생성; 도구 횟수 제한으로 무한 실행 방지
 def run_agent(client: OpenAI, model: str, question: str, output_dir: Path,
               max_tool_rounds: int = 3, history: list[dict] | None = None,
               active_artifact: dict | None = None, count_tokens=None,

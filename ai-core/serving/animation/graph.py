@@ -1,4 +1,5 @@
-# 파일 역할: 그래프 탐색(BFS·DFS)과 트리 순회(전위·중위·후위) 장면 요청을 실제로 실행하며 단계별 프레임을 만드는 시뮬레이터
+## @file
+# @brief 그래프 탐색(BFS·DFS)과 트리 순회(전위·중위·후위) 장면 요청을 실제로 실행하며 단계별 프레임을 만드는 시뮬레이터
 # - 방문 하나마다 프레임 하나. 이번 단계에 방문한 정점은 new, 이미 방문한 정점은 active, 아직 안 간 정점은 normal
 # - 화면 아래 두 줄에 방문 순서(y=6 또는 7)와 큐·스택 상태(y=7)를 함께 그려, 순서가 왜 그렇게 정해지는지 보이게 함
 # - 방향 간선은 화살표, 무방향 간선은 화살촉 없는 선(Arrow.head=False) 하나로 그림
@@ -28,12 +29,12 @@ VISIT_ROW, WAIT_ROW = GRID_HEIGHT - 2, GRID_HEIGHT - 1
 CAPTION_MAX = 80
 
 
-# 역할: 긴 캡션(정점·값 목록이 길 때)을 상한 안의 짧은 문장으로 바꿈
+## @brief 긴 캡션(정점·값 목록이 길 때)을 상한 안의 짧은 문장으로 바꿈
 def fit(caption: str, short: str) -> str:
     return caption if len(caption) <= CAPTION_MAX else short
 
 
-# 역할: 이웃 목록을 이름 오름차순으로 만듦. 무방향이면 양쪽에 넣음
+## @brief 이웃 목록을 이름 오름차순으로 만듦. 무방향이면 양쪽에 넣음
 def adjacency(req: GraphTraversalRequest, directed: bool) -> dict[str, list[str]]:
     adj = {node: set() for node in req.nodes}
     for a, b in req.edges:
@@ -43,7 +44,7 @@ def adjacency(req: GraphTraversalRequest, directed: bool) -> dict[str, list[str]
     return {node: sorted(adj[node]) for node in req.nodes}
 
 
-# 역할: 정점을 정점 수에 맞는 다각형 자리에 배치. 시작 정점부터 깊이 우선 순서로 돌며 자리를 주고, 닿지 않는 정점은 그 뒤에 둠
+## @brief 정점을 정점 수에 맞는 다각형 자리에 배치. 시작 정점부터 깊이 우선 순서로 돌며 자리를 주고, 닿지 않는 정점은 그 뒤에 둠
 # - 경로를 따라 이웃한 자리에 놓여 선이 덜 엇갈림. 방향과 탐색 방식에 관계없이 같은 배치라 BFS·DFS를 같은 그림으로 비교할 수 있음
 def layout(req: GraphTraversalRequest) -> dict[str, tuple[int, int]]:
     adj, order = adjacency(req, directed=False), []
@@ -59,7 +60,7 @@ def layout(req: GraphTraversalRequest) -> dict[str, tuple[int, int]]:
     return dict(zip(order, SLOTS[len(order)]))
 
 
-# 역할: 한 단계 화면. 정점·간선 + 방문 순서 줄 + 큐(BFS)·스택(DFS) 줄
+## @brief 한 단계 화면. 정점·간선 + 방문 순서 줄 + 큐(BFS)·스택(DFS) 줄
 def graph_frame(req, places, visited, current, waiting, caption) -> Frame:
     ids = {node: f'n{i}' for i, node in enumerate(req.nodes)}
     boxes = []
@@ -77,7 +78,7 @@ def graph_frame(req, places, visited, current, waiting, caption) -> Frame:
     return Frame(boxes=boxes, arrows=arrows, caption=caption)
 
 
-# 역할: BFS 장면 실행. 큐에 넣을 때 발견 표시를 해 같은 정점을 두 번 넣지 않음(교재의 표준 BFS)
+## @brief BFS 장면 실행. 큐에 넣을 때 발견 표시를 해 같은 정점을 두 번 넣지 않음(교재의 표준 BFS)
 def simulate_bfs(req: GraphTraversalRequest, places) -> list[Frame]:
     adj = adjacency(req, req.directed)
     queue, seen, visited = [req.start], {req.start}, []
@@ -94,7 +95,7 @@ def simulate_bfs(req: GraphTraversalRequest, places) -> list[Frame]:
     return frames
 
 
-# 역할: DFS 장면 실행(재귀). 스택 줄은 지금 들어가 있는 호출 경로(시작 → 현재)
+## @brief DFS 장면 실행(재귀). 스택 줄은 지금 들어가 있는 호출 경로(시작 → 현재)
 # - 되돌아가는 단계는 따로 프레임을 만들지 않고 다음 방문 캡션에 "어디까지 돌아갔는지"를 적음
 #   정점 8개에 방문·되돌아감을 모두 그리면 MAX_FRAMES(16)를 넘기 때문
 def simulate_dfs(req: GraphTraversalRequest, places) -> list[Frame]:
@@ -123,7 +124,7 @@ def simulate_dfs(req: GraphTraversalRequest, places) -> list[Frame]:
     return frames
 
 
-# 역할: 그래프 탐색 장면 실행. 마지막 프레임은 큐·스택이 빈 상태에서 전체 방문 순서를 정리함
+## @brief 그래프 탐색 장면 실행. 마지막 프레임은 큐·스택이 빈 상태에서 전체 방문 순서를 정리함
 def simulate_graph_traversal(req: GraphTraversalRequest) -> Animation:
     places = layout(req)
     frames = simulate_bfs(req, places) if req.order == 'bfs' else simulate_dfs(req, places)
@@ -142,7 +143,7 @@ TRAVERSAL_RULES = {'preorder': '자신을 먼저 보고 왼쪽, 오른쪽으로 
                    'postorder': '왼쪽, 오른쪽 서브트리를 마친 뒤 자신을 봄'}
 
 
-# 역할: 트리 순회 장면 실행. values를 차례로 이진 탐색 트리에 넣고, 순서대로 방문하는 노드마다 프레임 하나
+## @brief 트리 순회 장면 실행. values를 차례로 이진 탐색 트리에 넣고, 순서대로 방문하는 노드마다 프레임 하나
 # - 맨 아래 줄(y=7)을 방문 순서 칸으로 쓰므로 트리는 7층(깊이 0~6)까지만 그림
 def simulate_tree_traversal(req: TreeTraversalRequest) -> Animation:
     ids, root = count(), None
