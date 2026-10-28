@@ -1,4 +1,7 @@
-// 파일 역할: 브라우저 테스트용 서버 포트·화면 크기·선택적 실행 브라우저 경로 설정
+/**
+ * @file
+ * @brief 브라우저 테스트용 서버 포트·화면 크기·선택적 실행 브라우저 경로 설정
+ */
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({

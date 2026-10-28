@@ -1,9 +1,12 @@
-// 파일 역할: 네트워크 조각 경계와 중단·도식 이벤트 및 대화 복구를 UI 없이 검증
+/**
+ * @file
+ * @brief 네트워크 조각 경계와 중단·도식 이벤트 및 대화 복구를 UI 없이 검증
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { artifactNoun, artifactTitle, isAnimationArtifact, requestChat, loadConversation, toolProgress } from '../src/api.ts';
 
-// 역할: 일부러 응답을 조각내 한글 바이트와 JSON 줄 경계 처리 검증
+/** @brief 일부러 응답을 조각내 한글 바이트와 JSON 줄 경계 처리 검증 */
 function stream(text) {
   const bytes = new TextEncoder().encode(text);
   return new Response(new ReadableStream({

@@ -1,4 +1,7 @@
-// 파일 역할: 가짜 실험 API로 #/experiment 화면의 남은 시간 복구·조건별 도구 분리·마감 처리·중복 참가자 재개를 실제 브라우저에서 검증
+/**
+ * @file
+ * @brief 가짜 실험 API로 #/experiment 화면의 남은 시간 복구·조건별 도구 분리·마감 처리·중복 참가자 재개를 실제 브라우저에서 검증
+ */
 import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 
@@ -24,9 +27,11 @@ const learn = (condition: "system" | "chat", remaining: number) => ({
   remaining_seconds: remaining,
 });
 
-// 역할: 실험 API를 흉내 냄; GET은 state.view를 돌려주고(테스트가 바꿔 서버 시각 경과를 흉내 냄), 보낸 사건을 기록
-// - 개발 모드 StrictMode는 effect를 두 번 실행해 GET이 두 번 올 수 있으므로 호출 순서가 아닌 상태로 응답
-// - 사건 응답도 Backend처럼 화면 상태 전체이며, continue_reading 뒤에는 2부가 채워진 상태를 돌려줌
+/**
+ * @brief 실험 API를 흉내 냄; GET은 state.view를 돌려주고(테스트가 바꿔 서버 시각 경과를 흉내 냄), 보낸 사건을 기록
+ * - 개발 모드 StrictMode는 effect를 두 번 실행해 GET이 두 번 올 수 있으므로 호출 순서가 아닌 상태로 응답
+ * - 사건 응답도 Backend처럼 화면 상태 전체이며, continue_reading 뒤에는 2부가 채워진 상태를 돌려줌
+ */
 async function mockExperiment(page: Page, view: ReturnType<typeof learn>) {
   const events: { type: string; ref?: string }[] = [];
   const state = { view };

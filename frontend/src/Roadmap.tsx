@@ -1,4 +1,7 @@
-// 파일 역할: 개념 지도를 선수 관계 단계(위→아래)로 그리고 과목 구분·필터, 관계 강조·상세 선택·학습 진입 제공
+/**
+ * @file
+ * @brief 개념 지도를 선수 관계 단계(위→아래)로 그리고 과목 구분·필터, 관계 강조·상세 선택·학습 진입 제공
+ */
 import { useMemo, useState, type CSSProperties } from "react";
 import { ArrowUpRight, BookOpen, RotateCcw } from "lucide-react";
 import {
@@ -20,7 +23,7 @@ const nodeHeight = 60;
 // 왼쪽 단계 이름(1단계…) 자리
 const gutter = 48;
 
-// 역할: 개념 지도를 불러오는 중이거나 실패했을 때 로드맵 자리에 안내와 다시 시도 버튼 표시
+/** @brief 개념 지도를 불러오는 중이거나 실패했을 때 로드맵 자리에 안내와 다시 시도 버튼 표시 */
 export function ConceptMapStatus({
   error,
   onRetry,
@@ -48,7 +51,7 @@ export function ConceptMapStatus({
   );
 }
 
-// 역할: 선택 상태와 일시적인 호버·초점을 분리해 지도와 상세 패널 렌더링
+/** @brief 선택 상태와 일시적인 호버·초점을 분리해 지도와 상세 패널 렌더링 */
 export function Roadmap({
   concepts,
   state,
@@ -92,7 +95,7 @@ export function Roadmap({
     () => new Map(concepts.map((concept) => [concept.id, concept])),
     [concepts],
   );
-  // 역할: 개념이 지금 지도에 그려지는지 확인; 저장값 ID가 constructor 같은 기본 속성 이름이어도 오판하지 않게 자기 속성만 봄
+  /** @brief 개념이 지금 지도에 그려지는지 확인; 저장값 ID가 constructor 같은 기본 속성 이름이어도 오판하지 않게 자기 속성만 봄 */
   const isShown = (id: string) => Object.hasOwn(positions, id);
   // 저장된 선택이 지도에 없거나 필터로 숨겨졌으면(첫 방문·지도 변경·과목 필터) 보이는 첫 개념을 보여 줌
   const selected = byId.get(
@@ -110,14 +113,14 @@ export function Roadmap({
     ...focus.prerequisites.map((p) => p.id),
     ...successorsOf(focus.id).map((concept) => concept.id),
   ]);
-  // 역할: 탐색 중일 때만 관련·비관련 개념을 구분하는 표시 값 반환
+  /** @brief 탐색 중일 때만 관련·비관련 개념을 구분하는 표시 값 반환 */
   const emphasis = (id: string) =>
     activeId
       ? id === activeId || related.has(id)
         ? "related"
         : "muted"
       : undefined;
-  // 역할: 마우스와 키보드 탐색을 같은 강조 상태에 연결; 터치에 호버가 남는 현상 방지
+  /** @brief 마우스와 키보드 탐색을 같은 강조 상태에 연결; 터치에 호버가 남는 현상 방지 */
   const interaction = (id: string) => ({
     onPointerEnter: (event: React.PointerEvent<HTMLElement>) => {
       if (event.pointerType !== "touch") setHoveredId(id);
@@ -128,13 +131,13 @@ export function Roadmap({
     },
     onBlur: () => setFocusedId(null),
   });
-  // 역할: 상세 패널에서 다른 과목 개념(예: 운영체제 개념의 선수 개념 큐)을 고르면 필터를 풀어 그 개념이 지도에 보이게 함
+  /** @brief 상세 패널에서 다른 과목 개념(예: 운영체제 개념의 선수 개념 큐)을 고르면 필터를 풀어 그 개념이 지도에 보이게 함 */
   const select = (id: string) => {
     if (!isShown(id)) setSubjectFilter("all");
     onSelect(id);
   };
   const widest = Math.max(...layers.map((ids) => ids.length));
-  // 역할: 단계·줄 안 위치를 캔버스 왼쪽 위 기준 px 좌표로 변환
+  /** @brief 단계·줄 안 위치를 캔버스 왼쪽 위 기준 px 좌표로 변환 */
   const origin = (id: string) => ({
     left:
       gutter +

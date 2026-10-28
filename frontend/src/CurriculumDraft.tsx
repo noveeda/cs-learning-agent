@@ -1,4 +1,7 @@
-// 파일 역할: 학습 조건 입력과 체크포인트 기반 커리큘럼 생성·중단·재개 화면
+/**
+ * @file
+ * @brief 학습 조건 입력과 체크포인트 기반 커리큘럼 생성·중단·재개 화면
+ */
 import { useEffect, useRef, useState } from 'react';
 import { createCurriculum, loadCurriculum, stepCurriculum, type CurriculumJob, type DraftInput } from './curriculum';
 
@@ -6,7 +9,7 @@ const KEY = 'cs-curriculum-job';
 const stages = { outline: '개요 구성', generate: '단원 생성', review: '단원 검토', final: '전체 검토',
   repair: '부분 보완', complete: '초안 완성', blocked: '확인 필요' };
 
-// 역할: 작업 ID를 복원하고 작성 중 결과와 검토 완료 결과를 구분해 표시
+/** @brief 작업 ID를 복원하고 작성 중 결과와 검토 완료 결과를 구분해 표시 */
 export function CurriculumDraft() {
   const [input, setInput] = useState<DraftInput>({ topic: '', goal: '', level: '' });
   const [job, setJob] = useState<CurriculumJob | null>(null);
@@ -28,7 +31,7 @@ export function CurriculumDraft() {
     return () => { cancelled = true; stop.current = true; };
   }, []);
 
-  // 역할: 서버의 최신 상태를 다시 읽어 단계별 생성; 중단 요청은 현재 단계 저장 뒤 반영
+  /** @brief 서버의 최신 상태를 다시 읽어 단계별 생성; 중단 요청은 현재 단계 저장 뒤 반영 */
   async function generate(event?: React.FormEvent) {
     event?.preventDefault();
     if (inFlight.current || loading) return;

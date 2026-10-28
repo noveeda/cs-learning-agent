@@ -1,4 +1,7 @@
-// 파일 역할: React 진입점; 개념 지도 로딩·해시 경로·로드맵 상태·개념별 대화 ID·막힘 패널·커리큘럼 화면 연결
+/**
+ * @file
+ * @brief React 진입점; 개념 지도 로딩·해시 경로·로드맵 상태·개념별 대화 ID·막힘 패널·커리큘럼 화면 연결
+ */
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { loadConceptMap, newConversation } from "./api";
@@ -19,7 +22,7 @@ import {
 import "./style.css";
 import "./roadmap.css";
 
-// 역할: URL 해시에서 화면과 개념 ID 형식만 해석; 지도에 있는 개념인지는 지도를 받은 뒤 확인
+/** @brief URL 해시에서 화면과 개념 ID 형식만 해석; 지도에 있는 개념인지는 지도를 받은 뒤 확인 */
 function readRoute() {
   const hash = window.location.hash || "#/learn";
   const [path, query] = hash.slice(1).split("?");
@@ -40,7 +43,7 @@ type ConceptMapState =
   | { status: "error"; message: string }
   | { status: "ready"; concepts: Concept[] };
 
-// 역할: 화면 간 상태를 조율하고 선택 개념의 대화와 학습 표시를 연결
+/** @brief 화면 간 상태를 조율하고 선택 개념의 대화와 학습 표시를 연결 */
 function App() {
   const [curriculumOpen, setCurriculumOpen] = useState(false);
   const [roadmap, setRoadmap] = useState(loadRoadmap);
@@ -108,7 +111,7 @@ function App() {
     };
   }, [mapRequest]);
 
-  // 역할: 브라우저 저장 성공 뒤에만 화면 상태 갱신; 저장 실패를 성공처럼 표시하지 않음
+  /** @brief 브라우저 저장 성공 뒤에만 화면 상태 갱신; 저장 실패를 성공처럼 표시하지 않음 */
   function updateRoadmap(next: RoadmapState) {
     try {
       saveRoadmap(next);
@@ -122,18 +125,18 @@ function App() {
       return false;
     }
   }
-  // 역할: 상세 패널에 표시할 개념을 선택하고 브라우저에 보관
+  /** @brief 상세 패널에 표시할 개념을 선택하고 브라우저에 보관 */
   function selectConcept(id: string) {
     updateRoadmap({ ...roadmap, selectedId: id });
   }
-  // 역할: 사용자가 지정한 학습 상태 저장; AI의 이해도 판정과는 별개
+  /** @brief 사용자가 지정한 학습 상태 저장; AI의 이해도 판정과는 별개 */
   function updateStatus(id: string, status: LearningStatus) {
     updateRoadmap({
       ...roadmap,
       statuses: { ...roadmap.statuses, [id]: status },
     });
   }
-  // 역할: 개념별 대화 ID를 재사용하거나 생성하고 저장 성공 시 학습 화면으로 이동
+  /** @brief 개념별 대화 ID를 재사용하거나 생성하고 저장 성공 시 학습 화면으로 이동 */
   function startConcept(concept: Concept) {
     const id =
       roadmap.conversationIds[concept.id] ||
@@ -158,7 +161,7 @@ function App() {
       ? conceptMap.concepts.find((item) => item.id === route.conceptId)
       : undefined;
   const conceptId = concept?.id;
-  // 역할: 막힘 패널을 엶; 같은 개념·진입의 진행 중 세션이 있으면 새로 만들지 않고 이어서 엶
+  /** @brief 막힘 패널을 엶; 같은 개념·진입의 진행 중 세션이 있으면 새로 만들지 않고 이어서 엶 */
   function openStuck(key: string, start: StuckRequest) {
     const store = loadStuckStore();
     const id = store.sessions[key];
@@ -172,7 +175,7 @@ function App() {
     } else setStuck(start);
     setStuckOpening((count) => count + 1);
   }
-  // 역할: 개념의 [막혔어요]; 복귀 위치는 버튼을 누른 화면의 해시 경로
+  /** @brief 개념의 [막혔어요]; 복귀 위치는 버튼을 누른 화면의 해시 경로 */
   function stuckOnConcept(id: string) {
     const entry: Entry = {
       kind: "roadmap",
@@ -181,7 +184,7 @@ function App() {
     };
     openStuck(entryKey(entry), { mode: "start", entry });
   }
-  // 역할: 패널만 닫음; 세션은 진행 중 목록에 남아 다시 열면 이어서 함
+  /** @brief 패널만 닫음; 세션은 진행 중 목록에 남아 다시 열면 이어서 함 */
   function closeStuck() {
     try {
       saveStuckStore({ ...loadStuckStore(), active: null });
@@ -190,7 +193,7 @@ function App() {
     }
     setStuck(null);
   }
-  // 역할: 복귀 요약의 "원래 학습으로 돌아가기"; 대화는 패널 뒤에 그대로 있어 내용·스크롤이 유지됨
+  /** @brief 복귀 요약의 "원래 학습으로 돌아가기"; 대화는 패널 뒤에 그대로 있어 내용·스크롤이 유지됨 */
   function returnFromStuck(to: string) {
     closeStuck();
     if ((window.location.hash || "#/learn") !== to) window.location.hash = to;
@@ -327,7 +330,7 @@ function App() {
   );
 }
 
-// 역할: #/experiment이면 학습 앱(메뉴·로드맵) 대신 실험 화면만 그림; 실험 중 다른 도구가 보이지 않게 하기 위함
+/** @brief #/experiment이면 학습 앱(메뉴·로드맵) 대신 실험 화면만 그림; 실험 중 다른 도구가 보이지 않게 하기 위함 */
 function Root() {
   const isExperiment = () => window.location.hash.startsWith("#/experiment");
   const [experiment, setExperiment] = useState(isExperiment);

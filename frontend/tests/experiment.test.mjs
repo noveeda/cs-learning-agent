@@ -1,4 +1,7 @@
-// 파일 역할: 비교 실험 화면의 API 호출(중복 참가자 409·마감 경계 사건 409)·남은 시간·마감 판정·저장 복구를 UI 없이 검증
+/**
+ * @file
+ * @brief 비교 실험 화면의 API 호출(중복 참가자 409·마감 경계 사건 409)·남은 시간·마감 판정·저장 복구를 UI 없이 검증
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -18,7 +21,7 @@ import {
 
 const id = '0123456789abcdef0123456789abcdef';
 
-// 역할: 요청 순서대로 응답을 돌려주고 보낸 요청을 기록하는 가짜 fetch
+/** @brief 요청 순서대로 응답을 돌려주고 보낸 요청을 기록하는 가짜 fetch */
 function mockFetch(t, ...responses) {
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
@@ -28,7 +31,7 @@ function mockFetch(t, ...responses) {
   return calls;
 }
 
-// 역할: localStorage 대신 쓰는 메모리 저장소
+/** @brief localStorage 대신 쓰는 메모리 저장소 */
 function memoryStorage() {
   const data = new Map();
   return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => data.set(k, String(v)), removeItem: (k) => data.delete(k) };

@@ -1,4 +1,7 @@
-/* 파일 역할: [막혔어요] 진입 버튼과 막힘 패널 배치; 넓은 화면은 학습 화면 옆 고정 패널, 좁은 화면은 전체 화면 시트 */
+/**
+ * @file
+ * @brief [막혔어요] 진입 버튼과 막힘 패널 배치; 넓은 화면은 학습 화면 옆 고정 패널, 좁은 화면은 전체 화면 시트
+ */
 .stuck-entry { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border); }
 .stuck-button { color: var(--color-primary); font-weight: 600; }
 .stuck-unsupported { margin: 0; font-size: 11px; line-height: 1.7; color: var(--color-muted); }

@@ -1,4 +1,7 @@
-// 파일 역할: 브라우저에서 개념 지도 표시·선택·학습 상태 복구·관계 강조·로딩 실패·키보드 및 모바일 동작을 검증
+/**
+ * @file
+ * @brief 브라우저에서 개념 지도 표시·선택·학습 상태 복구·관계 강조·로딩 실패·키보드 및 모바일 동작을 검증
+ */
 import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 
@@ -13,7 +16,7 @@ const roadmapKey = "cs-dsa-roadmap-v1";
 const firstTitle = "메모리 주소와 연속 배치";
 const stackTitle = "스택";
 const question = (title: string) => `${title} 개념을 예시와 함께 설명해줘`;
-// 역할: 개념 제목과 학습 상태로 지도 노드 버튼 찾기
+/** @brief 개념 제목과 학습 상태로 지도 노드 버튼 찾기 */
 const node = (page: Page, title: string, status = "미학습") =>
   page.getByRole("button", { name: `${title} · ${status}`, exact: true });
 
@@ -26,7 +29,7 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-// 역할: 학습 화면에서 로드맵 메뉴를 열어 사용자 진입 경로 재현
+/** @brief 학습 화면에서 로드맵 메뉴를 열어 사용자 진입 경로 재현 */
 async function openRoadmap(page: Page) {
   await page
     .locator(".sidebar")
@@ -35,7 +38,7 @@ async function openRoadmap(page: Page) {
   await expect(page).toHaveURL(/#\/roadmap$/);
 }
 
-// 역할: 현재 개념의 학습 진입 버튼을 눌러 연결된 대화 화면으로 이동
+/** @brief 현재 개념의 학습 진입 버튼을 눌러 연결된 대화 화면으로 이동 */
 async function startLearning(page: Page) {
   await page.getByRole("button", { name: /^학습 (시작|이어가기)$/ }).click();
   await expect(page.getByLabel("질문", { exact: true })).toBeEnabled();
@@ -476,8 +479,10 @@ test("옛 9개 개념 저장값과 개념 주소는 무시하되 지우지 않�
   );
 });
 
-// 역할: 여러 과목을 합친 지도 응답(MVP 4 형식)의 목업; 자료구조 지도 뒤에 운영체제 개념 2개를 붙임
-// - process-state → queue는 과목 사이 선수 관계라 운영체제만 걸렀을 때 선이 사라져야 함
+/**
+ * @brief 여러 과목을 합친 지도 응답(MVP 4 형식)의 목업; 자료구조 지도 뒤에 운영체제 개념 2개를 붙임
+ * - process-state → queue는 과목 사이 선수 관계라 운영체제만 걸렀을 때 선이 사라져야 함
+ */
 const mixedMap = {
   ...conceptMap,
   id: "cs",
