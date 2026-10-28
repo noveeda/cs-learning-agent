@@ -2,11 +2,19 @@
 # @brief 근거 검사 하네스의 순수 검증 규칙과 자료형; 모델 출력을 코드가 다시 확인하는 기준을 한곳에 둠
 # - 생성 출력의 형식(문장 수·길이·근거 번호·한자 섞임)과 판정·채점 근거 구절의 글자 대조를 맡음
 # - 모델 호출은 harness_llm.py가 맡고, 이 모듈의 검증 함수를 parse 단계에서 불러 실패하면 재시도하게 함
-# - 단계 흐름(범위 → 검색 → 생성 → 판정 → 수정)은 아직 없음(계획 Task 6에서 추가)
+# - 단계 흐름 answer(범위 → 검색 → 생성 → 판정 → 수정 → 표시)도 여기 둠. 다음 단계는 모델이 아니라 이 코드가 정함
+#   - 모델 잠금은 잡지 않음: 게이트웨이가 호출마다 잡으므로, 요청 전체를 막는 일은 채팅 연결(계획 Task 7)이 맡음
 import re
 import string
+import time
+import uuid
 from dataclasses import dataclass
-from typing import Literal
+from datetime import datetime
+from typing import Iterator, Literal
+
+from rag.search import Passage
+from rag.sources import BOOKS
+from serving.stuck import LLMUnavailable
 
 # 한 답의 분량 상한: 학습자가 한 번에 읽을 분량이자 문장마다 판정 호출이 붙으므로 응답 시간을 묶는 운영 보호 장치
 MAX_SENTENCES = 8
@@ -16,6 +24,12 @@ MAX_SENTENCE_CHARS = 200
 # - 글자 대신 \u 이스케이프로 씀: 호환 한자 U+F900을 글자로 쓰면 편집기·도구의 NFC 정규화로 U+8C48이 되어
 #   범위가 한글 음절(U+AC00~)까지 넓어지고 모든 한국어 문장이 한자로 걸림
 HAN = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
+
+# 화면 고정 문구(계획 Global Constraints): 모델이 만들지 않으므로 검증 없이 그대로 보여 줌
+BLOCKED_TEXT = '이 도구는 자료구조·운영체제·데이터베이스·네트워크·컴퓨터구조의 61개 개념만 다룹니다. 로드맵에서 개념을 골라 학습해 주세요.'
+NO_SOURCE_TEXT = '교재에서 이 질문의 근거를 찾지 못했습니다.'
+FAILED_TEXT = '설명을 만들지 못했습니다. 아래 교재 원문을 확인해 주세요.'
+NEEDS_CHECK_MARK = ' ⚠️ **확인 필요**'
 
 # 서술 채점 근거 대조 전에 지우는 문장부호; 영문 기호와 한국어 답에 자주 나오는 가운뎃점·말줄임표·따옴표·낫표
 GRADING_PUNCTUATION = set(string.punctuation + '·…“”‘’「」『』')
@@ -75,3 +89,200 @@ def grading_evidence_in(evidence: str, answer: str) -> bool:
 
     needle = squeeze(evidence)
     return bool(needle) and needle in squeeze(answer)
+
+
+## @brief 다음 턴의 후속 질문이 이어받는 근거 기록; artifact 이벤트 {'kind': 'grounding'}로 Spring 이력에 저장됨
+# - concepts: 이번 답의 개념 ID, passage_ids: 근거 문단 id(p1부터 순서대로), verified: 판정을 통과해 화면에 표시 없이 나간 문장
+@dataclass(frozen=True)
+class Grounding:
+    concepts: tuple[str, ...]
+    passage_ids: tuple[str, ...]
+    verified: tuple[str, ...]
+
+
+## @brief 문장 하나를 화면 마크다운으로: 본문 + 근거 각주([^p1]) + 확인 필요 표시
+def _sentence_markdown(sentence: Sentence) -> str:
+    notes = ''.join(f'[^{key}]' for key in sentence.sources)
+    return sentence.text + notes + (NEEDS_CHECK_MARK if sentence.status == 'needs_check' else '')
+
+
+## @brief 문단 하나의 출처 문구: 교재명, 저자, 절 번호와 제목, 라이선스(링크), 발췌 (spec 5-6)
+def _citation(passage, books) -> str:
+    book = books[passage.book]
+    section = f"{passage.section_id.rsplit('#', 1)[-1]} {passage.title}"
+    return f'{book.title}, {book.authors}, {section}, [{book.license}]({book.license_url}), 발췌'
+
+
+## @brief 문단 원문을 인용 블록 줄로 바꿈; 문단 사이 빈 줄은 빈 인용 줄로, 문단 안 줄바꿈·연속 공백은 한 칸으로
+def _quote(text: str, indent: str = '') -> str:
+    paragraphs = [' '.join(p.split()) for p in text.split('\n\n') if p.strip()]
+    return f'\n{indent}>\n{indent}'.join(f'> {p}' for p in paragraphs)
+
+
+## @brief 출처 목록 블록: 같은 절의 문단은 한 줄로 합침
+def _sources_block(passages, books) -> str:
+    lines = dict.fromkeys(f'- {_citation(p, books)}' for p in passages)
+    return '**출처**\n\n' + '\n'.join(lines)
+
+
+## @brief 검사를 마친 문장 목록을 최종 답 마크다운으로 조립
+# - 본문은 text_delta로 보낸 문장을 이은 것과 같음. 그래서 스트림 화면과 저장된 답이 같은 글이 됨
+# - 각주 정의는 문장이 실제로 가리킨 문단만 원문 인용 + 출처로 씀. 원문은 번역하지 않음(번역도 검증이 필요한 생성이므로)
+def render_answer(sentences: list[Sentence], passages: dict[str, Passage], books) -> str:
+    body = ' '.join(_sentence_markdown(s) for s in sentences)
+    keys = [k for k in dict.fromkeys(key for s in sentences for key in s.sources) if k in passages]
+    notes = '\n\n'.join(f'[^{k}]: {_quote(passages[k].text, "    ")}\n\n    {_citation(passages[k], books)}'
+                          for k in keys)
+    return f'{body}\n\n{notes}\n\n{_sources_block([passages[k] for k in keys], books)}'
+
+
+## @brief 생성 실패·확인 필요 과반일 때의 답: 고정 실패 문구 + 검색된 문단 원문 인용 + 출처
+# - 모델 문장을 하나도 넣지 않음. 검증되지 않은 설명 대신 교재 원문만 보여 주기 위함
+def fallback_answer(passages: dict[str, Passage], books) -> str:
+    quotes = '\n\n'.join(_quote(p.text) for p in passages.values())
+    return f'{FAILED_TEXT}\n\n{quotes}\n\n{_sources_block(passages.values(), books)}'
+
+
+## @brief 문장 하나를 그 문장이 가리킨 문단으로 판정; True(통과)·False(틀림)·None(판정 호출 실패)
+# - "맞음"이어도 근거 구절이 가리킨 문단 어디에도 글자 그대로 없으면 틀림. 모델이 근거를 지어내는 경우를 막음
+# - 판정 실패는 예외 종류와 상관없이 None: 어떤 오류 경로로도 검증 안 된 문장이 통과로 처리되지 않게 함
+def _judged(gw, text, keys, passages, judgments):
+    try:
+        verdict, evidence = gw.judge(text, '\n\n'.join(passages[k].text for k in keys))
+    except Exception as exc:
+        judgments.append({'error': f'{type(exc).__name__}: {exc}'})
+        return None
+    found = any(evidence_in(evidence, passages[k].text) for k in keys)
+    judgments.append({'verdict': verdict, 'evidence': evidence, 'evidence_found': found})
+    return verdict == 'supported' and found
+
+
+## @brief 판정 → (틀리면) 수정 1회 → 재판정으로 문장 하나의 최종 상태를 정하고 기록(entry)을 채움
+# - 판정 호출 자체가 실패하면 수정하지 않고 needs_check. 고칠 근거(판정)가 없기 때문
+# - 수정은 첫 근거 문단 하나로 함. 수정 문장도 그 문단 하나로 다시 판정하므로 근거 키도 그 하나로 바뀜
+def _check_sentence(gw, text, keys, passages, entry) -> Sentence:
+    judgments = entry['judgments'] = []
+    first = _judged(gw, text, keys, passages, judgments)
+    if first is not None and not first:
+        try:
+            text, keys = gw.repair(text, passages[keys[0]].text, keys[0])
+            entry['repairs'] = 1
+            first = _judged(gw, text, keys, passages, judgments)
+        except Exception as exc:
+            entry['repair_error'] = f'{type(exc).__name__}: {exc}'
+    entry.update(text=text, sources=list(keys), status='verified' if first else 'needs_check')
+    return Sentence(text, tuple(keys), entry['status'])
+
+
+## @brief 답 하나를 끝내는 이벤트: 화면 초기화(text_start) → 본문 → 그림·근거 기록 artifact → answer → done
+# - text_start는 이미 보낸 문장이 있을 때 화면을 비우는 신호이기도 함(확인 필요 과반으로 원문 대체할 때)
+def _finish(text, artifacts=()):
+    yield {'type': 'text_start'}
+    yield {'type': 'text_delta', 'text': text}
+    yield from artifacts
+    yield {'type': 'answer', 'text': text}
+    yield {'type': 'done'}
+
+
+def _grounding_event(grounding: Grounding) -> dict:
+    return {'type': 'artifact', 'kind': 'grounding', 'artifact_id': uuid.uuid4().hex,
+            'grounding': {'concepts': list(grounding.concepts), 'passage_ids': list(grounding.passage_ids),
+                          'verified': list(grounding.verified)}}
+
+
+## @brief 교재 그림 artifact; path는 서버 안 PNG 경로라 채팅 연결(Task 7)이 공개 위치로 복사한 뒤 웹 이벤트에서 뺌
+def _figure_event(figure, books) -> dict:
+    book = books[figure.book]
+    section = figure.section_id.rsplit('#', 1)[-1]
+    return {'type': 'artifact', 'kind': 'figure', 'artifact_id': uuid.uuid4().hex, 'path': str(figure.path),
+            'figure': {'title': f'{book.title} · {section}', 'caption': figure.caption,
+                       'source': f'{book.title}, {book.authors}, {section}, {book.license}, 발췌'}}
+
+
+## @brief 질문 하나를 하네스 다섯 단계로 처리해 채팅 NDJSON 이벤트를 차례로 내보냄
+# - previous: 직전 답의 근거 기록. 범위 결정이 후속 질문이라고 보면 그 개념·문단·검증 문장을 이어 씀
+#   - 기록이 없으면(스위치를 켜기 전 대화) 후속 판정이어도 이번 범위 결정 결과로 검색함
+# - 문장 순서를 지킴: 앞 문장의 판정·수정이 끝나야 다음 문장을 판정하고 text_delta로 보냄
+# - 확인 필요 문장이 전체의 절반을 넘는 순간 남은 판정을 멈추고 원문 대체 답으로 바꿈(모델 호출 절약)
+# - 범위 결정·검색의 예외는 그대로 올려 보냄(채팅 연결이 error 이벤트로 바꿈). 어떤 경우에도 기록은 남김
+def answer(question: str, previous: Grounding | None, gw, retriever, concept_map, log) -> Iterator[dict]:
+    # outcome은 끝까지 가지 못하면(클라이언트가 연결을 끊는 등) incomplete로 남음
+    record = {'time': datetime.now().isoformat(timespec='seconds'), 'question': question, 'outcome': 'incomplete',
+              'timings': {}, 'sentences': []}
+    timings = record['timings']
+
+    def timed(stage, call, *args):
+        start = time.monotonic()
+        try:
+            return call(*args)
+        finally:
+            timings[stage] = round(timings.get(stage, 0.0) + time.monotonic() - start, 3)
+
+    try:
+        yield {'type': 'status', 'stage': 'scope'}
+        concepts, follow_up = timed('scope', gw.scope, question, list(previous.concepts) if previous else [], concept_map)
+        reuse = bool(follow_up and previous and previous.concepts)
+        if reuse:
+            concepts = list(previous.concepts)
+        record.update(concepts=concepts, follow_up=follow_up, reused=reuse)
+        if not concepts:
+            record['outcome'] = 'blocked'
+            yield from _finish(BLOCKED_TEXT)
+            return
+
+        yield {'type': 'status', 'stage': 'search'}
+
+        def search():
+            found = retriever.by_ids(list(previous.passage_ids)) if reuse else []
+            found = found or retriever.passages(concepts, question)
+            return found, retriever.figure(concepts, question, compatible_with=found) if found else None
+
+        found, figure = timed('search', search)
+        passages = {f'p{n}': p for n, p in enumerate(found, 1)}
+        record['passages'] = [{'key': k, 'id': p.id, 'score': round(p.score, 4)} for k, p in passages.items()]
+        record['figure'] = figure.id if figure else None
+        figure_events = [_figure_event(figure, BOOKS)] if figure else []
+        concept_ids, passage_ids = tuple(concepts), tuple(p.id for p in found)
+        if not passages:
+            record['outcome'] = 'no_source'
+            yield from _finish(NO_SOURCE_TEXT, [_grounding_event(Grounding(concept_ids, (), ()))])
+            return
+
+        fallback = [*figure_events, _grounding_event(Grounding(concept_ids, passage_ids, ()))]
+        yield {'type': 'status', 'stage': 'write'}
+        titles = {c.id: c.title for c in concept_map.concepts}
+        try:
+            drafts = timed('write', gw.ground, question, {k: p.text for k, p in passages.items()},
+                           [titles.get(c, c) for c in concepts], list(previous.verified) if reuse else [])
+        except LLMUnavailable as exc:
+            record.update(outcome='generation_failed', error=str(exc))
+            yield from _finish(fallback_answer(passages, BOOKS), fallback)
+            return
+
+        sentences, needs_check = [], 0
+        for index, (text, keys) in enumerate(drafts, 1):
+            yield {'type': 'status', 'stage': 'check', 'index': index, 'total': len(drafts)}
+            entry = {'draft': text, 'repairs': 0}
+            record['sentences'].append(entry)
+            sentence = timed('check', _check_sentence, gw, text, keys, passages, entry)
+            needs_check += sentence.status == 'needs_check'
+            if needs_check * 2 > len(drafts):
+                record['outcome'] = 'fallback'
+                yield from _finish(fallback_answer(passages, BOOKS), fallback)
+                return
+            if not sentences:
+                yield {'type': 'text_start'}
+            yield {'type': 'text_delta', 'text': (' ' if sentences else '') + _sentence_markdown(sentence)}
+            sentences.append(sentence)
+
+        record['outcome'] = 'answered'
+        verified = tuple(s.text for s in sentences if s.status == 'verified')
+        yield from figure_events
+        yield _grounding_event(Grounding(concept_ids, passage_ids, verified))
+        yield {'type': 'answer', 'text': render_answer(sentences, passages, BOOKS)}
+        yield {'type': 'done'}
+    except Exception as exc:
+        record.update(outcome='error', error=f'{type(exc).__name__}: {exc}')
+        raise
+    finally:
+        log.write(record)

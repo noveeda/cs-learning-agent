@@ -98,6 +98,18 @@ class Retriever:
                 families.add(license_family(fields[1]))
         return chosen
 
+    ## @brief 문단 id 목록으로 문단을 그대로 다시 읽음(주어진 순서 유지, 색인에 없는 id는 건너뜀)
+    # - 후속 질문("더 쉽게")이 직전 답의 문단을 이어 쓸 때 씀. 질문에 개념어가 없어 다시 검색하면 엉뚱한 문단이 오르기 때문
+    # - 다시 재지 않으므로 score는 0.0. 직전 답에서 이미 라이선스 계열을 맞춰 고른 문단이라 계열 검사도 다시 하지 않음
+    def by_ids(self, ids: list[str]) -> list[Passage]:
+        if not ids or not self.db_path.is_file():
+            return []
+        marks = ', '.join('?' * len(ids))
+        with sqlite3.connect(f'{self.db_path.as_uri()}?mode=ro', uri=True) as db:
+            rows = {r[0]: r for r in db.execute(
+                f'SELECT id, book, section_id, title, text FROM chunks WHERE id IN ({marks})', list(ids))}
+        return [Passage(*rows[i], 0.0) for i in ids if i in rows]
+
     ## @brief 개념 꼬리표가 붙은 그림 중 캡션이 질문과 가장 가까운 1개(없으면 None)
     # - compatible_with: 같은 답에 함께 보일 근거 문단. 이 문단들과 라이선스 계열을 섞을 수 없는 그림은 고르지 않음
     def figure(self, concepts: list[str], query: str, compatible_with=()) -> Figure | None:
