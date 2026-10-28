@@ -547,3 +547,62 @@ test("여러 과목 지도는 과목 표식·필터를 보여 주고 과목 사�
     "true",
   );
 });
+
+/**
+ * @brief 새 과목(데이터베이스·네트워크·컴퓨터구조)까지 다섯 과목이 든 지도의 목업; 과목마다 개념 1개씩 덧붙임
+ * - 과목 색은 CSS의 [data-subject] 규칙으로만 정해지므로, 규칙이 빠진 과목은 회색(기본값)으로 겹쳐 보임
+ */
+const fiveSubjectMap = {
+  ...mixedMap,
+  subjects: [
+    ...mixedMap.subjects,
+    { id: "db", title: "데이터베이스" },
+    { id: "network", title: "네트워크" },
+    { id: "arch", title: "컴퓨터구조" },
+  ],
+  concepts: [
+    ...mixedMap.concepts,
+    ...[
+      ["db", "hash-index", "해시 인덱스"],
+      ["network", "routing", "라우팅"],
+      ["arch", "cache-locality", "캐시와 지역성"],
+    ].map(([subject, id, title]) => ({
+      id,
+      title,
+      description: `${title} 설명`,
+      objectives: [`${title}을 설명할 수 있다.`],
+      prerequisites: [{ id: "queue", reason: "목업 관계" }],
+      subject,
+    })),
+  ],
+};
+
+test("다섯 과목 지도는 필터 막대와 노드 막대를 과목마다 서로 다른 색으로 그림", async ({
+  page,
+}) => {
+  await page.route("**/api/concept-map", (route) =>
+    route.fulfill({ json: fiveSubjectMap }),
+  );
+  await page.goto("/#/roadmap");
+  const filter = page.getByRole("group", { name: "과목" });
+  const subjects = ["dsa", "os", "db", "network", "arch"];
+  // 필터 버튼의 막대가 범례를 겸하므로, 버튼 막대 색이 과목마다 달라야 다섯 과목을 구분할 수 있음
+  const swatches = await Promise.all(
+    subjects.map((id) =>
+      filter
+        .locator(`.subject-swatch[data-subject="${id}"]`)
+        .evaluate((el) => getComputedStyle(el).backgroundColor),
+    ),
+  );
+  expect(new Set(swatches).size).toBe(subjects.length);
+  // 노드 위 막대도 같은 과목 색을 써야 필터와 지도가 같은 범례로 읽힘
+  const bars = await Promise.all(
+    subjects.map((id) =>
+      page
+        .locator(`.roadmap-node[data-subject="${id}"]`)
+        .first()
+        .evaluate((el) => getComputedStyle(el, "::before").backgroundColor),
+    ),
+  );
+  expect(bars).toEqual(swatches);
+});

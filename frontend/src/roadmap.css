@@ -17,10 +17,14 @@
 .roadmap-heading h2 { font-size: 20px; margin: var(--space-3) 0; letter-spacing: -.6px; }
 .roadmap-heading p, .roadmap-caption { color: var(--color-muted); font-size: var(--text-small); line-height: 1.8; margin: 0; }
 /* 과목 색: 노드 위쪽 막대와 필터 버튼의 막대에 같은 값을 써서 필터가 범례를 겸함
-   - 파랑(선택·강조)·초록(완료)과 겹치지 않는 색, 흰 바탕에서 글자로 써도 4.5:1 이상 */
+   - 파랑(선택·강조)·초록(완료)과 겹치지 않는 색, 흰 바탕에서 글자로 써도 4.5:1 이상
+   - 다섯 과목은 색상환을 나눠 씀: 네트워크는 완료 초록과 섞이지 않게 노란 기가 도는 올리브 초록 */
 [data-subject] { --subject-color: var(--color-muted); }
 [data-subject=dsa] { --subject-color: #0e7490; }
 [data-subject=os] { --subject-color: #be185d; }
+[data-subject=db] { --subject-color: #6d28d9; }
+[data-subject=network] { --subject-color: #4d7c0f; }
+[data-subject=arch] { --subject-color: #c2410c; }
 .subject-filter { display: flex; flex-wrap: wrap; gap: var(--space-1); width: fit-content; max-width: 100%; margin-top: var(--space-5); padding: var(--space-1); border-radius: 10px; background: var(--color-background); }
 .subject-filter button { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--text-small); cursor: pointer; }
 .subject-filter button:hover { color: var(--color-text); }
