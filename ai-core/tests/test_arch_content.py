@@ -104,7 +104,7 @@ class ArchContentTests(unittest.TestCase):
                     for prerequisite in concept.prerequisites if merged[prerequisite.id].subject in ('dsa', 'os')}
         self.assertGreaterEqual(len(boundary), 2)
         self.assertIn(('cache-locality', 'array'), boundary)
-        self.assertIn(('virtual-memory-pages', 'memory-address'), boundary)
+        self.assertIn(('memory-hierarchy', 'memory-address'), boundary)
         for subject in ('dsa', 'os'):
             source = json.loads((CONTENT_DIR / subject / 'concept-map.json').read_text(encoding='utf-8'))
             for concept in source['concepts']:
