@@ -1,7 +1,9 @@
 /**
  * @file
- * @brief 여러 과목을 합친 개념 지도의 화면용 타입, 과목 목록·필터, 선수 관계 단계 배치, 브라우저 학습 상태 저장 규칙
+ * @brief 여러 과목을 합친 개념 지도의 화면용 타입, 과목 목록·필터, 선수 관계 단계 배치, 학습 상태·세션별 진단 표시의 계산·저장 규칙
  */
+import type { StuckSession } from "./stuck";
+
 export type LearningStatus = "not-started" | "in-progress" | "completed";
 
 /** @brief 직접 선수 개념과 그 근거; 상세 패널에서 "왜 먼저 봐야 하는지"를 보여 주는 데 사용 */
@@ -195,4 +197,145 @@ export function saveRoadmap(
   storage: Pick<Storage, "setItem"> = localStorage,
 ): void {
   storage.setItem(storageKey, JSON.stringify({ version: 1, ...state }));
+}
+
+/** @brief 지도 진단 표시의 최소 복구 정보; 답안·설명 없이 세션과 개념 ID·통과 여부만 보관 */
+export type RoadmapDiagnosis = {
+  sessionId: string;
+  targetId: string;
+  gapIds: string[];
+  passedIds: string[];
+};
+
+/**
+ * @brief 세션 화면에서 지도용 진단 상태 갱신; 다른 세션의 진단이 섞이지 않도록 ID를 먼저 확인
+ * - 보충·확인 문항 화면에는 원래 빈틈 목록이 없어 이전 진단을 유지
+ * - 통과는 result·summary의 실제 판정으로만 바꾸며 사용자의 일반 학습 상태와 분리
+ */
+export function advanceDiagnosis(
+  previous: RoadmapDiagnosis | null,
+  session: StuckSession | null,
+): RoadmapDiagnosis | null {
+  if (!session) return null;
+  const view = session.view;
+  if (view.kind === "diagnosis_result")
+    return {
+      sessionId: session.id,
+      targetId: view.target.id,
+      gapIds: [...new Set(view.gaps.map((gap) => gap.id))],
+      passedIds: [],
+    };
+  if (
+    previous?.sessionId !== session.id ||
+    view.kind === "out_of_scope" ||
+    (view.kind === "question" && view.purpose === "diagnosis")
+  ) return null;
+  if (view.kind === "summary")
+    return {
+      ...previous,
+      passedIds: previous.gapIds.filter((id) =>
+        view.results.some((result) => result.concept.id === id && result.outcome === "passed"),
+      ),
+    };
+  if (view.kind === "result" || view.kind === "unresolved")
+    return {
+      ...previous,
+      passedIds: [
+        ...previous.passedIds.filter((id) => id !== view.concept.id),
+        ...(view.kind === "result" && view.passed && previous.gapIds.includes(view.concept.id)
+          ? [view.concept.id] : []),
+      ],
+    };
+  return previous;
+}
+
+/**
+ * @brief 지도에 존재하는 빈틈·통과·목표 개념과 빈틈→목표의 모든 실제 선수 간선 계산
+ * - 목표의 선수 집합 안에서만 후속 간선을 따라가 무관한 가지·빈틈의 이전 선수·가상 직통선을 제외
+ * - 과목 필터가 숨긴 개념·간선은 입력 지도에 없으므로 강조 대상으로 만들지 않음
+ */
+export function diagnosisHighlights(concepts: Concept[], diagnosis: RoadmapDiagnosis | null) {
+  const byId = new Map(concepts.map((concept) => [concept.id, concept]));
+  const gapIds = diagnosis?.gapIds.filter((id) => byId.has(id)) ?? [];
+  const passed = new Set(gapIds.filter((id) => diagnosis!.passedIds.includes(id)));
+  const gaps = new Set(gapIds.filter((id) => !passed.has(id)));
+  const target = diagnosis && byId.has(diagnosis.targetId) ? diagnosis.targetId : null;
+  const edges = new Set<string>();
+  const ancestors = new Set<string>();
+  const pending = target ? [target] : [];
+  while (pending.length) {
+    const id = pending.pop()!;
+    if (ancestors.has(id)) continue;
+    ancestors.add(id);
+    for (const prerequisite of byId.get(id)!.prerequisites)
+      if (byId.has(prerequisite.id)) pending.push(prerequisite.id);
+  }
+  const successors = new Map<string, string[]>();
+  for (const concept of concepts)
+    for (const prerequisite of concept.prerequisites)
+      if (byId.has(prerequisite.id))
+        successors.set(prerequisite.id, [...(successors.get(prerequisite.id) ?? []), concept.id]);
+  const visited = new Set<string>();
+  /** @brief 목표로 이어지는 후속 간선만 수집; 합쳐지는 경로는 한 번만 탐색 */
+  function trace(id: string) {
+    if (visited.has(id)) return;
+    visited.add(id);
+    for (const next of successors.get(id) ?? [])
+      if (ancestors.has(next)) {
+        edges.add(`${id}:${next}`);
+        trace(next);
+      }
+  }
+  for (const id of gapIds) if (ancestors.has(id)) trace(id);
+  return { gaps, passed, target, edges };
+}
+
+// 기존 막힘 목록과 별도로 최소 표시 정보만 저장; 복구는 해당 세션의 GET 성공 뒤에만 허용
+const diagnosisStorageKey = "cs-roadmap-diagnoses-v1";
+
+/** @brief 저장소 접근 실패·손상·형식 버전 변경 때 빈 진단 목록 반환 */
+function readDiagnoses(storage: Pick<Storage, "getItem">): Record<string, unknown> {
+  try {
+    const saved: unknown = JSON.parse(storage.getItem(diagnosisStorageKey) ?? "null");
+    return isRecord(saved) && saved.version === 1 && isRecord(saved.sessions) ? saved.sessions : {};
+  } catch {
+    return {};
+  }
+}
+
+/** @brief 세션 ID가 일치하고 개념 ID·통과 목록이 유효한 표시 정보인지 검증 */
+function validDiagnosis(value: unknown, sessionId: string): value is RoadmapDiagnosis {
+  if (!isRecord(value)) return false;
+  const gapIds = value.gapIds;
+  return value.sessionId === sessionId &&
+    /^[0-9a-f]{32}$/.test(sessionId) &&
+    typeof value.targetId === "string" && conceptIdPattern.test(value.targetId) &&
+    Array.isArray(gapIds) && gapIds.every((id) => typeof id === "string" && conceptIdPattern.test(id)) &&
+    Array.isArray(value.passedIds) && value.passedIds.every((id) => gapIds.includes(id));
+}
+
+/** @brief 현재 GET으로 재개한 세션의 표시 정보만 복구; 다른 세션·손상값·저장소 차단은 표시 없음 */
+export function loadDiagnosis(sessionId: string, storage?: Pick<Storage, "getItem">): RoadmapDiagnosis | null {
+  try {
+    const value = readDiagnoses(storage ?? localStorage)[sessionId];
+    return validDiagnosis(value, sessionId)
+      ? { sessionId, targetId: value.targetId, gapIds: [...value.gapIds], passedIds: [...value.passedIds] }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** @brief 진행 중 세션의 진단만 보존하며 현재 표시를 저장; 저장 실패는 App에서 새로고침 복구 한계를 알림 */
+export function saveDiagnosis(
+  diagnosis: RoadmapDiagnosis,
+  activeSessionIds: string[],
+  storage: Pick<Storage, "getItem" | "setItem"> = localStorage,
+): void {
+  const saved = readDiagnoses(storage);
+  const sessions = Object.fromEntries(Object.entries(saved).filter(([id, value]) =>
+    activeSessionIds.includes(id) && validDiagnosis(value, id),
+  ));
+  sessions[diagnosis.sessionId] = diagnosis;
+  storage.setItem(diagnosisStorageKey, JSON.stringify({ version: 1, sessions }));
 }

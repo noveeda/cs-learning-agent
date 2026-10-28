@@ -3,7 +3,7 @@
  * @brief [막혔어요]·붙여넣기 진입 버튼과 막힘 패널; 엔진이 만든 view.kind별 화면(진단·결과·보충·확인·복귀)을 그리고 입력을 한 단계씩 보냄
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import Markdown from "react-markdown";
+import { LearningMarkdown } from "./markdown";
 import { LoaderCircle, RotateCcw, X } from "lucide-react";
 import type { Concept } from "./roadmap";
 import { remediationParts } from "./animation";
@@ -157,6 +157,7 @@ function AnswerForm({
 /**
  * @brief 막힘 세션 하나를 열어 단계별 화면을 그림
  * - 세션 ID는 처음 받은 순간 브라우저에 저장하고, 끝나면 진행 중 목록에서 뺌(새로고침 재개 기준)
+ * - 지도 연결 콜백은 세션 응답·재시작·404만 전달; 실험 화면에서는 생략 가능
  * - 요청은 한 번에 하나만 보냄(inFlight): 연속 클릭으로 같은 단계를 두 번 진행하지 않게 함
  */
 export function StuckPanel({
@@ -165,12 +166,14 @@ export function StuckPanel({
   onClose,
   onReturn,
   onSessionsChange,
+  onSessionChange,
 }: {
   request: StuckRequest;
   concepts: Concept[];
   onClose: () => void;
   onReturn: (returnTo: string) => void;
   onSessionsChange: () => void;
+  onSessionChange?: (session: StuckSession | null) => void;
 }) {
   const [session, setSession] = useState<StuckSession | null>(null);
   const [excerpt, setExcerpt] = useState("");
@@ -208,6 +211,7 @@ export function StuckPanel({
       );
     }
     onSessionsChange();
+    onSessionChange?.(next);
   }
 
   /**
@@ -244,6 +248,7 @@ export function StuckPanel({
           }
           onSessionsChange();
         }
+        onSessionChange?.(null);
         setError({ message: `${message} 패널을 닫고 다시 시작해 주세요.` });
       } else {
         setError({
@@ -293,6 +298,7 @@ export function StuckPanel({
       // 목록에서 빼지 못해도 새 세션을 받으면 같은 키를 새 ID로 덮어씀
     }
     onSessionsChange();
+    onSessionChange?.(null);
     setSession(null);
     setNotice("");
     setError(null);
@@ -522,7 +528,7 @@ export function StuckPanel({
               {view.attempt > 1 ? ` · ${view.attempt}번째 설명` : ""}
             </span>
             <div className="message-content stuck-text">
-              <Markdown>{text}</Markdown>
+              <LearningMarkdown>{text}</LearningMarkdown>
             </div>
             {/* 다시 설명(attempt)이나 다른 개념으로 넘어가면 첫 단계부터 보여 주도록 key를 바꿈 */}
             {animation && (
@@ -635,7 +641,7 @@ export function StuckPanel({
           <section>
             <span className="badge">복귀 요약</span>
             <div className="message-content stuck-text">
-              <Markdown>{view.text}</Markdown>
+              <LearningMarkdown>{view.text}</LearningMarkdown>
             </div>
             <ul className="stuck-results">
               {view.results.map((row) => (

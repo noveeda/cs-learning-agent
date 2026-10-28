@@ -1,7 +1,7 @@
 ## @file
 # @brief 단계별 애니메이션의 프레임 스키마(Box·Arrow·Frame·Animation)와 모델이 고르는 장면 요청 스키마
 # - 모델은 장면 종류와 연산 입력(AnimationRequest)만 고름
-# - 프레임은 시뮬레이터(linear.py·hierarchical.py·graph.py·sorting.py·scheduling.py)가 연산을 실제로 실행해 만듦. 모델이 상태를 지어내면 틀린 그림을 잡을 수 없기 때문
+# - 프레임은 시뮬레이터(linear.py·hierarchical.py·graph.py·sorting.py·scheduling.py·call_stack.py)가 연산을 실제로 실행해 만듦. 모델이 상태를 지어내면 틀린 그림을 잡을 수 없기 때문
 # - 프레임 JSON은 artifact 이벤트·막힘 view로 프런트엔드 재생기에 그대로 전달됨
 """Animation frame and scene request schemas."""
 from typing import Annotated, Literal, Union
@@ -296,10 +296,26 @@ class CpuScheduleRequest(Strict):
         return self
 
 
+## @brief 재귀 호출 스택 장면. factorial은 0~6, fib는 0~3을 전체 호출·반환으로 그림
+# - 교육적 분량 제한: 초기 1단계 + 호출·반환 각 1단계, factorial(6)은 13단계·fib(3)은 11단계
+# - fib(4)는 9회 호출로 19단계가 되어 MAX_FRAMES를 넘음. 임의 함수를 실행하지 않고 두 함수만 허용
+class CallStackRequest(Strict):
+    kind: Literal['call_stack']
+    function: Literal['factorial', 'fib']
+    n: int = Field(ge=0, le=6)
+
+    ## @brief 지수적으로 늘어나는 fib 호출 수를 제한해 모든 호출을 생략 없이 따라가게 함
+    @model_validator(mode='after')
+    def validate_call_count(self):
+        if self.function == 'fib' and self.n > 3:
+            raise ValueError('fib는 n=0~3만 지원합니다. 모든 호출·반환을 16단계 안에 그리기 위한 분량 제한입니다')
+        return self
+
+
 # 모델이 고르는 장면 요청 전체. kind 값으로 요청 타입을 구분함
 AnimationRequest = Annotated[
     Union[ArrayRequest, LinkedListRequest, StackRequest, QueueRequest, HashTableRequest, BSTRequest, HeapRequest,
-          GraphTraversalRequest, SortRequest, TreeTraversalRequest, CpuScheduleRequest],
+          GraphTraversalRequest, SortRequest, TreeTraversalRequest, CpuScheduleRequest, CallStackRequest],
     Field(discriminator='kind')]
 
 
