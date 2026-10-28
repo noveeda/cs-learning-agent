@@ -75,6 +75,12 @@ BOOKS: dict[str, Book] = {b.id: b for b in (
     Book('watt-db', 'Database Design – 2nd Edition', 'Adrienne Watt, Nelson Eng', 'CC BY 4.0',
          'https://creativecommons.org/licenses/by/4.0/', 'https://opentextbc.ca/dbdesign01/',
          'epub', None, 'none'),
+    # 컴퓨터구조 보충(2의 보수·파이프라인·캐시 계층). Mavs Open Press(UTA) 2026-08-19 판
+    # - 사람이 내려받음: RAG_DATA_DIR/raw/uta-coal/*.pdf. 내려받기 링크가 자동 요청을 403으로 막으므로 우회하지 않음
+    # - 라이선스 확인 페이지: https://mavmatrix.uta.edu/oer_mavsopenpress2/3. 그림은 출처를 확인하지 않아 쓰지 않음
+    Book('uta-coal', 'Computer Organization and Assembly Language Programming', 'Chenxi Wang, Muhammad Rashed',
+         'CC BY-NC-SA 4.0', 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+         'https://mavmatrix.uta.edu/oer_mavsopenpress2/3', 'pdf', None, 'none'),
     # 그림은 파일마다 Wikimedia Commons 라이선스가 달라 확인 전에는 쓰지 않음
     Book('wikibooks-mpd', 'Microprocessor Design', 'Wikibooks contributors', 'CC BY-SA 4.0',
          'https://creativecommons.org/licenses/by-sa/4.0/', 'https://en.wikibooks.org/wiki/Microprocessor_Design',
