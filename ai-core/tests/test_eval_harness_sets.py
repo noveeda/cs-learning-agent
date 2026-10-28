@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from eval.harness_retrieval import gold_scores, recall_at_k
-from eval.harness_sets import retrieval_set, sample_sheet
+from eval.harness_sets import retrieval_set, sample_sheet, usable_question
 from rag.index import Chunk, build_index
 from rag.parse import Section
 from rag.search import Retriever
@@ -64,6 +64,15 @@ class RetrievalSetTests(unittest.TestCase):
         for concept in ('stack', 'queue', 'heap'):
             self.assertEqual(sheet.count(f'· {concept}'), 1)
         self.assertEqual(sheet.count('원문 ods:'), 3)
+
+    # 검증 목적: 한글 질문은 통과하고 한자 섞인 질문·잘린 출력·너무 긴 출력만 버리는지 확인
+    #   (한자 범위를 잘못 적으면 한글까지 걸러 세트가 통째로 비는 사고가 있었음)
+    def test_usable_question_keeps_hangul_drops_han(self):
+        self.assertEqual(usable_question(' "스택은 왜 LIFO인가요?" ', 'stop'), '스택은 왜 LIFO인가요?')
+        self.assertEqual(usable_question('스택\u5806은 무엇인가요?', 'stop'), '')
+        self.assertEqual(usable_question('스택\uf900은 무엇인가요?', 'stop'), '')
+        self.assertEqual(usable_question('스택은', 'length'), '')
+        self.assertEqual(usable_question('가' * 201, 'stop'), '')
 
 
 ## @brief 질문별로 미리 정한 순위 목록을 돌려주는 가짜 검색기; 받은 인자를 기록해 개념·k 전달을 확인함

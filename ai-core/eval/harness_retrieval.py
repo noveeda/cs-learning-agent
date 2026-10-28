@@ -36,19 +36,32 @@ def gold_scores(rows, retriever) -> list[float]:
 
 
 ## @brief 측정 명령 진입점: 세트 파일을 읽어 회수율·정답 점수 요약을 JSON 한 줄로 출력
+# - --build: 현재 임베더(RAG_EMBED_*)로 --db에 후보 전용 색인을 새로 만든 뒤 잼. 운영 색인(index.sqlite)을 덮지 않게 --db를 꼭 받음
 # - 회수율은 min_score를 끈(-1.0) 검색기로 잼. 기준값은 이 측정의 결과로 정하는 값이라 측정에 미리 넣지 않음
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog='python -m eval.harness_retrieval', description='검색 회수율을 잽니다.')
     parser.add_argument('--set', type=Path, required=True)
     parser.add_argument('--db', type=Path)
     parser.add_argument('--k', type=int, default=3)
+    parser.add_argument('--build', action='store_true', help='--db에 현재 임베더로 색인을 새로 만든 뒤 잽니다.')
+    parser.add_argument('--section-map', type=Path, help='--build에 쓸 절 대응표 JSON(기본: 저장소 대응표)')
     args = parser.parse_args(argv)
+    if args.build and not args.db:
+        parser.error('--build는 운영 색인을 덮지 않도록 --db를 함께 지정해야 합니다.')
     from rag.embed import Embedder
     from rag.fetch import DATA_DIR
     from rag.search import Retriever
 
+    embedder = Embedder.from_env()
+    if args.build:
+        # 절 대응표 모듈(Task 2)은 별도 PR이라 색인을 만들 때만 읽음
+        from rag.index import build_index, load_sections
+        from rag.section_map import load_section_map
+        counts = build_index(load_sections(DATA_DIR / 'sections.jsonl'), load_section_map(args.section_map), embedder, args.db)
+        print(f'{args.db}: 문단 묶음 {counts["chunks"]}개, 그림 {counts["figures"]}개', file=sys.stderr)
+
     rows = [json.loads(line) for line in args.set.read_text().splitlines() if line.strip()]
-    retriever = Retriever(args.db or DATA_DIR / 'index.sqlite', Embedder.from_env(), min_score=-1.0)
+    retriever = Retriever(args.db or DATA_DIR / 'index.sqlite', embedder, min_score=-1.0)
     scores = sorted(gold_scores(rows, retriever))
     print(json.dumps({'rows': len(rows), f'recall_at_{args.k}': round(recall_at_k(rows, retriever, args.k), 4),
                       'gold_score_p5': round(statistics.quantiles(scores, n=20)[0], 4),
