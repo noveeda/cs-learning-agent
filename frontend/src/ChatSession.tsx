@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief 대화 한 세션의 복구·질문 입력·실시간 답변·도식/애니메이션 표시와 실패 후 재시도, 막힘 진입 버튼 담당
+ * @brief 대화 한 세션의 복구·질문 입력·실시간 답변·도식/애니메이션/교재 그림 표시와 실패 후 재시도, 막힘 진입 버튼 담당
  */
 import { useEffect, useRef, useState } from "react";
 import { LearningMarkdown } from "./markdown";
@@ -16,6 +16,7 @@ import {
 import {
   artifactNoun,
   artifactTitle,
+  harnessProgress,
   isAnimationArtifact,
   requestChat,
   loadConversation,
@@ -176,6 +177,11 @@ export function ChatSession({
         setStatus(toolProgress(event.name, false));
       if (event.type === "tool_error")
         setStatus(toolProgress(event.name, true));
+      // 근거 하네스는 도구 대신 단계(status)를 알려 줌; 모르는 단계면 직전 문구를 그대로 둠
+      if (event.type === "status") {
+        const label = harnessProgress(event);
+        if (label) setStatus(label);
+      }
       if (event.type === "artifact") {
         setArtifact(event);
         setPanelOpen(true);
@@ -499,7 +505,7 @@ export function ChatSession({
             artifact={artifact}
             onClose={closePanel}
             onImageError={() =>
-              setError("도식을 불러오지 못했습니다. 서버 연결을 확인해 주세요.")
+              setError(`${artifactNoun(artifact)}을 불러오지 못했습니다. 서버 연결을 확인해 주세요.`)
             }
           />
         ))}

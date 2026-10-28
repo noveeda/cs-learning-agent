@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief 모의 AI 서버로 즉시 스트림 전달과 실패 문답의 재사용 제외를 검증
+ * @brief 모의 AI 서버로 즉시 스트림 전달과 실패 문답의 재사용 제외, 그림 Content-Type 중계를 검증
  */
 package com.csagent.backend;
 
@@ -102,6 +102,59 @@ class AgentControllerTests {
             assertEquals(0, ConversationStore.JSON.readTree(received.get()).path("history").size());
             assertThrows(org.springframework.web.server.ResponseStatusException.class,
                     () -> store.load("../escape"));
+        } finally {
+            upstream.stop(0);
+        }
+    }
+
+    /** @brief /artifacts/{id}만 응답하는 모의 AI 서버를 띄움; 주어진 Content-Type과 본문을 그대로 돌려줌 */
+    private HttpServer artifactUpstream(String contentType, byte[] body) throws Exception {
+        var upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        upstream.createContext("/artifacts/", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", contentType);
+            exchange.sendResponseHeaders(200, body.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        });
+        upstream.start();
+        return upstream;
+    }
+
+    @Test
+    /** @brief 하네스 교재 그림(PNG)이 SVG로 잘못 표시되지 않고 image/png와 바이트 그대로 전달되는지 검증 */
+    void artifactPassesPngContentType() throws Exception {
+        var png = new byte[] {(byte) 0x89, 'P', 'N', 'G', 0, 1, 2};
+        var upstream = artifactUpstream("image/png", png);
+        try {
+            var controller = new AgentController("http://127.0.0.1:" + upstream.getAddress().getPort(),
+                    new ConversationStore(directory.toString()));
+            var response = controller.artifact("d".repeat(32));
+            assertEquals(200, response.getStatusCode().value());
+            assertEquals("image/png", response.getHeaders().getFirst("Content-Type"));
+            assertEquals("nosniff", response.getHeaders().getFirst("X-Content-Type-Options"));
+            assertArrayEquals(png, response.getBody());
+            // 기존 도식 SVG 중계도 그대로 유지
+            upstream.stop(0);
+            upstream = artifactUpstream("image/svg+xml", "<svg/>".getBytes(StandardCharsets.UTF_8));
+            controller = new AgentController("http://127.0.0.1:" + upstream.getAddress().getPort(),
+                    new ConversationStore(directory.toString()));
+            assertEquals("image/svg+xml", controller.artifact("d".repeat(32)).getHeaders().getFirst("Content-Type"));
+        } finally {
+            upstream.stop(0);
+        }
+    }
+
+    @Test
+    /** @brief 그림이 아닌 형식(HTML 등)은 같은 출처 문서로 열리지 않도록 404로 막는지 검증 */
+    void artifactRejectsOtherContentTypes() throws Exception {
+        var upstream = artifactUpstream("text/html", "<script>alert(1)</script>".getBytes(StandardCharsets.UTF_8));
+        try {
+            var controller = new AgentController("http://127.0.0.1:" + upstream.getAddress().getPort(),
+                    new ConversationStore(directory.toString()));
+            var error = assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                    () -> controller.artifact("d".repeat(32)));
+            assertEquals(404, error.getStatusCode().value());
         } finally {
             upstream.stop(0);
         }
