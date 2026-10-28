@@ -1,4 +1,5 @@
-# 파일 역할: 시뮬레이션 학습자(프로필·응답자·API 클라이언트·실행·M1·M2 집계)를 가짜 API와 가짜 모델로 검증
+## @file
+# @brief 시뮬레이션 학습자(프로필·응답자·API 클라이언트·실행·M1·M2 집계)를 가짜 API와 가짜 모델로 검증
 # - 가짜 API는 실제 막힘 엔진(serving.stuck.step)을 그대로 쓰고 LLM 역할만 가짜로 바꿈: 진단·보충 순서는 실제 엔진 규칙대로 확인됨
 # - Review Focus 1(엔진 가정과 어긋나는 프로필)·2(진단 문항 상한 효과)를 프로필·집계 테스트로 고정
 import random
@@ -26,7 +27,7 @@ ALL = frozenset(c.id for c in MAP.concepts)
 PREREQUISITES = {c.id: [p.id for p in c.prerequisites] for c in MAP.concepts}
 
 
-# 역할: 막힘 엔진의 LLM 역할 가짜 구현; 서술 채점은 학습자 답에 '정확' 표시가 있을 때만 통과
+## @brief 막힘 엔진의 LLM 역할 가짜 구현; 서술 채점은 학습자 답에 '정확' 표시가 있을 때만 통과
 class FakeGateway:
     def explain(self, concept, attempt, entry, scene=None):
         return f'{concept.title} 보충'
@@ -44,7 +45,7 @@ class FakeGateway:
         return None
 
 
-# 역할: Spring 공개 API 가짜 구현; 실제 엔진으로 한 단계씩 진행하고 브라우저 공개 형태({id, version, stage, view, entry})만 돌려줌
+## @brief Spring 공개 API 가짜 구현; 실제 엔진으로 한 단계씩 진행하고 브라우저 공개 형태({id, version, stage, view, entry})만 돌려줌
 class FakeApi:
     def __init__(self):
         self.states, self.calls = {}, 0
@@ -66,7 +67,7 @@ class FakeApi:
         return self._public(session['id'])
 
 
-# 역할: 학습자 모델 가짜 구현; 아는 개념(참고 답을 받음)이면 '정확'으로 시작하는 답, 모르면 불완전한 답
+## @brief 학습자 모델 가짜 구현; 아는 개념(참고 답을 받음)이면 '정확'으로 시작하는 답, 모르면 불완전한 답
 def fake_explainer(question, reference):
     return f'정확: {reference["rationale"]}' if reference else '잘 모르겠지만 대충 이런 것 같다'
 
@@ -75,7 +76,7 @@ def profile_with(target, unknown, slip=0.0, guess=0.0, consistent=True):
     return Profile(id='t', target=target, known=ALL - frozenset(unknown) - {target}, slip=slip, guess=guess, consistent=consistent)
 
 
-# 역할: 과목 두 개를 합친 작은 지도(실제 운영체제 지도와 같은 모양). edges는 {개념: (과목, [선수 개념])}
+## @brief 과목 두 개를 합친 작은 지도(실제 운영체제 지도와 같은 모양). edges는 {개념: (과목, [선수 개념])}
 # - os 개념이 dsa 개념(queue·priority-queue)을 선수로 가져 과목 경계를 넘는 빈틈을 만들 수 있음
 # - subjects=False면 과목 표시를 지운 같은 지도(과목 규칙이 같은 과목 대상 프로필을 바꾸지 않는지 비교용)
 def two_subject_map(subjects=True):

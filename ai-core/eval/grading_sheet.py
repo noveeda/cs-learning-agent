@@ -1,4 +1,5 @@
-# 파일 역할: 한국어 서술 답(MVP 2 답 시트)을 사람이 채점할 눈가림 시트와 채점 기준표로 바꿈
+## @file
+# @brief 한국어 서술 답(MVP 2 답 시트)을 사람이 채점할 눈가림 시트와 채점 기준표로 바꿈
 # - 사람 라벨은 M3(서술 채점 신뢰도)의 최종 근거라, 채점자가 작성자·시점·AI 판정을 보고 기울지 않게 하기 위함
 # - 시트와 결과는 git-ignored 폴더(ai-core/outputs/) 아래에만 씀(학생 답 원문이 Git에 들어가지 않게)
 """Build a blinded human grading sheet (and criteria sheet) from collected Korean answers."""
@@ -31,7 +32,7 @@ SHEET_COLUMNS = ('answer_id', 'practice', 'question', 'answer',
 CRITERIA_COLUMNS = ('item_id', 'question', 'rubric_no', 'rubric', 'met_example')
 
 
-# 역할: CSV 한 개를 행 목록으로 읽음; 사람이 엑셀로 열어 채운 뒤 돌려주는 파일을 모두 이 함수로 읽음
+## @brief CSV 한 개를 행 목록으로 읽음; 사람이 엑셀로 열어 채운 뒤 돌려주는 파일을 모두 이 함수로 읽음
 # - UTF-8(BOM 포함)로 먼저 읽고, 실패하면 cp949로 다시 읽음
 #   엑셀에서 형식을 "CSV(쉼표로 분리)"로 저장하면 한글 Windows에서는 cp949(ANSI)가 되기 때문
 # - 둘 다 실패하면 깨진 글자로 계산하지 않도록, 다시 저장할 형식을 알려 주는 ValueError를 냄
@@ -48,18 +49,18 @@ def read_csv(path):
     return list(csv.DictReader(io.StringIO(text, newline='')))
 
 
-# 역할: 답 시트 CSV들을 읽어 빈 답을 뺀 행 목록 반환; 빈 답은 채점할 내용이 없어 사람·AI 모두 채점하지 않음
+## @brief 답 시트 CSV들을 읽어 빈 답을 뺀 행 목록 반환; 빈 답은 채점할 내용이 없어 사람·AI 모두 채점하지 않음
 def read_answers(paths):
     rows = [row for path in paths for row in read_csv(path)]
     return [r for r in rows if r['answer'].strip()]
 
 
-# 역할: 채점자·회차마다 고정된 섞기 seed; 같은 채점자가 시트를 다시 만들어도 순서가 같고, 채점자·재채점 회차끼리는 순서가 다름
+## @brief 채점자·회차마다 고정된 섞기 seed; 같은 채점자가 시트를 다시 만들어도 순서가 같고, 채점자·재채점 회차끼리는 순서가 다름
 def grader_seed(grader, round_no=1):
     return zlib.crc32(f'{grader}:{round_no}'.encode())
 
 
-# 역할: 시트 한 행; 문항과 루브릭은 문항 은행 원문을 쓰고 판정 칸은 비워 둠
+## @brief 시트 한 행; 문항과 루브릭은 문항 은행 원문을 쓰고 판정 칸은 비워 둠
 def sheet_row(answer, item, practice):
     row = {'answer_id': answer['answer_id'], 'practice': '1' if practice else '0', 'question': item.question,
            'answer': answer['answer'], 'overall_pass': '', 'note': ''}
@@ -69,7 +70,7 @@ def sheet_row(answer, item, practice):
     return {column: row[column] for column in SHEET_COLUMNS}
 
 
-# 역할: 채점자 시트 행 목록 반환
+## @brief 채점자 시트 행 목록 반환
 # - 연습 5개: 개발자 답에서 고정 seed로 골라 맨 앞에 둠(채점자 모두 같은 연습 답으로 기준을 맞추기 위함)
 # - 나머지: 채점자 seed로 섞음(순서 효과가 채점자끼리 겹치지 않게 하기 위함)
 def build_sheet(answers, items, grader, round_no=1):
@@ -84,14 +85,14 @@ def build_sheet(answers, items, grader, round_no=1):
             + [sheet_row(a, by_id[a['item_id']], False) for a in rest])
 
 
-# 역할: 채점 기준표 행 목록; 시트에 나온 문항의 루브릭 요소마다 "충족" 예시를 적을 빈칸을 둠(채점자끼리 기준을 맞추는 메모)
+## @brief 채점 기준표 행 목록; 시트에 나온 문항의 루브릭 요소마다 "충족" 예시를 적을 빈칸을 둠(채점자끼리 기준을 맞추는 메모)
 def build_criteria(answers, items):
     used = {a['item_id'] for a in answers if a['answer'].strip()}
     return [{'item_id': item.id, 'question': item.question, 'rubric_no': str(n), 'rubric': rubric, 'met_example': ''}
             for item in items if item.id in used for n, rubric in enumerate(item.rubric, 1)]
 
 
-# 역할: outputs 아래 새 CSV로 씀; 채점자가 채운 시트를 덮어쓰지 않도록 이미 있으면 거부(채운 판정은 되살릴 수 없음)
+## @brief outputs 아래 새 CSV로 씀; 채점자가 채운 시트를 덮어쓰지 않도록 이미 있으면 거부(채운 판정은 되살릴 수 없음)
 def write_csv(parser, path, columns, rows):
     path = Path(path).resolve()
     if not path.is_relative_to(OUTPUT_ROOT):
@@ -108,7 +109,7 @@ def write_csv(parser, path, columns, rows):
     print(f'{path}: {len(rows)}줄')
 
 
-# 역할: 명령행 실행; 채점 시트(--out)와 같은 폴더에 <이름>-criteria.csv 기준표를 함께 씀(엑셀용 UTF-8 BOM)
+## @brief 명령행 실행; 채점 시트(--out)와 같은 폴더에 <이름>-criteria.csv 기준표를 함께 씀(엑셀용 UTF-8 BOM)
 # - 도움말 끝에 채점자에게 시트를 나눠 줄 때 지킬 두 가지를 적음(epilog)
 def main(argv=None):
     parser = argparse.ArgumentParser(

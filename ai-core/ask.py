@@ -1,4 +1,5 @@
-# 파일 역할: 로컬 vLLM에 질문을 직접 보내고 응답 조각을 터미널에 출력하는 최소 호출 예제
+## @file
+# @brief 로컬 vLLM에 질문을 직접 보내고 응답 조각을 터미널에 출력하는 최소 호출 예제
 from openai import OpenAI
 
 # OpenAI 클라이언트 객체 생성

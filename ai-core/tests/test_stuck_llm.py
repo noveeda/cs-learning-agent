@@ -1,4 +1,5 @@
-# 파일 역할: 막힘 흐름 LLM 역할(vLLM Gateway)의 요청 형태·출력 검증·오류 변환·모델 잠금·장면 선택과, 가짜 모델로 끝까지 가는 흐름을 검증
+## @file
+# @brief 막힘 흐름 LLM 역할(vLLM Gateway)의 요청 형태·출력 검증·오류 변환·모델 잠금·장면 선택과, 가짜 모델로 끝까지 가는 흐름을 검증
 import json
 import threading
 import unittest
@@ -27,7 +28,7 @@ def reply(content, finish='stop'):
     return SimpleNamespace(choices=[SimpleNamespace(finish_reason=finish, message=SimpleNamespace(content=content))])
 
 
-# 역할: OpenAI 클라이언트 가짜 구현; 요청을 기록하고 시스템 지시로 역할을 알아내 역할별 응답 함수에 넘김
+## @brief OpenAI 클라이언트 가짜 구현; 요청을 기록하고 시스템 지시로 역할을 알아내 역할별 응답 함수에 넘김
 # - 응답 함수가 예외 객체를 돌려주면 그대로 던져 연결 실패·시간 초과를 흉내 냄
 class FakeClient:
     def __init__(self, **responders):
@@ -57,7 +58,7 @@ class FakeClient:
 STACK_SCENE = {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}, {'op': 'push', 'value': 2}, {'op': 'pop'}]}
 
 
-# 역할: 가짜 모델이 정상 응답만 하는 기본 역할 응답; identified로 개념 특정 결과를 정함
+## @brief 가짜 모델이 정상 응답만 하는 기본 역할 응답; identified로 개념 특정 결과를 정함
 # - 장면 선택은 stack이 허용되면 stack 장면, 아니면 "장면 없음"(null)을 고름
 def happy_client(identified='stack'):
     return FakeClient(
@@ -341,7 +342,7 @@ class FailureTests(unittest.TestCase):
         self.assertFalse(lock.locked())
 
 
-# 역할: 실제 지도·문항 은행과 가짜 모델로 세션을 끝까지 진행; 진단은 모두 틀리고 확인 문항은 정답 키로 맞힘
+## @brief 실제 지도·문항 은행과 가짜 모델로 세션을 끝까지 진행; 진단은 모두 틀리고 확인 문항은 정답 키로 맞힘
 # - items: 특정 개념 문항을 뺀 목록을 넣어 "문항 없는 개념"을 실제 문항 은행과 무관하게 만들 때 씀
 def run_session(test, entry, client, items=ITEMS):
     g, state, calls = gateway(client), None, 0

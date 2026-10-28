@@ -1,4 +1,5 @@
-# 파일 역할: 해시 테이블·BST·힙 애니메이션이 dict·정렬·heapq 참조 결과와 같은 상태를 그리는지, 실행할 수 없는 연산과 분량 초과를 거부하는지 검증
+## @file
+# @brief 해시 테이블·BST·힙 애니메이션이 dict·정렬·heapq 참조 결과와 같은 상태를 그리는지, 실행할 수 없는 연산과 분량 초과를 거부하는지 검증
 import heapq
 import unittest
 
@@ -6,12 +7,12 @@ from serving.animation import simulate
 from serving.animation.model import AnimationRequestModel
 
 
-# 역할: dict 요청을 스키마로 검증한 뒤 시뮬레이터를 실행
+## @brief dict 요청을 스키마로 검증한 뒤 시뮬레이터를 실행
 def run(data: dict):
     return simulate(AnimationRequestModel.model_validate(data).root)
 
 
-# 역할: 프레임의 화살표를 따라 트리를 복원해 중위 순회 라벨과 (부모, 왼쪽 자식) 관계를 반환
+## @brief 프레임의 화살표를 따라 트리를 복원해 중위 순회 라벨과 (부모, 왼쪽 자식) 관계를 반환
 # - 왼쪽 자식은 부모보다 x가 작은 자식. 레이아웃이 아니라 연결 구조로 순회해야 화살표 오류도 잡힘
 def tree_of(frame):
     nodes = {b.id: b for b in frame.boxes if b.shape == 'node' and b.tone != 'removed'}

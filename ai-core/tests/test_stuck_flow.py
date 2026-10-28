@@ -1,4 +1,5 @@
-# 파일 역할: 막힘 흐름의 진단 가지치기·상한·보충 순서·혼합형 확인·보충 애니메이션·복귀와, 잘못된 입력·LLM 실패 시 상태 보존을 검증
+## @file
+# @brief 막힘 흐름의 진단 가지치기·상한·보충 순서·혼합형 확인·보충 애니메이션·복귀와, 잘못된 입력·LLM 실패 시 상태 보존을 검증
 import json
 import unittest
 from unittest.mock import patch
@@ -13,7 +14,7 @@ from serving.item_bank import Item, load_item_bank
 from serving.stuck import LLMUnavailable, MAX_DIAGNOSIS_ITEMS, StepInput, UnavailableGateway, step
 
 
-# 역할: 규칙 확인용 작은 지도; top의 선수는 alpha·beta, alpha 아래로 gamma → delta → eps가 이어짐(eps는 깊이 4)
+## @brief 규칙 확인용 작은 지도; top의 선수는 alpha·beta, alpha 아래로 gamma → delta → eps가 이어짐(eps는 깊이 4)
 def small_map(status='reviewed', edges=None):
     edges = edges or {'top': ['alpha', 'beta'], 'alpha': ['gamma'], 'gamma': ['delta'], 'delta': ['eps'], 'beta': [], 'eps': []}
     return ConceptMap.model_validate({'id': 'test', 'title': '테스트', 'version': 1, 'status': status, 'concepts': [
@@ -21,7 +22,7 @@ def small_map(status='reviewed', edges=None):
          'prerequisites': [{'id': p, 'reason': '근거'} for p in ps]} for cid, ps in edges.items()]})
 
 
-# 역할: 개념마다 진단 1·확인 2·서술 1 문항을 만들고, 정답은 모두 "ok"
+## @brief 개념마다 진단 1·확인 2·서술 1 문항을 만들고, 정답은 모두 "ok"
 def small_items(concepts, without=()):
     items = []
     for cid in concepts:
@@ -41,7 +42,7 @@ def small_items(concepts, without=()):
 STACK_SCENE = {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}, {'op': 'push', 'value': 2}, {'op': 'pop'}]}
 
 
-# 역할: LLM 역할 가짜 구현; 호출을 기록해 요청당 호출 수를 확인하고, 서술 통과 여부와 고를 장면을 조절
+## @brief LLM 역할 가짜 구현; 호출을 기록해 요청당 호출 수를 확인하고, 서술 통과 여부와 고를 장면을 조절
 # - scene: choose_animation이 돌려줄 장면 요청(dict), None(장면 없음), 또는 예외 객체(던짐)
 # - explained_scenes: explain이 받은 장면 요약을 호출 순서대로 기록(글 예시와 장면 일치 확인용)
 class FakeGateway:
@@ -94,11 +95,11 @@ class Session:
         self.state = new
         return new
 
-    # 역할: 문항의 실제 정답 키(아는 학습자의 답)
+    ## @brief 문항의 실제 정답 키(아는 학습자의 답)
     def key(self, item_id):
         return next(i.answer for i in self.items if i.id == item_id)
 
-    # 역할: 진단 문항에 답함; known에 있는 개념이면 정답 키로 맞히고 아니면 틀림
+    ## @brief 진단 문항에 답함; known에 있는 개념이면 정답 키로 맞히고 아니면 틀림
     def diagnose(self, known=(), skip=()):
         while self.state.stage == 'diagnose':
             concept = self.state.view['concept']['id']
@@ -108,7 +109,7 @@ class Session:
                 answer = self.key(self.state.pending) if concept in known else '틀린 답'
                 self.send({'type': 'answer', 'item': self.state.pending, 'answer': answer})
 
-    # 역할: 보충 대상마다 설명을 받고 확인 문항·서술에 답함; check_ok가 False면 적용 문항을 틀림
+    ## @brief 보충 대상마다 설명을 받고 확인 문항·서술에 답함; check_ok가 False면 적용 문항을 틀림
     def remediate(self, check_ok=True):
         while self.state.stage not in ('return', 'complete'):
             if self.state.stage in ('remediate', 'decide'):
@@ -242,7 +243,7 @@ class RemediationTests(unittest.TestCase):
 
 
 
-# 역할: 실제 지도·문항 은행으로 concept에서 막힌 세션을 열고 진단을 건너뛴 뒤 첫 보충 화면까지 진행
+## @brief 실제 지도·문항 은행으로 concept에서 막힌 세션을 열고 진단을 건너뛴 뒤 첫 보충 화면까지 진행
 # - 진단할 선수 개념이 없는 개념(logarithm 등)은 시작하자마자 보충 단계라 opt_out을 보내지 않음
 def remediation_session(test, concept, gateway):
     session = Session(test, gateway=gateway, concept_map=load_concept_map(), items=load_item_bank(),

@@ -1,4 +1,5 @@
-# 파일 역할: 배열·연결 리스트·스택·큐 애니메이션이 파이썬 참조 동작과 같은 상태를 그리는지, 실행할 수 없는 연산과 분량 초과를 거부하는지 검증
+## @file
+# @brief 배열·연결 리스트·스택·큐 애니메이션이 파이썬 참조 동작과 같은 상태를 그리는지, 실행할 수 없는 연산과 분량 초과를 거부하는지 검증
 import json
 import unittest
 
@@ -7,12 +8,12 @@ from serving.animation import create_animation, simulate
 from serving.animation.model import AnimationRequestModel
 
 
-# 역할: dict 요청을 스키마로 검증한 뒤 시뮬레이터를 실행
+## @brief dict 요청을 스키마로 검증한 뒤 시뮬레이터를 실행
 def run(data: dict):
     return simulate(AnimationRequestModel.model_validate(data).root)
 
 
-# 역할: 프레임에서 지정 모양 상자의 라벨을 x(왼→오), y(위→아래) 순서로 꺼냄
+## @brief 프레임에서 지정 모양 상자의 라벨을 x(왼→오), y(위→아래) 순서로 꺼냄
 def labels(frame, shape='cell'):
     return [b.label for b in sorted((b for b in frame.boxes if b.shape == shape), key=lambda b: (b.x, b.y))]
 

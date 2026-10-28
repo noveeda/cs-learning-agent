@@ -1,4 +1,5 @@
-# 파일 역할: 문항 은행의 서술 문항으로 한국어 답 수집 시트(CSV)를 만듦; 사람이 쓴 답은 교차 채점(MVP 3)과 M3 근거로 쓰임
+## @file
+# @brief 문항 은행의 서술 문항으로 한국어 답 수집 시트(CSV)를 만듦; 사람이 쓴 답은 교차 채점(MVP 3)과 M3 근거로 쓰임
 """Export a blank Korean answer-collection sheet for explanation items (no rubric, no rationale)."""
 import argparse
 import csv
@@ -23,7 +24,7 @@ COLUMNS = ('answer_id', 'item_id', 'concept', 'question', 'phase', 'author', 'an
 PHASES = ('before', 'after')
 
 
-# 역할: 시트 안에서 겹치지 않는 answer_id('A' + 무작위 숫자 7자리)를 만들어 used에 넣고 반환
+## @brief 시트 안에서 겹치지 않는 answer_id('A' + 무작위 숫자 7자리)를 만들어 used에 넣고 반환
 # - 무작위인 이유: 채점자가 문항 순서나 작성자를 짐작하지 못하게 하기 위함
 # - 'A'로 시작하는 이유: 엑셀이 숫자처럼 보이는 id(예전 16진수 id의 1e5c3a20 → 지수 표기, 앞자리 0)를 바꾸지 못하게 하기 위함
 # - 예전 16진수 id 시트도 채점 도구가 그대로 읽음(문자열로만 비교)
@@ -35,7 +36,7 @@ def new_answer_id(used):
             return answer_id
 
 
-# 역할: 서술 문항마다 before·after 두 줄을 만들어 반환
+## @brief 서술 문항마다 before·after 두 줄을 만들어 반환
 # - concepts가 주어지면 그 개념의 문항만 고름
 def build_rows(items, concepts=None):
     chosen = [item for item in items if item.purpose == 'explanation' and (concepts is None or item.concept in concepts)]
@@ -47,7 +48,7 @@ def build_rows(items, concepts=None):
     return rows
 
 
-# 역할: 명령행 인자를 읽어 시트를 씀
+## @brief 명령행 인자를 읽어 시트를 씀
 # - --out이 ai-core/outputs/ 밖이면(../ 우회 포함) 파일을 만들지 않고 종료
 # - --concepts에 서술 문항이 없는 개념이 있으면 오타로 보고 종료; 조용히 빈 줄이 빠지는 일을 막음
 # - 이미 있는 파일은 덮어쓰지 않음; 채운 답 원문 보호(Git 밖이라 되살릴 수 없음)

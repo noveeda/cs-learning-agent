@@ -1,4 +1,5 @@
-# 파일 역할: 자료구조 개념 지도 데이터와, 진단 탐색이 의존하는 그래프 규칙의 거부 동작을 검증
+## @file
+# @brief 자료구조 개념 지도 데이터와, 진단 탐색이 의존하는 그래프 규칙의 거부 동작을 검증
 import unittest
 
 from pydantic import ValidationError
@@ -6,7 +7,7 @@ from pydantic import ValidationError
 from serving.concept_map import CONTENT_DIR, ConceptMap, load_concept_map
 
 
-# 역할: 규칙 검사용 최소 지도 생성; edges는 {개념: [선수 개념]}
+## @brief 규칙 검사용 최소 지도 생성; edges는 {개념: [선수 개념]}
 def build(edges, objective='예시를 설명할 수 있다.'):
     return {'id': 'test', 'title': '테스트', 'version': 1, 'status': 'draft', 'concepts': [
         {'id': cid, 'title': cid, 'description': cid, 'objectives': [objective],

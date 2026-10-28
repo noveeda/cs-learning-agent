@@ -1,4 +1,5 @@
-# 파일 역할: 묶음 2(트리·이진 트리·순회·BST·균형 BST) 문항의 구성을 검사하고, 단답 정답을 문항 속 트리를 실제로 만들어 독립 계산해 대조
+## @file
+# @brief 묶음 2(트리·이진 트리·순회·BST·균형 BST) 문항의 구성을 검사하고, 단답 정답을 문항 속 트리를 실제로 만들어 독립 계산해 대조
 import math
 import re
 import unittest
@@ -12,7 +13,7 @@ SCOPE = {'tree', 'binary-tree', 'tree-traversal', 'bst', 'balanced-bst'}
 EXTREME_WORDS = ('항상', '반드시', '절대', '전혀', '무조건')
 
 
-# 역할: 문항 속 "X(L,R)" 표기(-는 자식 없음)를 {노드: (왼쪽, 오른쪽)}과 루트로 바꿈; 적히지 않은 노드는 리프
+## @brief 문항 속 "X(L,R)" 표기(-는 자식 없음)를 {노드: (왼쪽, 오른쪽)}과 루트로 바꿈; 적히지 않은 노드는 리프
 def binary(text):
     pick = lambda v: None if v == '-' else int(v)
     tree = {int(n): (pick(l), pick(r)) for n, l, r in re.findall(r'(\d+)\((\d+|-),(\d+|-)\)', text)}
@@ -20,7 +21,7 @@ def binary(text):
     return tree, (set(tree) - children).pop()
 
 
-# 역할: 문항 속 "부모: 자식, 자식 / …" 표기를 {부모: [자식…]}로 바꿈; 루트는 누구의 자식도 아닌 노드
+## @brief 문항 속 "부모: 자식, 자식 / …" 표기를 {부모: [자식…]}로 바꿈; 루트는 누구의 자식도 아닌 노드
 def general(text):
     tree = {int(p): [int(c) for c in cs.split(', ')] for p, cs in re.findall(r'(\d+): (\d+(?:, \d+)*)', text)}
     children = {c for cs in tree.values() for c in cs}
@@ -45,12 +46,12 @@ def postorder(tree, node):
     return postorder(tree, left) + postorder(tree, right) + [node]
 
 
-# 역할: 간선 수로 센 높이; 빈 서브트리는 −1이라 리프의 높이가 0이 됨
+## @brief 간선 수로 센 높이; 빈 서브트리는 −1이라 리프의 높이가 0이 됨
 def height(tree, node):
     return -1 if node is None else 1 + max(height(tree, c) for c in kids(tree, node))
 
 
-# 역할: 루트를 1, 왼쪽 자식을 2i, 오른쪽 자식을 2i+1로 번호 매겨 1..n이 빈틈없이 채워졌는지로 완전·포화 여부 판단
+## @brief 루트를 1, 왼쪽 자식을 2i, 오른쪽 자식을 2i+1로 번호 매겨 1..n이 빈틈없이 채워졌는지로 완전·포화 여부 판단
 def complete_and_full(tree, root):
     numbers, stack = set(), [(root, 1)]
     while stack:
@@ -63,7 +64,7 @@ def complete_and_full(tree, root):
     return complete, complete and len(numbers) == 2 ** (height(tree, root) + 1) - 1
 
 
-# 역할: 일반 트리의 깊이(루트에서 간선 수)를 너비 우선으로 셈
+## @brief 일반 트리의 깊이(루트에서 간선 수)를 너비 우선으로 셈
 def depths(tree, root):
     found, queue = {root: 0}, deque([root])
     while queue:
@@ -78,7 +79,7 @@ def subtree_size(tree, node):
     return 1 + sum(subtree_size(tree, c) for c in tree.get(node, []))
 
 
-# 역할: BST 노드를 [키, 왼쪽, 오른쪽] 리스트로 두고 삽입·탐색 경로·삭제(자식 둘이면 오른쪽 서브트리 최솟값으로 대체)를 실제로 수행
+## @brief BST 노드를 [키, 왼쪽, 오른쪽] 리스트로 두고 삽입·탐색 경로·삭제(자식 둘이면 오른쪽 서브트리 최솟값으로 대체)를 실제로 수행
 def bst_insert(node, key):
     if node is None:
         return [key, None, None]
@@ -129,7 +130,7 @@ def bst_height(node):
     return -1 if node is None else 1 + max(bst_height(node[1]), bst_height(node[2]))
 
 
-# 역할: AVL 삽입; 삽입 뒤 높이 차가 2가 된 노드를 LL·RR·LR·RL 경우에 맞는 회전으로 되돌림
+## @brief AVL 삽입; 삽입 뒤 높이 차가 2가 된 노드를 LL·RR·LR·RL 경우에 맞는 회전으로 되돌림
 def rotate_right(node):
     top = node[1]
     node[1], top[2] = top[2], node
@@ -159,7 +160,7 @@ def avl_insert(node, key):
     return node
 
 
-# 역할: 정렬된 키를 가운데 값부터 넣어 높이가 가장 낮은 BST를 만드는 삽입 순서
+## @brief 정렬된 키를 가운데 값부터 넣어 높이가 가장 낮은 BST를 만드는 삽입 순서
 def median_first(keys):
     if not keys:
         return []
@@ -171,7 +172,7 @@ def join(values):
     return ','.join(str(v) for v in values)
 
 
-# 역할: 문항 ID → 정답 키와 별도로 계산한 기대 답
+## @brief 문항 ID → 정답 키와 별도로 계산한 기대 답
 def expected_answers(items):
     q = {item.id: item.question for item in items}
     leaf_tree, _ = general(q['tree-d1'])

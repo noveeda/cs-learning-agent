@@ -1,4 +1,5 @@
-# 파일 역할: 한국어 답 채점 도구(채점 시트·AI 채점·일치도)가 눈가림을 지키고, 채점자 수와 빈칸에 상관없이 지표를 바르게 내는지 검증
+## @file
+# @brief 한국어 답 채점 도구(채점 시트·AI 채점·일치도)가 눈가림을 지키고, 채점자 수와 빈칸에 상관없이 지표를 바르게 내는지 검증
 import csv
 import json
 import tempfile
@@ -13,7 +14,7 @@ from serving.stuck import LLMUnavailable
 ITEMS = load_item_bank()
 
 
-# 역할: MVP 2 답 시트 형식의 가짜 답; 개발자 답 8개(연습 5개를 빼도 3개 남음), 학생 답 4개, 빈 답 1개
+## @brief MVP 2 답 시트 형식의 가짜 답; 개발자 답 8개(연습 5개를 빼도 3개 남음), 학생 답 4개, 빈 답 1개
 def fake_answers():
     rows = []
     for n in range(13):
@@ -24,7 +25,7 @@ def fake_answers():
     return rows
 
 
-# 역할: 시트 행에 사람 판정을 채움; verdicts는 answer_id → 통과 여부, 요소 판정은 통과면 모두 1, 아니면 첫 요소만 0
+## @brief 시트 행에 사람 판정을 채움; verdicts는 answer_id → 통과 여부, 요소 판정은 통과면 모두 1, 아니면 첫 요소만 0
 def fill(rows, verdicts):
     for row in rows:
         if row['answer_id'] in verdicts:
@@ -144,7 +145,7 @@ def write_csv(path, rows, encoding):
 
 
 class ExcelSafetyTests(unittest.TestCase):
-    # 역할: 실제 ai-core/outputs/ 안 임시 폴더를 씀; 명령행 도구가 outputs 밖 경로를 거부하기 때문
+    ## @brief 실제 ai-core/outputs/ 안 임시 폴더를 씀; 명령행 도구가 outputs 밖 경로를 거부하기 때문
     def setUp(self):
         grading_sheet.OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
         self.tmp = tempfile.TemporaryDirectory(dir=grading_sheet.OUTPUT_ROOT)
@@ -196,7 +197,7 @@ class ExcelSafetyTests(unittest.TestCase):
 
 
 class AiGradeTests(unittest.TestCase):
-    # 역할: 운영 Gateway 대신 루브릭 길이에 맞춘 판정을 돌려주는 가짜; fail에 든 답 내용이면 첫 요소 미충족, broken이면 모델 실패
+    ## @brief 운영 Gateway 대신 루브릭 길이에 맞춘 판정을 돌려주는 가짜; fail에 든 답 내용이면 첫 요소 미충족, broken이면 모델 실패
     class FakeGateway:
         def __init__(self, fail=(), broken=()):
             self.fail, self.broken, self.calls = set(fail), set(broken), []

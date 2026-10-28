@@ -1,4 +1,5 @@
-# 파일 역할: 비교 실험 자료(backend/src/main/resources/experiment/materials.json)의 형식·ID 규칙·문항 수를 검사하고,
+## @file
+# @brief 비교 실험 자료(backend/src/main/resources/experiment/materials.json)의 형식·ID 규칙·문항 수를 검사하고,
 # 단답 정답을 문항 내용으로부터 독립 계산해 대조하며, 문항 은행·CS-300과 겹치는 문항이 없는지 확인
 # - 자료는 Spring 리소스지만 Java 로더(실험 Task 2)와 따로 이 파일로 먼저 검증함
 import json
@@ -43,12 +44,12 @@ def numbers_in(text):
     return [int(v) for v in re.findall(r'-?\d+', text)]
 
 
-# 역할: 문항 속 "[1,2,3]" 꼴 배열을 읽음; 정답 계산이 문항 본문과 어긋나지 않게 하기 위함
+## @brief 문항 속 "[1,2,3]" 꼴 배열을 읽음; 정답 계산이 문항 본문과 어긋나지 않게 하기 위함
 def array_in(question):
     return [int(v) for v in re.search(r'\[([\d,]+)\]', question).group(1).split(',')]
 
 
-# 역할: "키 a, b, c를(을)" 꼴 키 목록과 "mod m"의 m을 읽어 체이닝 버킷 길이 목록 반환
+## @brief "키 a, b, c를(을)" 꼴 키 목록과 "mod m"의 m을 읽어 체이닝 버킷 길이 목록 반환
 def chain_lengths(question):
     keys = [int(v) for v in re.search(r'키 ([\d, ]+)[을를]', question).group(1).split(', ')]
     m = int(re.search(r'mod (\d+)', question).group(1))
@@ -56,7 +57,7 @@ def chain_lengths(question):
     return [buckets[b] for b in range(m)]
 
 
-# 역할: BST를 반복문으로 만듦(정렬된 키 1,023개도 재귀 깊이 걱정 없이); 노드는 [키, 왼쪽, 오른쪽]
+## @brief BST를 반복문으로 만듦(정렬된 키 1,023개도 재귀 깊이 걱정 없이); 노드는 [키, 왼쪽, 오른쪽]
 def bst(keys):
     root = None
     for key in keys:
@@ -82,7 +83,7 @@ def leaves(node):
     return leaves(node[1]) + leaves(node[2])
 
 
-# 역할: 키 key를 찾을 때 비교하는 노드 수(없는 키면 빈 자리에 닿을 때까지)
+## @brief 키 key를 찾을 때 비교하는 노드 수(없는 키면 빈 자리에 닿을 때까지)
 def comparisons(root, key):
     count, cur = 0, root
     while cur is not None:
@@ -100,7 +101,7 @@ def median_first(keys):
     return [keys[mid]] + median_first(keys[:mid]) + median_first(keys[mid + 1:])
 
 
-# 역할: 최소 힙에 넣고 위로 재정렬; (부모와 바꾼 횟수, 최종 인덱스) 반환
+## @brief 최소 힙에 넣고 위로 재정렬; (부모와 바꾼 횟수, 최종 인덱스) 반환
 def heap_push(heap, value):
     heap = heap + [value]
     i, swaps = len(heap) - 1, 0
@@ -110,7 +111,7 @@ def heap_push(heap, value):
     return swaps, i
 
 
-# 역할: 완전 이진 트리를 위층·왼쪽부터 채우는 규칙만으로 {자식: 부모}를 만듦(부모 공식을 쓰지 않고 확인하기 위함)
+## @brief 완전 이진 트리를 위층·왼쪽부터 채우는 규칙만으로 {자식: 부모}를 만듦(부모 공식을 쓰지 않고 확인하기 위함)
 def parents(n):
     found, waiting, nxt = {}, deque([0]), 1
     while nxt < n:
@@ -123,7 +124,7 @@ def parents(n):
     return found
 
 
-# 역할: 로무토 분할(마지막 원소가 피벗, 피벗보다 작은 원소를 앞으로 모음); (분할 뒤 배열, 피벗 위치) 반환
+## @brief 로무토 분할(마지막 원소가 피벗, 피벗보다 작은 원소를 앞으로 모음); (분할 뒤 배열, 피벗 위치) 반환
 def lomuto(values):
     values, pivot, boundary = list(values), values[-1], 0
     for j in range(len(values) - 1):
@@ -144,7 +145,7 @@ def merge_sort(values):
     return merged + left + right
 
 
-# 역할: 문항 속 무방향 간선 "a-b"로 BFS(이웃은 작은 번호부터, 큐에 넣을 때 방문 표시); {정점: (부모, 거리)}
+## @brief 문항 속 무방향 간선 "a-b"로 BFS(이웃은 작은 번호부터, 큐에 넣을 때 방문 표시); {정점: (부모, 거리)}
 def bfs(question, start):
     adjacency = {}
     for a, b in re.findall(r'(\d+)-(\d+)', question):
@@ -164,20 +165,20 @@ def directed_edges(text):
     return [(int(a), int(b)) for a, b in re.findall(r'(\d+)→(\d+)', text)]
 
 
-# 역할: 정점 순열을 모두 시도해 모든 간선 방향을 지키는 순서(위상 순서)의 개수를 셈
+## @brief 정점 순열을 모두 시도해 모든 간선 방향을 지키는 순서(위상 순서)의 개수를 셈
 def topological_orders(edges):
     vertices = sorted({v for e in edges for v in e})
     return sum(all(order.index(a) < order.index(b) for a, b in edges) for order in permutations(vertices))
 
 
-# 역할: 한 번에 오를 수 있는 칸 수의 순서열을 모두 나열해 n칸을 오르는 방법 수를 셈(점화식 표를 쓰지 않음)
+## @brief 한 번에 오를 수 있는 칸 수의 순서열을 모두 나열해 n칸을 오르는 방법 수를 셈(점화식 표를 쓰지 않음)
 def stair_ways(steps, n):
     if n == 0:
         return 1
     return sum(stair_ways(steps, n - s) for s in steps if s <= n)
 
 
-# 역할: 문항 ID → 정답 키와 별도로 계산한 기대 답
+## @brief 문항 ID → 정답 키와 별도로 계산한 기대 답
 def expected_answers(items):
     q = {item['id']: item['question'] for item in items}
     ha, hb = chain_lengths(q['exp-hash-table-A1']), chain_lengths(q['exp-hash-table-B1'])
@@ -207,7 +208,7 @@ def expected_answers(items):
     }
 
 
-# 역할: 선택형 중 계산으로 정답을 확인할 수 있는 문항의 기대 정답 보기 문자열
+## @brief 선택형 중 계산으로 정답을 확인할 수 있는 문항의 기대 정답 보기 문자열
 def expected_choices():
     sorted_tree, low_tree = bst(range(1, 1024)), bst(median_first(list(range(1, 1024))))
     absent = [k + 0.5 for k in range(0, 1024)]  # 키 사이의 없는 값을 모두 시도

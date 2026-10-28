@@ -1,4 +1,5 @@
-# 파일 역할: 묶음 5(위상 정렬·최단 경로·탐욕법·최소 신장 트리·동적 계획법) 문항의 구성을 검사하고, 단답 정답을 알고리즘을 실제로 돌려 독립 계산해 대조
+## @file
+# @brief 묶음 5(위상 정렬·최단 경로·탐욕법·최소 신장 트리·동적 계획법) 문항의 구성을 검사하고, 단답 정답을 알고리즘을 실제로 돌려 독립 계산해 대조
 import math
 import re
 import unittest
@@ -13,13 +14,13 @@ SCOPE = {'topological-sort', 'shortest-path', 'greedy', 'mst', 'dynamic-programm
 EXTREME_WORDS = ('항상', '반드시', '절대', '전혀', '무조건')
 
 
-# 역할: 문항 속 간선 표기를 (a, b, 가중치) 목록으로 읽음; "a→b"는 방향, "a-b"는 무방향, ":w"가 없으면 가중치 None
+## @brief 문항 속 간선 표기를 (a, b, 가중치) 목록으로 읽음; "a→b"는 방향, "a-b"는 무방향, ":w"가 없으면 가중치 None
 def edges(question):
     return [(int(a), int(b), None if w == '' else int(w))
             for a, _, b, w in re.findall(r'(\d+)(-|→)(\d+)(?::(-?\d+))?', question)]
 
 
-# 역할: 진입 차수와 큐로 위상 정렬(진입 차수 0인 정점은 작은 번호부터, 이웃도 작은 번호부터 처리); 꺼낸 순서와 끝까지 남은 정점 반환
+## @brief 진입 차수와 큐로 위상 정렬(진입 차수 0인 정점은 작은 번호부터, 이웃도 작은 번호부터 처리); 꺼낸 순서와 끝까지 남은 정점 반환
 def kahn(pairs):
     vertices = sorted({v for a, b, _ in pairs for v in (a, b)})
     indegree = {v: 0 for v in vertices}
@@ -38,7 +39,7 @@ def kahn(pairs):
     return order, [v for v in vertices if v not in order]
 
 
-# 역할: 다익스트라; 확정되지 않은 정점 중 거리가 가장 작은 것(같으면 작은 번호)을 확정하고, 확정된 정점은 다시 갱신하지 않음
+## @brief 다익스트라; 확정되지 않은 정점 중 거리가 가장 작은 것(같으면 작은 번호)을 확정하고, 확정된 정점은 다시 갱신하지 않음
 # - confirmed만큼 확정한 직후의 거리 표를 반환해 중간 상태 문항도 계산함
 def dijkstra(pairs, start, confirmed=None):
     vertices = sorted({v for a, b, _ in pairs for v in (a, b)})
@@ -55,7 +56,7 @@ def dijkstra(pairs, start, confirmed=None):
     return distance
 
 
-# 역할: 벨만-포드로 음의 간선이 있어도 맞는 최단 거리; 다익스트라 결과와 비교할 기준
+## @brief 벨만-포드로 음의 간선이 있어도 맞는 최단 거리; 다익스트라 결과와 비교할 기준
 def bellman_ford(pairs, start):
     vertices = {v for a, b, _ in pairs for v in (a, b)}
     distance = {v: math.inf for v in vertices}
@@ -66,7 +67,7 @@ def bellman_ford(pairs, start):
     return distance
 
 
-# 역할: 끝나는 시각이 빠른 회의부터 겹치지 않게 고름(앞 회의가 끝나는 시각에 시작해도 됨)
+## @brief 끝나는 시각이 빠른 회의부터 겹치지 않게 고름(앞 회의가 끝나는 시각에 시작해도 됨)
 def earliest_end(meetings):
     chosen, end = [], -math.inf
     for start, finish in sorted(meetings, key=lambda m: m[1]):
@@ -80,7 +81,7 @@ def meetings_in(question):
     return [(int(s), int(e)) for s, e in re.findall(r'\((\d+),\s?(\d+)\)', question)]
 
 
-# 역할: 큰 동전부터 고르는 탐욕 거스름돈의 동전 수와, 동적 계획법으로 구한 최소 동전 수
+## @brief 큰 동전부터 고르는 탐욕 거스름돈의 동전 수와, 동적 계획법으로 구한 최소 동전 수
 def greedy_coins(coins, amount):
     count = 0
     for coin in sorted(coins, reverse=True):
@@ -95,7 +96,7 @@ def fewest_coins(coins, amount):
     return best[amount]
 
 
-# 역할: 서로소 집합으로 크루스칼; 가중치 작은 간선부터 사이클을 만들지 않는 것만 고름
+## @brief 서로소 집합으로 크루스칼; 가중치 작은 간선부터 사이클을 만들지 않는 것만 고름
 def kruskal(pairs):
     parent = {}
 
@@ -112,7 +113,7 @@ def kruskal(pairs):
     return chosen
 
 
-# 역할: 프림; 이미 이어진 정점들에서 나가는 가장 가벼운 간선으로 새 정점을 하나씩 붙임
+## @brief 프림; 이미 이어진 정점들에서 나가는 가장 가벼운 간선으로 새 정점을 하나씩 붙임
 def prim(pairs, start):
     joined = [start]
     vertices = {v for a, b, _ in pairs for v in (a, b)}
@@ -122,7 +123,7 @@ def prim(pairs, start):
     return joined
 
 
-# 역할: 리프(차수 1 이하)를 반복해 지워 사이클 위 정점만 남김(2-코어)
+## @brief 리프(차수 1 이하)를 반복해 지워 사이클 위 정점만 남김(2-코어)
 def cycle_vertices(pairs):
     alive = [(a, b) for a, b, _ in pairs]
     while True:
@@ -133,7 +134,7 @@ def cycle_vertices(pairs):
         alive = [e for e in alive if not set(e) & leaves]
 
 
-# 역할: 문항 첫 줄 뒤의 코드를 실제로 정의하고 fib 호출을 감싸 인자별 호출 횟수를 셈
+## @brief 문항 첫 줄 뒤의 코드를 실제로 정의하고 fib 호출을 감싸 인자별 호출 횟수를 셈
 def fib_calls(question, n):
     scope = {}
     exec(question.split('\n', 1)[1], scope)
@@ -147,7 +148,7 @@ def fib_calls(question, n):
     return calls
 
 
-# 역할: 오른쪽·아래로만 움직이는 경로를 모두 나열해 막힌 칸을 피하는 것만 셈; 점화식 표를 쓰지 않고 정답을 확인하기 위함
+## @brief 오른쪽·아래로만 움직이는 경로를 모두 나열해 막힌 칸을 피하는 것만 셈; 점화식 표를 쓰지 않고 정답을 확인하기 위함
 def grid_paths(row, col, blocked):
     total = 0
     for downs in combinations(range(row + col), row):
@@ -164,7 +165,7 @@ def join(values):
     return ','.join(str(v) for v in values)
 
 
-# 역할: 문항 ID → 정답 키와 별도로 계산한 기대 답
+## @brief 문항 ID → 정답 키와 별도로 계산한 기대 답
 def expected_answers(items):
     q = {item.id: item.question for item in items}
     popped, left = kahn(edges(q['topological-sort-c2']))

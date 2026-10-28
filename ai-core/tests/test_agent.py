@@ -1,4 +1,5 @@
-# 파일 역할: 모델 응답을 모사해 도구 결과 전달·스트리밍 순서·잘린 호출 실행 방지·애니메이션 도구 분기를 검증
+## @file
+# @brief 모델 응답을 모사해 도구 결과 전달·스트리밍 순서·잘린 호출 실행 방지·애니메이션 도구 분기를 검증
 import json
 import tempfile
 import unittest
@@ -13,20 +14,20 @@ from serving.animation.model import AnimationRequestModel
 from serving.context import token_counter
 
 
-# 역할: 모델 스트림의 텍스트·도구·종료 사유 조각 구성
+## @brief 모델 스트림의 텍스트·도구·종료 사유 조각 구성
 def chunk(text=None, calls=None, finish=None):
     return SimpleNamespace(choices=[SimpleNamespace(
         delta=SimpleNamespace(content=text, tool_calls=calls), finish_reason=finish)])
 
 
-# 역할: 컨텍스트 매니저로 사용되는 가짜 모델 스트림 구성
+## @brief 컨텍스트 매니저로 사용되는 가짜 모델 스트림 구성
 def stream(chunks):
     result = MagicMock()
     result.__enter__.return_value = iter(chunks)
     return result
 
 
-# 역할: 완성된 메시지를 테스트에서 사용할 스트리밍 응답 형태로 변환
+## @brief 완성된 메시지를 테스트에서 사용할 스트리밍 응답 형태로 변환
 def response(message):
     calls = []
     for i, call in enumerate(message.tool_calls or []):
@@ -126,7 +127,7 @@ class AgentTests(unittest.TestCase):
             list(events)
 
 
-# 역할: 가짜 모델이 지정 도구를 한 번 부르고, 다음 턴에 텍스트로 끝내는 클라이언트 구성
+## @brief 가짜 모델이 지정 도구를 한 번 부르고, 다음 턴에 텍스트로 끝내는 클라이언트 구성
 def tool_then_text(name, arguments):
     call = ChatCompletionMessage(role='assistant', tool_calls=[{
         'id': 'call_1', 'type': 'function', 'function': {'name': name, 'arguments': arguments}}])

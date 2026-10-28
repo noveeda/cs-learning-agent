@@ -1,4 +1,5 @@
-# 파일 역할: 가짜 모델 응답으로 단계 전환·압축·분할·재개·검토 반복 중단을 검증
+## @file
+# @brief 가짜 모델 응답으로 단계 전환·압축·분할·재개·검토 반복 중단을 검증
 import json
 import unittest
 from types import SimpleNamespace
@@ -15,12 +16,12 @@ LESSONS = [Lesson(title=t, objectives=[t + '을 설명한다']) for t in PLAN.to
 DRAFT = UnitContent(lessons=[Objectives(objectives=l.objectives) for l in LESSONS])
 
 
-# 역할: 테스트 간 상태 공유를 피하도록 기본 단원 계획을 깊은 복사
+## @brief 테스트 간 상태 공유를 피하도록 기본 단원 계획을 깊은 복사
 def unit(id='u1'):
     return Unit(id=id, plan=PLAN.model_copy(deep=True))
 
 
-# 역할: 모델 호출 순서를 기록하고 준비된 응답 또는 예외를 차례대로 반환
+## @brief 모델 호출 순서를 기록하고 준비된 응답 또는 예외를 차례대로 반환
 class FakeGateway:
     def __init__(self, *results):
         self.results = list(results)
@@ -192,7 +193,7 @@ class CurriculumTests(unittest.TestCase):
         guard.feed(valid)
         self.assertEqual(guard.text, valid)
 
-    # 역할: 요청과 스트림 종료 호출을 관찰할 수 있는 가짜 게이트웨이 구성
+    ## @brief 요청과 스트림 종료 호출을 관찰할 수 있는 가짜 게이트웨이 구성
     def review_gateway(self, chunks):
         client, http = Mock(), Mock()
         stream = Mock()
@@ -202,7 +203,7 @@ class CurriculumTests(unittest.TestCase):
         http.post.return_value = Mock(json=lambda: {'count': 100})
         return ModelGateway(client, http, 'model', 32768), stream
 
-    # 역할: 검토 스트림의 텍스트·종료 사유·사용량을 가진 이벤트 생성
+    ## @brief 검토 스트림의 텍스트·종료 사유·사용량을 가진 이벤트 생성
     def chunk(self, text='', finish=None, usage=None):
         return SimpleNamespace(usage=usage, choices=[SimpleNamespace(
             delta=SimpleNamespace(content=text), finish_reason=finish)])

@@ -1,4 +1,5 @@
-# 파일 역할: 한국어 서술 답을 운영 채점 경로(StuckModelGateway.grade_explanation)로 채점해 사람 라벨과 비교할 AI 판정을 만듦
+## @file
+# @brief 한국어 서술 답을 운영 채점 경로(StuckModelGateway.grade_explanation)로 채점해 사람 라벨과 비교할 AI 판정을 만듦
 # - 판정 규칙은 막힘 흐름 확인 단계와 같음: 루브릭 요소가 모두 충족이어야 통과
 # - 운영 모델(8000)에 하나씩 보내고, 결과를 한 줄씩 이어 써서 중단돼도 다음 실행이 남은 답만 채점
 """Grade collected Korean answers with the production rubric grader (resumable)."""
@@ -24,7 +25,7 @@ from serving.stuck_llm import StuckModelGateway  # noqa: E402
 AI_COLUMNS = ('answer_id', *(f'met_{k}' for k in range(1, RUBRIC_SLOTS + 1)), 'overall_pass')
 
 
-# 역할: 답들을 하나씩 채점해 (결과 행 목록, 모델 실패 answer_id 목록) 반환
+## @brief 답들을 하나씩 채점해 (결과 행 목록, 모델 실패 answer_id 목록) 반환
 # - done: 이미 결과에 있는 answer_id; 다시 부르지 않음(재개)
 # - 모델 실패(LLMUnavailable) 답은 결과에 쓰지 않고 따로 돌려줌; 다음 실행에서 다시 채점되게 하기 위함
 # - met_k는 1·0, 루브릭이 없는 칸은 빈칸
@@ -47,7 +48,7 @@ def grade_answers(answers, items, gateway, done=frozenset()):
     return rows, failed
 
 
-# 역할: 명령행 실행; 결과 CSV가 있으면 이어서 채점하고, 새 결과는 다 모은 뒤가 아니라 한 줄씩 덧붙임
+## @brief 명령행 실행; 결과 CSV가 있으면 이어서 채점하고, 새 결과는 다 모은 뒤가 아니라 한 줄씩 덧붙임
 def main(argv=None):
     parser = argparse.ArgumentParser(description='한국어 서술 답 AI 채점(운영 채점 경로, 순차)')
     parser.add_argument('--answers', nargs='+', required=True, type=Path, help='MVP 2 답 시트 CSV')

@@ -1,4 +1,5 @@
-# 파일 역할: CPU 스케줄링 간트 차트 장면이 손으로 계산한 교과서 예제와 같은 순서·대기 시간을 그리는지,
+## @file
+# @brief CPU 스케줄링 간트 차트 장면이 손으로 계산한 교과서 예제와 같은 순서·대기 시간을 그리는지,
 # 동점·유휴 구간 규칙을 지키는지, 그릴 수 없는 입력을 거부하는지, 장면 선택 LLM 경로에 형식이 들어가는지 검증
 # - 기대값은 시뮬레이터를 거치지 않고 손으로 계산해 적음: 코드와 같은 실수를 테스트가 따라 하지 않게 하기 위함
 # - 동점 규칙(MVP 4 계획 Review Focus 2): 도착 시각 → 프로세스 이름 순. RR에서 같은 시각이면 새 도착이 할당량이 끝난 프로세스보다 먼저 큐에 들어감
@@ -11,7 +12,7 @@ from serving.animation import SCENE_FORMATS, check_limits, create_animation, sce
 from serving.animation.model import MAX_FRAMES, AnimationRequestModel
 
 
-# 역할: 프로세스 목록 축약. (이름, 도착, 실행[, 우선순위]) 튜플을 요청 dict로
+## @brief 프로세스 목록 축약. (이름, 도착, 실행[, 우선순위]) 튜플을 요청 dict로
 def procs(*rows):
     return [dict(zip(('name', 'arrival', 'burst', 'priority'), row)) for row in rows]
 
@@ -23,12 +24,12 @@ def run(algorithm, processes, quantum=None):
     return simulate(AnimationRequestModel.model_validate(request).root)
 
 
-# 역할: 마지막 프레임의 간트 줄(y=1 cell)을 x 순서대로 읽음
+## @brief 마지막 프레임의 간트 줄(y=1 cell)을 x 순서대로 읽음
 def gantt(animation):
     return [b.label for b in sorted((b for b in animation.frames[-1].boxes if b.y == 1), key=lambda b: b.x)]
 
 
-# 역할: 마지막 프레임의 대기 시간 줄(y=6 label, 'P1 대기 4')을 {이름: 대기 시간}으로 읽음
+## @brief 마지막 프레임의 대기 시간 줄(y=6 label, 'P1 대기 4')을 {이름: 대기 시간}으로 읽음
 def waits(animation):
     rows = (b.label.split() for b in animation.frames[-1].boxes if b.y == 6)
     return {name: int(value) for name, _, value in rows}

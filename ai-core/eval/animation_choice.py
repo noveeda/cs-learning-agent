@@ -1,4 +1,5 @@
-# 파일 역할: 막힘 보충(S4)의 장면 선택(choose_animation → simulate)을 실제 모델로 반복 실행해 성공률·실패 원인·지연을 측정
+## @file
+# @brief 막힘 보충(S4)의 장면 선택(choose_animation → simulate)을 실제 모델로 반복 실행해 성공률·실패 원인·지연을 측정
 # - 장면 목록(CONCEPT_SCENES)의 개념마다 로드맵 진입 1개와 붙여넣기 진입 1개를 만들어 --runs 회 시도
 # - 결과 원본은 git-ignored 폴더(ai-core/outputs/eval/)에만 쓰고, PR·발표에는 요약만 옮김
 """Measure how often the stuck-flow scene chooser yields a runnable animation."""
@@ -34,7 +35,7 @@ EVAL_ROOT = AI_CORE / 'outputs' / 'eval'
 OUTCOMES = ('success', 'null', 'schema_failure', 'simulation_failure')
 
 
-# 역할: 개념 하나의 측정용 진입 두 가지를 만듦
+## @brief 개념 하나의 측정용 진입 두 가지를 만듦
 # - 로드맵: 학습자가 그 개념 화면에서 막힘을 누른 경우
 # - 붙여넣기: 개념 설명 문장을 붙여넣은 경우(문항·정답은 쓰지 않음)
 def entries_for(concept):
@@ -42,7 +43,7 @@ def entries_for(concept):
             ('excerpt', Entry(kind='excerpt', excerpt=f'{concept.description} 이 부분이 이해가 안 돼요.', return_to='/measure'))]
 
 
-# 역할: 한 번의 장면 선택 동안 Gateway가 남기는 경고(재시도 원인)를 모음; 스키마 실패의 원인을 결과에 남기기 위함
+## @brief 한 번의 장면 선택 동안 Gateway가 남기는 경고(재시도 원인)를 모음; 스키마 실패의 원인을 결과에 남기기 위함
 class _Warnings(logging.Handler):
     def __init__(self):
         super().__init__(logging.WARNING)
@@ -52,7 +53,7 @@ class _Warnings(logging.Handler):
         self.messages.append(record.getMessage()[:300])
 
 
-# 역할: 장면 선택을 차례로 실행하고 시도마다 분류·지연·고른 요청·오류를 담은 결과 목록을 반환
+## @brief 장면 선택을 차례로 실행하고 시도마다 분류·지연·고른 요청·오류를 담은 결과 목록을 반환
 # - 요청은 하나씩 보냄: 운영 서버(--max-num-seqs 1)와 GPU를 같이 쓰므로 동시에 보내지 않음
 # - progress: 시도마다 한 줄을 받는 함수(명령행에서는 print)
 def measure(gateway, runs, concepts=None, concept_map=None, progress=None):
@@ -90,7 +91,7 @@ def measure(gateway, runs, concepts=None, concept_map=None, progress=None):
     return results
 
 
-# 역할: 결과 목록을 네 분류 개수·전체 성공률·장면 종류별 성공률·평균·최대 지연으로 집계
+## @brief 결과 목록을 네 분류 개수·전체 성공률·장면 종류별 성공률·평균·최대 지연으로 집계
 def summarize(results):
     total = len(results)
     counts = {outcome: sum(1 for r in results if r['outcome'] == outcome) for outcome in OUTCOMES}
@@ -109,7 +110,7 @@ def summarize(results):
             'seconds_max': max(seconds) if seconds else 0.0}
 
 
-# 역할: 명령행 인자를 읽어 측정하고 결과 JSON을 씀
+## @brief 명령행 인자를 읽어 측정하고 결과 JSON을 씀
 # - --out이 ai-core/outputs/eval/ 밖이거나 이미 있으면 모델을 부르기 전에 종료(결과 원본 보호, Git 유입 방지)
 # - 시작 전에 모델 목록을 한 번 조회해 서버가 없으면 종료: 연결 실패를 스키마 실패로 잘못 세지 않기 위함
 def main(argv=None):

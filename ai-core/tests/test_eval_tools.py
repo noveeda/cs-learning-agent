@@ -1,4 +1,5 @@
-# 파일 역할: 측정 도구(한국어 답 수집 시트, 장면 선택 성공률)가 채점 기준을 숨기고, 결과를 Git 밖에만 쓰며, 결과를 바르게 분류·집계하는지 검증
+## @file
+# @brief 측정 도구(한국어 답 수집 시트, 장면 선택 성공률)가 채점 기준을 숨기고, 결과를 Git 밖에만 쓰며, 결과를 바르게 분류·집계하는지 검증
 import csv
 import re
 import tempfile
@@ -14,14 +15,14 @@ from serving.stuck import LLMUnavailable
 EXPLANATIONS = [item for item in load_item_bank() if item.purpose == 'explanation']
 
 
-# 역할: 시트 파일을 BOM을 뗀 UTF-8로 읽어 행 목록 반환
+## @brief 시트 파일을 BOM을 뗀 UTF-8로 읽어 행 목록 반환
 def read_sheet(path):
     with open(path, encoding='utf-8-sig', newline='') as file:
         return list(csv.DictReader(file))
 
 
 class AnswerSheetTest(unittest.TestCase):
-    # 역할: 실제 ai-core/outputs/ 안 임시 폴더에 시트를 만들고 끝나면 지움; 테스트가 outputs 밖 경로를 쓰지 않게 함
+    ## @brief 실제 ai-core/outputs/ 안 임시 폴더에 시트를 만들고 끝나면 지움; 테스트가 outputs 밖 경로를 쓰지 않게 함
     def setUp(self):
         answer_sheet.OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
         self.tmp = tempfile.TemporaryDirectory(dir=answer_sheet.OUTPUT_ROOT)
@@ -107,7 +108,7 @@ class AnswerSheetTest(unittest.TestCase):
 
 
 
-# 역할: 장면 선택 가짜 Gateway; 개념마다 정한 행동(장면 dict·None·예외)을 돌려주고 받은 입력을 기록
+## @brief 장면 선택 가짜 Gateway; 개념마다 정한 행동(장면 dict·None·예외)을 돌려주고 받은 입력을 기록
 class FakeChooser:
     def __init__(self, behaviors):
         self.behaviors, self.calls = behaviors, []

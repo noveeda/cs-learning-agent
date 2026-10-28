@@ -1,4 +1,5 @@
-# 파일 역할: 선형 구조 문항 은행의 구성·스키마 거부 동작과, 단답 정답을 문항 내용으로부터 독립 계산해 대조
+## @file
+# @brief 선형 구조 문항 은행의 구성·스키마 거부 동작과, 단답 정답을 문항 내용으로부터 독립 계산해 대조
 import json
 import math
 import re
@@ -18,7 +19,7 @@ LINEAR_SCOPE = {'memory-address', 'reference', 'logarithm', 'big-o', 'complexity
 CS300 = Path(__file__).resolve().parents[2] / 'codex' / 'model-evaluation' / 'cs-300-v1' / 'questions.jsonl'
 
 
-# 역할: 문항 본문의 연산 열("P1 P5 X" 또는 "E3 D")을 그대로 실행해 꺼낸 값과 남은 원소 반환
+## @brief 문항 본문의 연산 열("P1 P5 X" 또는 "E3 D")을 그대로 실행해 꺼낸 값과 남은 원소 반환
 # - 연산 열은 콜론 뒤부터 기호 설명 괄호 앞까지만 읽어, 안내 문장 속 단어를 연산으로 오인하지 않게 함
 def run_container(question, lifo):
     box, removed = [], []
@@ -30,14 +31,14 @@ def run_container(question, lifo):
     return removed, box
 
 
-# 역할: 문항 본문의 코드 조각을 실제로 실행해 count 값 반환; 손 계산 실수를 막기 위함
+## @brief 문항 본문의 코드 조각을 실제로 실행해 count 값 반환; 손 계산 실수를 막기 위함
 def run_snippet(question, n):
     scope = {'n': n, 'count': 0}
     exec(question.split('\n', 1)[1], {}, scope)
     return scope['count']
 
 
-# 역할: 빈 동적 배열에 k개를 추가하며 재할당 횟수와 복사한 원소 수 합계를 셈
+## @brief 빈 동적 배열에 k개를 추가하며 재할당 횟수와 복사한 원소 수 합계를 셈
 def grow(k, policy, capacity=1):
     size, reallocations, copies = 0, 0, 0
     for _ in range(k):
@@ -47,7 +48,7 @@ def grow(k, policy, capacity=1):
     return reallocations, copies
 
 
-# 역할: {칸: (값, next)} 메모리 표에서 head부터 next를 따라가며 방문한 값 목록 반환
+## @brief {칸: (값, next)} 메모리 표에서 head부터 next를 따라가며 방문한 값 목록 반환
 def follow(table, head, steps=None):
     values, cell = [], head
     while cell is not None and (steps is None or len(values) <= steps):
@@ -56,7 +57,7 @@ def follow(table, head, steps=None):
     return values
 
 
-# 역할: 단일 연결 리스트 노드를 참조로 이어 붙여 삽입·삭제를 실제로 수행
+## @brief 단일 연결 리스트 노드를 참조로 이어 붙여 삽입·삭제를 실제로 수행
 class Node:
     def __init__(self, value, next=None):
         self.value, self.next = value, next
@@ -81,7 +82,7 @@ def join(values):
     return ','.join(str(v) for v in values)
 
 
-# 역할: 연결 리스트에서 head부터 next를 따라가 index 노드에 닿을 때까지의 이동 횟수
+## @brief 연결 리스트에서 head부터 next를 따라가 index 노드에 닿을 때까지의 이동 횟수
 def steps_to(head, index):
     steps = 0
     while steps < index:
@@ -89,7 +90,7 @@ def steps_to(head, index):
     return steps
 
 
-# 역할: 순차 탐색을 실제로 돌려 비교 횟수를 셈
+## @brief 순차 탐색을 실제로 돌려 비교 횟수를 셈
 def comparisons(values, target):
     count = 0
     for value in values:
@@ -99,7 +100,7 @@ def comparisons(values, target):
     return count
 
 
-# 역할: 문항 ID → 정답 키와 별도로 계산한 기대 답
+## @brief 문항 ID → 정답 키와 별도로 계산한 기대 답
 def expected_answers(items):
     q = {item.id: item.question for item in items}
     ll = build_list([7, 3, 9, 5])

@@ -1,4 +1,5 @@
-# 파일 역할: 사람 채점 시트와 AI 판정을 모아 채점 일치도 보고서(M3)를 만듦
+## @file
+# @brief 사람 채점 시트와 AI 판정을 모아 채점 일치도 보고서(M3)를 만듦
 # - 사람 라벨: 채점자 2명이면 사람 간 kappa와 합의 라벨, 1명이면 재채점으로 채점자 내 kappa
 # - AI 대 최종 라벨: kappa, 거짓 통과율(사람 미통과 중 AI 통과)과 Wilson 95% 구간을 학생 답·개발자 답·전체로 나눠 냄(설계 2-4)
 # - 지표 정의는 eval/metrics.py 하나만 씀(Mohler 개발 검증과 같은 계산)
@@ -28,7 +29,7 @@ def _flag(value):
     return True if value == '1' else False if value == '0' else None
 
 
-# 역할: 시트 행에서 채점이 끝난 답의 판정만 모음 {answer_id: {'overall': bool, 'met': [bool|None]*4}}
+## @brief 시트 행에서 채점이 끝난 답의 판정만 모음 {answer_id: {'overall': bool, 'met': [bool|None]*4}}
 # - 연습 답과 전체 판정(overall_pass)이 빈칸인 답은 빼서, 덜 채운 시트도 계산을 깨지 않게 함
 def labels(rows):
     found = {}
@@ -41,7 +42,7 @@ def labels(rows):
     return found
 
 
-# 역할: 두 판정 묶음의 공통 답에서 전체 판정 kappa·일치율과 요소 단위 kappa(두 쪽 모두 적은 칸만)를 계산
+## @brief 두 판정 묶음의 공통 답에서 전체 판정 kappa·일치율과 요소 단위 kappa(두 쪽 모두 적은 칸만)를 계산
 # - 일치율을 함께 내는 이유: 판정이 한 범주로 쏠리면 kappa가 부풀거나 0으로 떨어져 kappa만으로는 읽기 어려움
 def _compare(first, second):
     common = sorted(set(first) & set(second))
@@ -55,7 +56,7 @@ def _compare(first, second):
     return result, common
 
 
-# 역할: 한 묶음(학생·개발자·전체)의 AI 대 최종 라벨 지표
+## @brief 한 묶음(학생·개발자·전체)의 AI 대 최종 라벨 지표
 # - 거짓 통과율: 사람이 미통과로 본 답 중 AI가 통과시킨 비율; 학습자가 이해하지 못했는데 넘어가는 위험을 잼
 # - 민감도(사람 통과 중 AI 통과)·특이도(사람 미통과 중 AI 미통과)·일치율·표본 수를 함께 냄
 #   한 범주만 있는 하위 집단(예: 모두 미통과)에서는 kappa가 부풀거나 0이 되어 그것만으로 판단하면 안 되기 때문
@@ -75,7 +76,7 @@ def _ai_group(ids, final, ai):
     return group
 
 
-# 역할: 일치도 보고서 dict 반환(맨 앞 키는 warnings, 다음은 unknown_ids)
+## @brief 일치도 보고서 dict 반환(맨 앞 키는 warnings, 다음은 unknown_ids)
 # - sheets: {채점자 코드: 시트 행}; 1명 또는 2명
 # - answers: 원래 답 시트 행(작성자 구분과 answer_id 대조에 씀), ai_rows: ai_grade 결과 행
 # - final_rows: 갈린 답의 합의 라벨(answer_id, final_pass), regrade_rows: 채점자 1명일 때 재채점 시트
@@ -133,7 +134,7 @@ def analyze(sheets, answers, ai_rows=None, final_rows=None, regrade_rows=None):
     return {'warnings': warnings, 'unknown_ids': unknown, **report}
 
 
-# 역할: 채점자 1명일 때 재채점 시트; 채점이 끝난 답 중 최대 size개를 다른 seed로 골라 섞고 판정 칸을 비움
+## @brief 채점자 1명일 때 재채점 시트; 채점이 끝난 답 중 최대 size개를 다른 seed로 골라 섞고 판정 칸을 비움
 def regrade_sheet(rows, grader, size=REGRADE_SIZE):
     done = labels(rows)
     picked = [r for r in rows if r['answer_id'] in done]
@@ -143,7 +144,7 @@ def regrade_sheet(rows, grader, size=REGRADE_SIZE):
     return [{column: ({**row, **blank}[column]) for column in SHEET_COLUMNS} for row in picked]
 
 
-# 역할: 명령행 실행; 보고서를 쓰고, 다음 사람 작업에 필요한 파일(재채점 시트, 합의 라벨 칸)이 없으면 함께 만듦
+## @brief 명령행 실행; 보고서를 쓰고, 다음 사람 작업에 필요한 파일(재채점 시트, 합의 라벨 칸)이 없으면 함께 만듦
 def main(argv=None):
     parser = argparse.ArgumentParser(description='한국어 서술 채점 일치도 보고서')
     parser.add_argument('--sheets', nargs='+', required=True, type=Path, help='채운 채점 시트(G1.csv [G2.csv]); 파일 이름이 채점자 코드')

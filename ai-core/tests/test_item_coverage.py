@@ -1,4 +1,5 @@
-# 파일 역할: 개념 지도의 모든 개념이 막힘 흐름에 필요한 문항 구성을 갖췄는지, 실제 지도·문항 은행으로 흐름이 끝까지 가는지 검사
+## @file
+# @brief 개념 지도의 모든 개념이 막힘 흐름에 필요한 문항 구성을 갖췄는지, 실제 지도·문항 은행으로 흐름이 끝까지 가는지 검사
 # - 문항이 빠지거나 개념이 새로 생겼는데 문항이 없으면 CI에서 막기 위함(설계 MVP 2 "36개 개념 E2E"의 자동 부분)
 import unittest
 from collections import Counter
@@ -16,7 +17,7 @@ REQUIRED = {'diagnosis': 2, 'check': 2, 'explanation': 1}
 MAX_STEPS = 200
 
 
-# 역할: 개념마다 목적별로 모자란 문항 수를 반환; 모두 갖췄으면 빈 dict
+## @brief 개념마다 목적별로 모자란 문항 수를 반환; 모두 갖췄으면 빈 dict
 def shortfalls(concept_map, items):
     counts = Counter((i.concept, i.purpose) for i in items)
     found = {}
@@ -27,7 +28,7 @@ def shortfalls(concept_map, items):
     return found
 
 
-# 역할: concept에서 로드맵으로 막힌 세션을 끝까지 진행하고, 완주를 막은 문제를 목록으로 반환(빈 목록이면 완주)
+## @brief concept에서 로드맵으로 막힌 세션을 끝까지 진행하고, 완주를 막은 문제를 목록으로 반환(빈 목록이면 완주)
 # - 진단은 정답 키로 모두 맞히고, 확인 문항도 정답 키로, 서술은 가짜 채점기가 통과시킴
 # - 장면 선택은 끄고(scene=None) 문항 구성과 단계 전환만 봄; 애니메이션은 test_stuck_flow가 따로 검사함
 def flow_problems(test, concept_map, items, concept):

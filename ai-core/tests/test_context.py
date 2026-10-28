@@ -1,4 +1,5 @@
-# 파일 역할: 실제 내용 길이 기반 예산과 최근 문답 쌍·도식 구조 보존을 검증
+## @file
+# @brief 실제 내용 길이 기반 예산과 최근 문답 쌍·도식 구조 보존을 검증
 import unittest
 from serving.context import fit_context, history_messages, token_counter
 

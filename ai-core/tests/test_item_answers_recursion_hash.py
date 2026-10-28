@@ -1,4 +1,5 @@
-# 파일 역할: 묶음 1(재귀·점화식·이진 탐색·해시) 문항의 구성을 검사하고, 단답 정답을 문항 내용으로부터 독립 계산해 대조
+## @file
+# @brief 묶음 1(재귀·점화식·이진 탐색·해시) 문항의 구성을 검사하고, 단답 정답을 문항 내용으로부터 독립 계산해 대조
 import math
 import re
 import unittest
@@ -13,14 +14,14 @@ SCOPE = {'recursion', 'recurrence-relation', 'binary-search', 'hash-function', '
 EXTREME_WORDS = ('항상', '반드시', '절대', '전혀', '무조건')
 
 
-# 역할: 문항 본문 첫 줄 뒤의 코드 조각을 실제로 정의해 이름공간 반환; 손 계산 대신 코드 그대로 실행하기 위함
+## @brief 문항 본문 첫 줄 뒤의 코드 조각을 실제로 정의해 이름공간 반환; 손 계산 대신 코드 그대로 실행하기 위함
 def define(question, scope=None):
     scope = scope if scope is not None else {}
     exec(question.split('\n', 1)[1], scope)
     return scope
 
 
-# 역할: 재귀 함수 name을 감싸 호출 횟수를 셈; 함수가 이름공간에서 자기 이름을 찾아 부르므로 재귀 호출도 모두 세어짐
+## @brief 재귀 함수 name을 감싸 호출 횟수를 셈; 함수가 이름공간에서 자기 이름을 찾아 부르므로 재귀 호출도 모두 세어짐
 def count_calls(scope, name, *args):
     original, calls = scope[name], [0]
 
@@ -32,7 +33,7 @@ def count_calls(scope, name, *args):
     return calls[0]
 
 
-# 역할: lo=0, hi=n-1, mid=(lo+hi)//2 규칙의 이진 탐색을 실제로 돌려 비교한 인덱스 순서 반환
+## @brief lo=0, hi=n-1, mid=(lo+hi)//2 규칙의 이진 탐색을 실제로 돌려 비교한 인덱스 순서 반환
 def probes(values, target):
     lo, hi, seen = 0, len(values) - 1, []
     while lo <= hi:
@@ -47,7 +48,7 @@ def probes(values, target):
     return seen
 
 
-# 역할: 체이닝 해시 테이블(h(k)=k mod m, 새 키는 버킷 리스트 뒤에 붙임)에 키를 차례로 넣은 버킷 목록 반환
+## @brief 체이닝 해시 테이블(h(k)=k mod m, 새 키는 버킷 리스트 뒤에 붙임)에 키를 차례로 넣은 버킷 목록 반환
 def chain(keys, m):
     buckets = [[] for _ in range(m)]
     for key in keys:
@@ -63,7 +64,7 @@ def array_in(question):
     return [int(v) for v in re.search(r'\[([\d,]+)\]', question).group(1).split(',')]
 
 
-# 역할: 문항 ID → 정답 키와 별도로 계산한 기대 답
+## @brief 문항 ID → 정답 키와 별도로 계산한 기대 답
 def expected_answers(items):
     q = {item.id: item.question for item in items}
     printed = []

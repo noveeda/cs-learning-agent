@@ -1,4 +1,5 @@
-# 파일 역할: Mohler 단답 채점 데이터(영어 원문)로 운영 서술 채점 경로의 사람 일치도를 재는 개발용 검증 도구(계획 Task 3)
+## @file
+# @brief Mohler 단답 채점 데이터(영어 원문)로 운영 서술 채점 경로의 사람 일치도를 재는 개발용 검증 도구(계획 Task 3)
 # - download: Hugging Face 미러의 원본 행을 Git 밖(ai-core/data/raw/mohler/)에 JSONL로 내려받음
 # - split_questions: 문항 단위로 dev·report 절반씩 나눔(같은 문항의 답, 같은 질문의 다른 문항이 양쪽에 섞이지 않게)
 # - grade: 운영 채점 경로(StuckModelGateway.grade_explanation)로 답마다 루브릭 항목 충족을 판정, 중단 후 이어하기
@@ -70,7 +71,7 @@ AI_CANDIDATES = (('1.0', 1.0), ('0.75', 3 / 4), ('0.67', 2 / 3), ('0.5', 1 / 2))
 EPSILON = 1e-9
 
 
-# 역할: 미러의 open_ended 행 전체를 쪽 단위로 받아 out_dir/open_ended.jsonl로 쓰고 경로를 반환
+## @brief 미러의 open_ended 행 전체를 쪽 단위로 받아 out_dir/open_ended.jsonl로 쓰고 경로를 반환
 # - 이미 있으면 덮어쓰지 않음: 다른 워커가 같은 원본을 쓰고 있을 수 있기 때문
 def download(out_dir=RAW):
     out = Path(out_dir) / 'open_ended.jsonl'
@@ -97,18 +98,18 @@ def load_jsonl(path):
         return [json.loads(line) for line in file if line.strip()]
 
 
-# 역할: 행 id에서 문항 ID를 냄; 'E01.Q01.A00'(과제·문항·답 번호) → 'E01.Q01'
+## @brief 행 id에서 문항 ID를 냄; 'E01.Q01.A00'(과제·문항·답 번호) → 'E01.Q01'
 # - 루브릭 파일(rubrics.jsonl)의 question_id도 이 규칙을 씀
 def question_id(row_id):
     return row_id.rsplit('.', 1)[0]
 
 
-# 역할: 질문 문장을 비교용으로 정리(소문자, 문장부호를 공백으로, 공백 하나로); 'What is a queue?' → 'what is a queue'
+## @brief 질문 문장을 비교용으로 정리(소문자, 문장부호를 공백으로, 공백 하나로); 'What is a queue?' → 'what is a queue'
 def normalize_question(text):
     return ' '.join(re.sub(r'[^\w\s]', ' ', text.lower()).split())
 
 
-# 역할: 문항을 묶음 단위로 seed로 섞어 문항 수 절반까지 dev, 나머지는 report로 나눠 (dev_ids, report_ids)를 정렬된 목록으로 반환
+## @brief 문항을 묶음 단위로 seed로 섞어 문항 수 절반까지 dev, 나머지는 report로 나눠 (dev_ids, report_ids)를 정렬된 목록으로 반환
 # - 묶음: 정리한 질문 문장이 같은 문항들 + SAME_MEANING 쌍(union-find로 합침). 묶음은 쪼개지 않음
 # - 묶음 때문에 dev가 절반보다 한두 문항 많을 수 있음
 # - 행 순서와 무관하게 같은 seed면 같은 분할(묶음을 정렬한 뒤 섞음)
@@ -143,12 +144,12 @@ def split_questions(rows, seed=SPLIT_SEED):
     return sorted(dev), sorted(report)
 
 
-# 역할: rubrics.jsonl({question_id, rubric: [..]})을 {question_id: rubric} 사전으로 읽음
+## @brief rubrics.jsonl({question_id, rubric: [..]})을 {question_id: rubric} 사전으로 읽음
 def load_rubrics(path):
     return {entry['question_id']: entry['rubric'] for entry in load_jsonl(path)}
 
 
-# 역할: 답마다 운영 채점 경로로 루브릭 항목 충족을 판정해 [{id, met: list[bool]}]을 rows 순서로 반환
+## @brief 답마다 운영 채점 경로로 루브릭 항목 충족을 판정해 [{id, met: list[bool]}]을 rows 순서로 반환
 # - 문항·모범 답(instructor_answer → reference)·루브릭은 영어 원문 그대로 넘김
 #   Item 검증(문항 500자·근거 400자 상한, 한국어 문항 ID 규칙)은 문항 은행용이라 건너뛰고 필요한 필드만 채움(model_construct)
 # - out(JSONL)에 이미 있는 답은 다시 채점하지 않고, 새 판정은 한 줄씩 덧붙임(중단 후 재개)
@@ -176,7 +177,7 @@ def grade(rows, rubrics, gateway, out, progress=None):
     return grades
 
 
-# 역할: 순위 상관(Spearman); 동점은 평균 순위로 두고 순위끼리의 Pearson 상관을 냄
+## @brief 순위 상관(Spearman); 동점은 평균 순위로 두고 순위끼리의 Pearson 상관을 냄
 def spearman(x, y):
     def ranks(values):
         order = sorted(range(len(values)), key=lambda i: values[i])
@@ -197,7 +198,7 @@ def spearman(x, y):
     return cov / var if var else 0.0
 
 
-# 역할: 한 분할의 사람 판정(human)·AI 판정(ai) 비교 지표
+## @brief 한 분할의 사람 판정(human)·AI 판정(ai) 비교 지표
 # - 정답 쪽으로 치우친 점수(평균 4.17)에서 kappa가 낮게 나오는 역설에 대비해 일치율·민감도·특이도를 함께 냄
 # - 거짓 통과: 사람 미통과인데 AI가 통과시킨 답(학습자가 모르는데 넘어가는 위험)
 def _compare(human, ai):
@@ -214,7 +215,7 @@ def _compare(human, ai):
             'false_pass_interval': [round(low, 4), round(high, 4)]}
 
 
-# 역할: 사람 통과 기준마다 dev에서 AI 임계값을 고르고 report에서 지표를 한 번 재서 반환
+## @brief 사람 통과 기준마다 dev에서 AI 임계값을 고르고 report에서 지표를 한 번 재서 반환
 # - 임계값은 dev kappa가 가장 큰 후보; 같으면 후보 순서상 앞(더 엄격한 값)을 고름
 # - report 지표: kappa·일치율·민감도·특이도·거짓 통과율과 Wilson 95% 구간, 충족 비율과 score_avg의 Spearman,
 #   사람 채점자 둘 사이 kappa(같은 통과 기준; AI-사람 일치도의 현실적 상한)
@@ -239,7 +240,7 @@ def evaluate(rows, grades, dev_ids, report_ids):
                        'dev_questions': len(dev_ids), 'report_questions': len(report_ids)}}
 
 
-# 역할: 명령행 진입점(download, grade, evaluate)
+## @brief 명령행 진입점(download, grade, evaluate)
 # - grade·evaluate의 결과 경로는 ai-core/outputs/eval/ 아래만 허용(결과 원본의 Git 유입 방지)
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Mohler 영어 원문 서술 채점 개발 검증')

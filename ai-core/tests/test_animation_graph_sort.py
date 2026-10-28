@@ -1,4 +1,5 @@
-# 파일 역할: 그래프 탐색(BFS·DFS)·정렬(삽입·병합·퀵)·트리 순회 장면이 참조 구현과 같은 순서·결과를 그리고,
+## @file
+# @brief 그래프 탐색(BFS·DFS)·정렬(삽입·병합·퀵)·트리 순회 장면이 참조 구현과 같은 순서·결과를 그리고,
 # 실행할 수 없는 요청을 거부하며, 개념별로 허용한 알고리즘만 장면 선택 schema에 남기는지 검증
 # - 상태는 코드가 계산한다는 원칙(MVP 2): 프레임의 방문 순서·정렬 결과가 교과서 알고리즘과 다르면 학생이 틀린 과정을 배움
 import itertools
@@ -22,25 +23,25 @@ def run(request: dict):
     return simulate(AnimationRequestModel.model_validate(request).root)
 
 
-# 역할: 마지막 프레임의 방문 순서 줄(y=7, id가 v로 시작하는 칸)을 x 순서대로 읽음
+## @brief 마지막 프레임의 방문 순서 줄(y=7, id가 v로 시작하는 칸)을 x 순서대로 읽음
 def visit_row(animation):
     cells = [b for b in animation.frames[-1].boxes if b.id.startswith('v')]
     return [b.label for b in sorted(cells, key=lambda b: b.x)]
 
 
-# 역할: 프레임의 정렬 배열 줄(y=0 cell)을 x 순서대로 읽음
+## @brief 프레임의 정렬 배열 줄(y=0 cell)을 x 순서대로 읽음
 def array_row(frame):
     return [int(b.label) for b in sorted((b for b in frame.boxes if b.y == 0 and b.shape == 'cell'), key=lambda b: b.x)]
 
 
-# 역할: 점 p에서 선분 a-b까지의 최단 거리(픽셀)
+## @brief 점 p에서 선분 a-b까지의 최단 거리(픽셀)
 def segment_distance(p, a, b):
     dx, dy = b[0] - a[0], b[1] - a[1]
     t = max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy)))
     return math.dist(p, (a[0] + t * dx, a[1] + t * dy))
 
 
-# 역할: 이웃을 이름 오름차순으로 보는 인접 리스트(참조 구현용)
+## @brief 이웃을 이름 오름차순으로 보는 인접 리스트(참조 구현용)
 def neighbors(nodes, edges, directed):
     adj = {n: set() for n in nodes}
     for a, b in edges:
@@ -74,7 +75,7 @@ def dfs_reference(nodes, edges, start, directed=False):
     return order
 
 
-# 역할: Lomuto 분할(피벗은 마지막 원소)을 한 번 하고 피벗의 최종 인덱스를 반환
+## @brief Lomuto 분할(피벗은 마지막 원소)을 한 번 하고 피벗의 최종 인덱스를 반환
 def lomuto_pivot_index(values):
     a, pivot, i = list(values), values[-1], 0
     for j in range(len(a) - 1):
