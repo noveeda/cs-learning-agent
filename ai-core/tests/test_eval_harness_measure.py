@@ -1,15 +1,17 @@
 ## @file
 # @brief 하네스 모델별 측정(eval.harness_measure)의 지표 계산 metrics(rows)가 spec 8-2 정의대로 수치를 내는지 검증
 # - 모델 호출 없이 측정 결과 행(rows.jsonl과 같은 모양)을 직접 만들어 넣음. 지표 정의가 바뀌면 모델별 비교가 무너지므로 순수 함수로 고정함
+import json
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from eval import harness_measure
-from eval.harness_measure import metrics
+from eval.harness_measure import astra_pass, bootstrap_diff, judge_by_origin, metrics, metrics_by_group, report
 
 
 def _answer(outcome, sentences, task='answer', **extra):
@@ -85,6 +87,75 @@ class ProdSlotTests(unittest.TestCase):
             for thread in threads:
                 thread.join()
         self.assertEqual(peak[0], 2)
+
+
+class FinetuneMeasureTests(unittest.TestCase):
+    # 검증 목적: 학습한 개념과 제외 개념의 점수를 나눠야 문단을 미리 본 효과로 부푼 점수가 합격 판정에 섞이지 않음
+    # - 범위 행은 expected, 생성 행은 expected(없으면 concepts)로 개념을 봄. 개념 하나라도 제외 개념이면 제외 쪽
+    def test_metrics_by_group_splits_holdout(self):
+        rows = [{'task': 'scope', 'id': 's1', 'kind': 'direct', 'expected': ['bfs'], 'concepts': ['bfs']},
+                {'task': 'scope', 'id': 's2', 'kind': 'direct', 'expected': ['stack'], 'concepts': ['queue']},
+                {'task': 'scope', 'id': 's3', 'kind': 'compare', 'expected': ['stack', 'bfs'], 'concepts': ['stack']},
+                _answer('answered', [{'status': 'verified', 'han': False, 'audit': False}], id='a1', concepts=['bfs']),
+                _answer('answered', [{'status': 'verified', 'han': False, 'audit': True}], id='a2', expected=['stack'],
+                        concepts=['stack'])]
+        groups = metrics_by_group(rows, {'bfs'})
+        self.assertEqual((groups['holdout']['scope']['n'], groups['holdout']['scope']['accuracy']), (2, 0.5))
+        self.assertEqual((groups['trained']['scope']['n'], groups['trained']['scope']['accuracy']), (1, 0.0))
+        self.assertEqual(groups['holdout']['answers']['exposure']['rate'], 1.0)
+        self.assertEqual(groups['trained']['answers']['exposure']['rate'], 0.0)
+
+    # 검증 목적: 미세조정 전후 비율 차이의 95% 구간이 실제 차이(-0.08)를 담고, 차이가 뚜렷하면 0을 담지 않아야
+    # "좋아졌다"를 표본 운으로 말하지 않을 수 있음. 고정 seed라 다시 돌려도 같은 구간
+    def test_bootstrap_diff_contains_true_difference(self):
+        before = [1] * 50 + [0] * 450
+        after = [1] * 10 + [0] * 490
+        low, high = bootstrap_diff(before, after, seed=0)
+        self.assertLess(low, -0.08)
+        self.assertGreater(high, -0.08)
+        self.assertLess(high, 0)
+        self.assertEqual(bootstrap_diff(before, after, seed=0), (low, high))
+
+    # 검증 목적: 규칙 교란(숫자·부정)과 모델 교란(덧붙이기·개념 바꾸기) 검출률을 나눠야
+    # 학습이 26B가 만든 교란 모양만 외웠는지 볼 수 있음
+    def test_judge_by_origin(self):
+        rows = [{'task': 'judge', 'id': f'j{n}', 'label': 'unsupported', 'perturbation': kind, 'passed': passed}
+                for n, (kind, passed) in enumerate([('number', False), ('negation', True), ('addition', False),
+                                                    ('swap_concept', False), ('addition', True)])]
+        rows.append({'task': 'judge', 'id': 'ok', 'label': 'supported', 'perturbation': None, 'passed': True})
+        self.assertEqual(judge_by_origin(rows), {'rule': {'n': 2, 'detection': 0.5}, 'model': {'n': 3, 'detection': 0.6667}})
+
+
+    # 검증 목적: 외부 검사는 노출 대상 문장(답변 완료 답의 verified)만, 아직 판정 못 한 문장만 보내고 문단 원문을 문단 ID로 다시 찾음
+    # - 이미 판정한 문장을 다시 보내면 검사 비용이 늘고, 확인 필요·원문 대체 문장을 보내면 노출 지표 분모가 틀어짐
+    def test_astra_pass_checks_only_unmarked_unchecked(self):
+        rows = [_answer('answered', [{'text': '새 문장', 'sources': ['p1'], 'status': 'verified', 'han': False, 'audit': True},
+                                     {'text': '판정됨', 'sources': ['p1'], 'status': 'verified', 'han': False, 'audit': True,
+                                      'astra': True},
+                                     {'text': '확인 필요', 'sources': ['p1'], 'status': 'needs_check', 'han': False,
+                                      'audit': None}], passages={'p1': 'c1'}),
+                _answer('fallback', [{'text': '지워짐', 'sources': ['p1'], 'status': 'verified', 'han': False, 'audit': None}],
+                        id='f', passages={'p1': 'c1'})]
+        retriever = SimpleNamespace(by_ids=lambda ids: [SimpleNamespace(id=i, text=f'{i} 원문') for i in ids])
+        sent = []
+
+        def runner(prompt, schema):
+            sent.append(prompt)
+            return {'results': [{'id': 0, 'supported': False}]}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'rows.jsonl'
+            path.write_text(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in rows), encoding='utf-8')
+            self.assertEqual(astra_pass(path, retriever, runner), 1)
+            saved = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
+        self.assertIn('새 문장', sent[0])
+        self.assertIn('c1 원문', sent[0])
+        self.assertNotIn('판정됨', sent[0])
+        self.assertEqual([s.get('astra') for s in saved[0]['sentences']], [False, True, None])
+        answers = metrics(saved)['answers']
+        self.assertEqual(answers['exposure_astra'], {'audited': 2, 'mismatch': 1, 'errors': 0, 'rate': 0.5})
+        groups = {'trained': metrics(saved), 'holdout': {}}
+        self.assertIn('노출 지표(외부 검사)', report(metrics(saved), {'model': 'm'}, groups))
 
 
 if __name__ == '__main__':
