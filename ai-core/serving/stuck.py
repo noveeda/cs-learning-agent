@@ -147,10 +147,13 @@ class _Context:
 
 
 ## @brief 화면용 문항; 정답·근거·루브릭을 빼서 브라우저와 저장소로 정답이 새지 않게 함
+# - figure: 지문 도식(있을 때만); 문항 은행 저장 형식(선 끝 from·to, 기본값 생략) 그대로 넘겨 프런트 ItemFigure가 그림
 def _item_view(item):
     view = {'id': item.id, 'format': item.format, 'question': item.question}
     if item.options:
         view['options'] = item.options
+    if item.figure:
+        view['figure'] = item.figure.model_dump(by_alias=True, exclude_defaults=True)
     return view
 
 
