@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from finetune.split import choose_holdout, load_holdout, measured_questions, normalize_question, trainable_passages
+from finetune.split import HOLDOUT_PATH, choose_holdout, load_holdout, measured_questions, normalize_question, trainable_passages
 from serving.concept_map import Concept, load_concept_map
 
 
@@ -63,6 +63,15 @@ class FinetuneSplitTests(unittest.TestCase):
             choose_holdout(concepts, {c: 3 for c in counts}, {'version': 1, 'gaps': [], 'entries': [
                 {'book': 'b', 'section_id': f'all#{i}', 'concepts': list(counts)} for i in range(3)]})
 
+    # 검증 목적: 절 공유 때문에 제약을 만족할 수 없는 과목(OS)은 제외 개념을 고르지 않고, 나머지 과목만 2개씩 골라야 함
+    def test_skipped_subject_has_no_holdout(self):
+        subjects = ['dsa', 'os']
+        concepts = [_concept(s, n) for s in subjects for n in range(4)]
+        counts = {c.id: 3 for c in concepts}
+        chosen, _ = choose_holdout(concepts, counts, _own_sections(counts), skip_subjects={'os'})
+        self.assertEqual(len(chosen), 2)
+        self.assertTrue(all(c.startswith('dsa-') for c in chosen))
+
     # 검증 목적: 띄어쓰기·문장부호만 다른 질문을 다른 질문으로 보면 측정 질문이 학습에 그대로 들어감
     def test_normalized_duplicate_is_measured(self):
         self.assertEqual(normalize_question('스택이 뭐야?'), normalize_question(' 스택이  뭐야 '))
@@ -79,15 +88,17 @@ class FinetuneSplitTests(unittest.TestCase):
             {'book': 'ods', 'section_id': 'a#2', 'concepts': ['stack']}]}
         self.assertEqual(trainable_passages(section_map, {'queue'}), {('ods', 'a#2')})
 
-    # 검증 목적: 커밋한 제외 개념 목록이 형식(과목마다 2개, 10개)을 지키고 실제 개념 지도에 있는 ID인지 확인
+    # 검증 목적: 커밋한 제외 개념 목록이 형식(건너뛴 과목 0개, 나머지 과목마다 2개)을 지키고 실제 개념 지도에 있는 ID인지 확인
     def test_committed_holdout_matches_concept_map(self):
         subject_of = {c.id: c.subject for c in load_concept_map().concepts}
+        data = json.loads(HOLDOUT_PATH.read_text(encoding='utf-8'))
         holdout = load_holdout()
-        self.assertEqual(len(holdout), 10)
+        self.assertEqual(set(data['skipped_subjects']), {'os'})
+        self.assertEqual(len(holdout), 8)
         self.assertLessEqual(holdout, set(subject_of))
         subjects = [subject_of[c] for c in holdout]
-        self.assertEqual({s: subjects.count(s) for s in subjects}, {s: 2 for s in set(subject_of.values())})
-
+        expected = {s: 2 for s in set(subject_of.values()) - set(data['skipped_subjects'])}
+        self.assertEqual({s: subjects.count(s) for s in subjects}, expected)
 
 if __name__ == '__main__':
     unittest.main()

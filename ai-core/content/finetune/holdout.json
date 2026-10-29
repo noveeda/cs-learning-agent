@@ -1,16 +1,17 @@
 {
   "version": 1,
-  "seed": 0,
+  "seed": 1,
+  "skipped_subjects": {
+    "os": "6개념이 절 8개를 나눠 써서, 어떤 개념을 빼도 다른 OS 개념의 학습 절이 3개 미만으로 줄어듦"
+  },
   "concepts": [
+    "bfs",
     "btree-index",
-    "ip-subnet",
+    "cache-locality",
     "linked-list",
-    "memory-address",
-    "memory-hierarchy",
     "network-layers",
     "normalization",
-    "process-state",
-    "round-robin",
-    "virtual-memory-pages"
+    "pipelining-hazards",
+    "tcp-reliability"
   ]
 }

@@ -1,7 +1,7 @@
 ## @file
 # @brief 미세조정 학습 데이터와 측정 세트를 가르는 규칙: 제외 개념 선택, 측정 질문 정규화, 학습에 쓸 절 고르기
 # - 문단은 학습과 측정이 공유하고, 측정 세트 질문과 정규화 후 같은 질문만 학습에서 버림(설계 5장)
-# - 제외 개념 10개(과목마다 2개)는 학습 예시 어디에도 나오지 않게 해, 합격 판정을 처음 보는 개념 기준으로 함
+# - 제외 개념(OS를 뺀 4과목에서 2개씩 8개)은 학습 예시 어디에도 나오지 않게 해, 합격 판정을 처음 보는 개념 기준으로 함
 # - 제외 개념 목록(content/finetune/holdout.json)만 커밋하고, 학습 데이터는 Git 밖에 둠
 import argparse
 import json
@@ -16,14 +16,18 @@ HOLDOUT_PATH = Path(__file__).resolve().parents[1] / 'content' / 'finetune' / 'h
 
 # 제약을 만족하는 seed를 찾을 때 시도하는 최대 횟수(무한 반복 방지)
 MAX_SEED_TRIES = 1000
+# 제외 개념을 고르지 않는 과목과 이유(2026-10-29 사용자 결정 B): holdout.json에 그대로 남겨 측정 보고에서 밝힘
+SKIPPED_SUBJECTS = {
+    'os': '6개념이 절 8개를 나눠 써서, 어떤 개념을 빼도 다른 OS 개념의 학습 절이 3개 미만으로 줄어듦',
+}
 
 
 ## @brief seed 하나로 과목마다 per_subject개씩 뽑아 개념 ID 순으로 반환(제약 검사 없음)
 # - 과목을 이름순, 후보를 ID순으로 정렬한 뒤 seed 고정 난수로 뽑아, 개념 지도 파일 순서가 바뀌어도 같은 목록이 나옴
-def _sample(concepts, passage_counts, per_subject, min_passages, seed):
+def _sample(concepts, passage_counts, per_subject, min_passages, seed, skip_subjects):
     rng = random.Random(seed)
     chosen = []
-    for subject in sorted({c.subject for c in concepts}):
+    for subject in sorted({c.subject for c in concepts} - set(skip_subjects)):
         candidates = sorted(c.id for c in concepts
                             if c.subject == subject and passage_counts.get(c.id, 0) >= min_passages)
         if len(candidates) < per_subject:
@@ -49,12 +53,13 @@ def _keeps_others_trainable(concepts, section_map, holdout, min_passages):
 ## @brief 과목마다 per_subject개씩 제외 개념을 골라 (개념 ID 순 목록, 쓴 seed)를 반환
 # - passage_counts: 개념 ID → 근거 문단 수. min_passages 미만인 개념은 제외 개념으로 측정할 재료가 모자라 후보에서 뺌
 # - section_map: content/rag/section-map.json을 읽은 dict. 제외 뒤 다른 개념의 학습 절 수를 검사하는 데 씀
+# - skip_subjects: 제외 개념을 고르지 않는 과목. 그 과목 개념은 모두 학습 개념으로 남고 제약 검사도 받음
 # - seed부터 1씩 올리며 제약을 만족하는 첫 결과를 고르고, 쓴 seed를 holdout.json에 남겨 같은 목록을 재현함
 # - MAX_SEED_TRIES번 안에 찾지 못하면 ValueError
 def choose_holdout(concepts: list[Concept], passage_counts: dict[str, int], section_map: dict, per_subject: int = 2,
-                   min_passages: int = 3, seed: int = 0) -> tuple[list[str], int]:
+                   min_passages: int = 3, seed: int = 0, skip_subjects: set[str] = frozenset()) -> tuple[list[str], int]:
     for tried in range(seed, seed + MAX_SEED_TRIES):
-        chosen = _sample(concepts, passage_counts, per_subject, min_passages, tried)
+        chosen = _sample(concepts, passage_counts, per_subject, min_passages, tried, skip_subjects)
         if _keeps_others_trainable(concepts, section_map, chosen, min_passages):
             return chosen, tried
     raise ValueError(f'seed {seed}~{seed + MAX_SEED_TRIES - 1}에서 다른 개념의 학습 절을 지키는 제외 개념을 찾지 못했습니다.')
@@ -89,7 +94,7 @@ def load_holdout(path: Path = HOLDOUT_PATH) -> set[str]:
 
 
 ## @brief 제외 개념 목록 생성 명령: python -m finetune.split --write-holdout
-# - 운영 개념 지도와 절 대응표로 개념별 근거 문단(대응 절) 수를 세어 --seed(기본 0)부터 고르고, 쓴 seed와 함께 holdout.json에 씀
+# - 운영 개념 지도와 절 대응표로 개념별 근거 문단(대응 절) 수를 세어 --seed(기본 0)부터 고르고, 쓴 seed·건너뛴 과목과 함께 holdout.json에 씀
 # - 고른 개념의 과목·문단 수와 학습에 남는 절 수를 출력해 PR·문서에 그대로 옮길 수 있게 함
 def main(argv=None):
     from rag.section_map import MAP_PATH
@@ -102,10 +107,11 @@ def main(argv=None):
     concepts = load_concept_map().concepts
     raw_map = json.loads(MAP_PATH.read_text(encoding='utf-8'))
     counts = {c.id: sum(1 for e in raw_map['entries'] if c.id in e['concepts']) for c in concepts}
-    chosen, seed = choose_holdout(concepts, counts, raw_map, seed=args.seed)
+    chosen, seed = choose_holdout(concepts, counts, raw_map, seed=args.seed, skip_subjects=set(SKIPPED_SUBJECTS))
     args.write_holdout.parent.mkdir(parents=True, exist_ok=True)
     args.write_holdout.write_text(
-        json.dumps({'version': 1, 'seed': seed, 'concepts': chosen}, ensure_ascii=False, indent=2) + '\n',
+        json.dumps({'version': 1, 'seed': seed, 'skipped_subjects': SKIPPED_SUBJECTS, 'concepts': chosen},
+                   ensure_ascii=False, indent=2) + '\n',
         encoding='utf-8')
     print(f'seed {seed}, 학습 절 {len(trainable_passages(raw_map, set(chosen)))}/{len(raw_map["entries"])}')
     by_id = {c.id: c for c in concepts}
