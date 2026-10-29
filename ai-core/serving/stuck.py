@@ -20,6 +20,9 @@ from serving.item_bank import Item
 MAX_DIAGNOSIS_ITEMS = 5   # 한 세션에서 푸는 진단 문항 수
 MAX_DEPTH = 3             # 막힌 개념에서 선수 관계를 따라 내려가는 깊이
 MAX_RETRIES = 2           # 같은 빈틈에 대해 다른 방식으로 다시 보충하는 횟수
+# 서술이 '충분'하다고 보여 줄 루브릭 충족 비율(절반 이상: 2개 중 1·3개 중 2·4개 중 2)
+# - 통과 판정이 아니라 결과 화면 문구와 측정 로그에만 쓰는 표시 기준
+EXPLANATION_ENOUGH_SHARE = 0.5
 
 
 class StrictModel(BaseModel):
@@ -404,7 +407,7 @@ def _remediate(s, ctx):
     s.view['item'] = _item_view(item)
 
 
-## @brief S5·S6 혼합형 확인의 첫 단계; 적용 문항을 결정적으로 채점하고 서술 질문으로 넘어감
+## @brief S5·S6 이해 확인의 첫 단계; 적용 문항을 결정적으로 채점하고(통과 판정 기준) 서술 질문으로 넘어감
 def _check(s, ctx):
     _expect(ctx, 'answer')
     answer = _answer_for(s, ctx)
@@ -422,17 +425,35 @@ def _check(s, ctx):
               'item': _item_view(chosen)}
 
 
-## @brief 혼합형 확인의 두 번째 단계; 서술을 루브릭으로 채점(LLM 1회)하고 두 결과가 모두 통과해야 이해로 인정
+## @brief 루브릭 충족 목록이 '설명도 충분' 기준(EXPLANATION_ENOUGH_SHARE 이상)을 넘는지
+def explanation_enough(met):
+    return sum(met) >= len(met) * EXPLANATION_ENOUGH_SHARE
+
+
+## @brief 이해 확인의 두 번째 단계; 서술을 루브릭으로 채점(LLM 1회)해 피드백으로 보여 주고, 통과는 적용 문항 결과로만 정함
+# - 서술을 통과 조건에서 뺀 이유: 채점 모델이 사람이 통과시킨 답의 약 4할(26B 40.5%·12B QAT 38.0%, 영어 Mohler 기준)을 불통과로 매김(docs/harness-measurement.md 채점 거짓 불통과율, 2026-10-30 결정)
+# - 채점 실패(모델 연결 실패·항목 수 불일치)는 503으로 멈추지 않고 피드백 없이 진행; 실패 이유는 측정용 로그에 남김
+# - 빠진 루브릭 항목은 통과해 다음으로 넘어갈 때만 보여 줌. 재보충 때는 같은 서술 문항이 다시 나올 수 있어 정답 기준을 미리 보이지 않기 위함
 def _explain(s, ctx):
     _expect(ctx, 'answer')
     answer = _answer_for(s, ctx)
     item = ctx.item(s.pending)
-    met = ctx.gateway.grade_explanation(item, answer)
-    if len(met) != len(item.rubric):
-        # 채점 결과 수가 루브릭과 다르면 LLM 출력 오류로 보고 재시도 가능한 오류(503)로 끝냄; 상태는 아직 바꾸지 않았음
-        raise LLMUnavailable('서술 채점 결과가 올바르지 않습니다. 다시 시도해 주세요.')
-    _log(s, ctx, 'explanation_graded', item.concept, item.id, answer=answer, rubric_met=met, check_passed=s.check_passed)
-    _conclude(s, ctx, bool(s.check_passed) and all(met), rubric_met=met)
+    try:
+        met = ctx.gateway.grade_explanation(item, answer)
+        if len(met) != len(item.rubric):
+            raise LLMUnavailable(f'서술 채점 결과 수({len(met)})가 루브릭 수({len(item.rubric)})와 다릅니다.')
+    except LLMUnavailable as exc:
+        _log(s, ctx, 'explanation_grading_failed', item.concept, item.id, answer=answer, reason=str(exc)[:300],
+             check_passed=s.check_passed)
+        _conclude(s, ctx, bool(s.check_passed))
+        return
+    enough = explanation_enough(met)
+    _log(s, ctx, 'explanation_graded', item.concept, item.id, answer=answer, rubric_met=met,
+         explanation_enough=enough, check_passed=s.check_passed)
+    feedback = {'rubric_met': met, 'explanation_enough': enough}
+    if s.check_passed and not enough:
+        feedback['rubric_missed'] = [r for r, ok in zip(item.rubric, met) if not ok]
+    _conclude(s, ctx, bool(s.check_passed), **feedback)
 
 
 ## @brief 확인 결과에 따라 다음 보충 대상으로 넘어가거나, 재보충하거나, 미해결로 학습자 선택을 기다림

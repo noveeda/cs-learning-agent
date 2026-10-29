@@ -1,5 +1,5 @@
 ## @file
-# @brief 막힘 흐름의 진단 가지치기·상한·보충 순서·혼합형 확인·보충 애니메이션·복귀와, 잘못된 입력·LLM 실패 시 상태 보존을 검증
+# @brief 막힘 흐름의 진단 가지치기·상한·보충 순서·이해 확인(적용 문제 판정·서술 피드백)·보충 애니메이션·복귀와, 잘못된 입력·LLM 실패 시 상태 보존을 검증
 # - 1단계 개념(선수 개념 없음) 안내·설명 방식, 세션별 문항 순서(seed)·장면 다양화, 옛 저장 상태 복원도 검증
 import json
 import unittest
@@ -12,7 +12,8 @@ from serving.animation.model import AnimationRequestModel
 from serving.api import app
 from serving.concept_map import ConceptMap, load_concept_map
 from serving.item_bank import Item, load_item_bank
-from serving.stuck import LLMUnavailable, MAX_DIAGNOSIS_ITEMS, StepInput, StuckState, UnavailableGateway, step
+from serving.stuck import (LLMUnavailable, MAX_DIAGNOSIS_ITEMS, StepInput, StuckState, UnavailableGateway,
+                           explanation_enough, step)
 
 
 ## @brief 규칙 확인용 작은 지도; top의 선수는 alpha·beta, alpha 아래로 gamma → delta → eps가 이어짐(eps는 깊이 4)
@@ -47,9 +48,11 @@ STACK_SCENE = {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}, {'op': 'push
 # - scene: choose_animation이 돌려줄 장면 요청(dict), None(장면 없음), 또는 예외 객체(던짐)
 # - explained_scenes: explain이 받은 장면 요약을 호출 순서대로 기록(글 예시와 장면 일치 확인용)
 # - attempts: explain이 받은 설명 차례(attempt), previous_scenes: choose_animation이 받은 직전 장면을 호출 순서대로 기록
+# - grade_error: 서술 채점에서 던질 예외(채점 실패 흉내); 없으면 rubric_pass로 모든 항목을 같은 값으로 채점
 class FakeGateway:
-    def __init__(self, identified='top', rubric_pass=True, rubric_extra=0, scene=STACK_SCENE):
+    def __init__(self, identified='top', rubric_pass=True, rubric_extra=0, scene=STACK_SCENE, grade_error=None):
         self.calls, self.identified, self.rubric_pass, self.rubric_extra = [], identified, rubric_pass, rubric_extra
+        self.grade_error = grade_error
         self.scene, self.explained_scenes, self.attempts, self.previous_scenes = scene, [], [], []
 
     def identify(self, excerpt, concept_map):
@@ -64,6 +67,8 @@ class FakeGateway:
 
     def grade_explanation(self, item, answer):
         self.calls.append('grade')
+        if self.grade_error:
+            raise self.grade_error
         return [self.rubric_pass] * (len(item.rubric) + self.rubric_extra)
 
     def summarize(self, state, concept_map):
@@ -205,17 +210,77 @@ class RemediationTests(unittest.TestCase):
         for kind in ('stuck_started', 'probe_answered', 'remediated', 'check_answered', 'explanation_graded', 'returned'):
             self.assertIn(kind, kinds)
 
-    # 검증 목적: 적용 문항은 맞혀도 서술 루브릭을 통과하지 못하면 이해로 인정하지 않는지(혼합형) 확인
-    def test_check_and_rubric_must_both_pass(self):
-        session = Session(self, gateway=FakeGateway(rubric_pass=False))
+    ## @brief 진단을 건너뛰고 막힌 개념(top)의 적용 문제·서술에 답한 뒤 결과 화면에서 멈춤
+    def answer_target(self, gateway, check_answer):
+        session = Session(self, gateway=gateway)
         session.send({'type': 'opt_out'})
         session.send({'type': 'continue'})
-        session.send({'type': 'answer', 'item': session.state.pending, 'answer': 'ok'})
+        session.send({'type': 'answer', 'item': session.state.pending, 'answer': check_answer})
         session.send({'type': 'answer', 'item': session.state.pending, 'answer': '설명'})
+        return session
+
+    # 검증 목적: 적용 문제를 맞히면 서술 루브릭을 하나도 못 채워도 통과하고, 빠진 루브릭 항목을 피드백으로 보여 주는지 확인
+    # - 서술 채점 모델이 사람이 통과시킨 답의 약 4할(26B 40.5%·12B QAT 38.0%, 영어 Mohler 기준)을 불통과로 매겨(docs/harness-measurement.md) 서술을 통과 조건에서 뺀 결정(2026-10-30)
+    def test_check_pass_passes_with_rubric_feedback(self):
+        session = self.answer_target(FakeGateway(rubric_pass=False), 'ok')
+        self.assertEqual(session.state.fixes[0].outcome, 'passed')
+        self.assertEqual(session.state.stage, 'return')
+        view = session.state.view
+        self.assertEqual((view['kind'], view['passed']), ('result', True))
+        self.assertEqual((view['rubric_met'], view['explanation_enough']), ([False, False], False))
+        self.assertEqual(view['rubric_missed'], ['핵심1', '핵심2'])
+        graded = next(e for e in session.state.log if e.kind == 'explanation_graded')
+        self.assertEqual((graded.detail['rubric_met'], graded.detail['explanation_enough']), ([False, False], False))
+
+    # 검증 목적: 서술이 충분하면 통과 화면에 빠진 항목 없이 충분 표시만 남는지 확인
+    def test_enough_explanation_has_no_missed_items(self):
+        view = self.answer_target(FakeGateway(rubric_pass=True), 'ok').state.view
+        self.assertEqual((view['passed'], view['explanation_enough']), (True, True))
+        self.assertNotIn('rubric_missed', view)
+
+    # 검증 목적: 적용 문제를 틀리면 서술 루브릭을 모두 채워도 재보충하는지 확인
+    def test_check_fail_retries_even_with_full_rubric(self):
+        session = self.answer_target(FakeGateway(rubric_pass=True), 'no')
         self.assertEqual(session.state.fixes[0].outcome, 'pending')
         view = session.state.view
         self.assertEqual((view['kind'], view['passed'], view['retry']), ('result', False, True))
         self.assertEqual(session.state.stage, 'remediate')
+
+    # 검증 목적: 서술 채점이 실패(모델 연결 실패·항목 수 불일치)해도 503으로 멈추지 않고 적용 문제 결과로 진행하는지 확인
+    # - 서술은 통과 조건이 아니라 피드백만 빠지고, 실패 이유는 측정용 로그에 남음
+    def test_grading_failure_proceeds_without_feedback(self):
+        for gateway in (FakeGateway(grade_error=LLMUnavailable('모델 응답을 받지 못했습니다.')), FakeGateway(rubric_extra=1)):
+            with self.subTest(gateway=gateway.grade_error or 'mismatch'):
+                session = self.answer_target(gateway, 'ok')
+                self.assertEqual(session.state.fixes[0].outcome, 'passed')
+                view = session.state.view
+                self.assertEqual((view['kind'], view['passed']), ('result', True))
+                for key in ('rubric_met', 'explanation_enough', 'rubric_missed'):
+                    self.assertNotIn(key, view)
+                failed = [e for e in session.state.log if e.kind == 'explanation_grading_failed']
+                self.assertEqual(len(failed), 1)
+                self.assertNotIn('explanation_graded', [e.kind for e in session.state.log])
+
+    # 검증 목적: '설명도 충분' 기준이 루브릭 절반 이상인지 경계값(2·3·4개)으로 확인
+    def test_explanation_enough_is_half_or_more(self):
+        cases = {(True, False): True, (False, False): False,
+                 (True, False, False): False, (True, True, False): True,
+                 (True, False, False, False): False, (True, True, False, False): True}
+        for met, expected in cases.items():
+            with self.subTest(met=met):
+                self.assertEqual(explanation_enough(list(met)), expected)
+
+    # 검증 목적: 서술 단계에서 저장된 옛 세션을 복원해도 새 규칙(적용 문제 판정)으로 이어서 진행되는지 확인
+    def test_saved_explain_stage_restores_with_new_rule(self):
+        session = Session(self, gateway=FakeGateway(rubric_pass=False))
+        session.send({'type': 'opt_out'})
+        session.send({'type': 'continue'})
+        session.send({'type': 'answer', 'item': session.state.pending, 'answer': 'ok'})
+        self.assertEqual(session.state.stage, 'explain')
+        restored = StuckState.model_validate_json(session.state.model_dump_json())
+        nxt = step(restored, StepInput(type='answer', item=restored.pending, answer='설명'),
+                   FakeGateway(rubric_pass=False), session.map, session.items, 1.0)
+        self.assertEqual((nxt.fixes[0].outcome, nxt.view['passed']), ('passed', True))
 
     # 검증 목적: 재보충 2회까지 실패하면 미해결로 기록하고, 계속하기로 다음 단계에 넘어가며, 재보충마다 다른 확인 문항을 쓰는지 확인
     def test_unresolved_after_retry_limit(self):
@@ -459,6 +524,7 @@ class SafetyTests(unittest.TestCase):
     # 검증 목적: 진단부터 복귀까지 매 단계 저장 상태(view·log 포함)에 정답 키·근거·루브릭 문자열이 없는지 확인
     # - 학습자는 늘 틀린 답만 내므로 정답 키 "ok"가 보이면 문항 정보가 샌 것
     # - JSON 공백 형식에 기대지 않도록 직렬화한 값 자체를 찾음(이전 검사는 공백 차이로 항상 통과했음)
+    # - 빠진 루브릭 항목은 적용 문제를 맞혀 넘어갈 때만 피드백으로 보이므로, 늘 틀리는 이 세션에는 나오지 않아야 함
     def test_state_never_contains_answer_keys(self):
         session = Session(self)
         secrets = {json.dumps(i.answer) for i in session.items if i.answer}
@@ -491,17 +557,6 @@ class SafetyTests(unittest.TestCase):
         before = session.state.model_dump()
         with self.assertRaises(LLMUnavailable):
             step(session.state, StepInput(type='continue'), UnavailableGateway(), session.map, session.items, 1.0)
-        self.assertEqual(session.state.model_dump(), before)
-
-    # 검증 목적: 서술 채점 결과 수가 루브릭과 다르면(LLM 출력 오류) 재시도 가능한 LLMUnavailable로 끝나고 상태가 보존되는지 확인
-    def test_rubric_count_mismatch_is_llm_failure(self):
-        session = Session(self, gateway=FakeGateway(rubric_extra=1))
-        session.send({'type': 'opt_out'})
-        session.send({'type': 'continue'})
-        session.send({'type': 'answer', 'item': session.state.pending, 'answer': 'ok'})
-        before = session.state.model_dump()
-        with self.assertRaises(LLMUnavailable):
-            session.send({'type': 'answer', 'item': session.state.pending, 'answer': '설명'})
         self.assertEqual(session.state.model_dump(), before)
 
     # 검증 목적: 검수 전(draft) 지도로는 진단을 시작하지 않는지 확인

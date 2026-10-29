@@ -595,16 +595,32 @@ export function StuckPanel({
                 ? "이해 확인을 통과했어요."
                 : "아직 확인을 통과하지 못했어요."}
             </h3>
+            {/* 서술 채점 결과는 통과 판정이 아닌 피드백; 채점이 실패하면 필드가 없어 이 부분을 그리지 않음 */}
             {view.rubric_met && (
               <p className="stuck-help">
                 서술 기준 {view.rubric_met.filter(Boolean).length}/
                 {view.rubric_met.length}개를 충족했어요.
+                {view.passed && view.explanation_enough && " 설명도 충분해요."}
               </p>
             )}
+            {view.passed &&
+              view.rubric_missed &&
+              view.rubric_missed.length > 0 && (
+                <>
+                  <p className="stuck-help">
+                    설명에 이 내용을 더하면 더 좋아요.
+                  </p>
+                  <ul>
+                    {view.rubric_missed.map((point) => (
+                      <li key={point}>{point}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
             {!view.passed && (
               <p className="stuck-help">
-                적용 문항과 서술을 모두 통과해야 이해한 것으로 봐요. 다른
-                방식으로 다시 설명해 드릴게요.
+                적용 문제를 맞히면 이해한 것으로 봐요. 다른 방식으로 다시
+                설명해 드릴게요.
               </p>
             )}
             <div className="stuck-actions">
