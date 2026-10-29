@@ -9,6 +9,7 @@ from uuid import uuid4
 from serving.tools.diagram import inline_schema
 
 from .call_stack import simulate_call_stack
+from .db import DB_SCENE_FORMATS, DB_SIMULATORS
 from .graph import simulate_graph_traversal, simulate_tree_traversal
 from .hierarchical import simulate_bst, simulate_hash_table, simulate_heap
 from .linear import simulate_array, simulate_linked_list, simulate_queue, simulate_stack
@@ -30,6 +31,7 @@ SIMULATORS = {
     'tree_traversal': simulate_tree_traversal,
     'cpu_schedule': simulate_cpu_schedule,
     'call_stack': simulate_call_stack,
+    **DB_SIMULATORS,
 }
 
 
@@ -91,6 +93,7 @@ SCENE_FORMATS = {
     'cpu_schedule': {'kind': 'cpu_schedule', 'algorithm': 'fcfs', 'quantum': 2,
                      'processes': [{'name': 'P1', 'arrival': 0, 'burst': 3, 'priority': 2},
                                    {'name': 'P2', 'arrival': 1, 'burst': 2, 'priority': 1}]},
+    **DB_SCENE_FORMATS,
 }
 
 
