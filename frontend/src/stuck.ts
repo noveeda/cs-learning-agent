@@ -44,6 +44,8 @@ export type StuckView =
       gaps: ConceptRef[];
       evidence: Evidence[];
       opted_out: boolean;
+      // 막힌 개념이 선수 개념 없는 1단계 개념인지; 필드 도입 전 저장 세션이면 없음(일반 개념처럼 표시)
+      root?: boolean;
     }
   | {
       kind: "remediation";
