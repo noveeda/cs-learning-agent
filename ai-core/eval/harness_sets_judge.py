@@ -236,7 +236,9 @@ def scope_sheet(rows, concept_map, out: Path, seed=0) -> None:
     out.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
-## @brief 판정 세트 사용자 표본 시트: 맞는 문장·망가뜨린 문장 반반으로 n개, 근거 문단 앞부분과 함께
+## @brief 판정 세트 사용자 표본 시트: 맞는 문장·망가뜨린 문장 반반으로 n개
+# - 위에는 한눈에 보는 요약 표, 아래에는 행마다 문장과 근거 문단 원문 전체(인용 블록)를 둠
+#   - 문단(최대 1200자)을 표 칸에 넣으면 읽기 어렵고, 앞부분만 보이면 문장과 대조할 수 없어 행별 블록으로 나눔
 def judge_sheet(rows, out: Path, n=50, seed=0) -> None:
     rng = random.Random(seed)
     picked = []
@@ -246,17 +248,21 @@ def judge_sheet(rows, out: Path, n=50, seed=0) -> None:
     picked.sort(key=lambda r: r['id'])
     kinds = {None: '-', 'number': '숫자 바꾸기', 'negation': '반대로 말하기', 'addition': '없는 내용 덧붙이기',
              'swap_concept': '개념 바꾸기'}
-    lines = ['# 일치 판정 측정 세트 표본 50개 (사용자 확인용)', '',
+    answer = lambda row: '맞음' if row['label'] == 'supported' else '틀림'  # noqa: E731
+    lines = [f'# 일치 판정 측정 세트 표본 {len(picked)}개 (사용자 확인용)', '',
              '- 하네스의 판정 단계(한국어 문장 하나가 교재 문단과 맞는지)를 잴 세트입니다.',
              '- "맞음" 문장은 26B 하네스가 판정을 통과시킨 문장이고, "틀림" 문장은 그 문장을 일부러 망가뜨린 것입니다.',
              '- 확인할 것: "맞음"이 정말 문단과 맞는지, "틀림"이 정말 문단과 어긋나는지(우연히 맞게 바뀌지 않았는지).',
-             '- 이상한 행은 "확인" 칸에 X와 이유를 적어 주세요.', '',
+             '- 아래 요약 표의 "확인" 칸에 이상한 행만 X와 이유를 적어 주세요. 근거 문단 원문은 표 아래 행별로 있습니다.', '',
              f'- 전체: {len(rows)}개 (맞음 {sum(r["label"] == "supported" for r in rows)}, '
              f'틀림 {sum(r["label"] == "unsupported" for r in rows)})', '',
-             '| ID | 정답 | 망가뜨린 방식 | 문장 | 근거 문단(앞 300자) | 확인 |', '|---|---|---|---|---|---|']
+             '| ID | 정답 | 망가뜨린 방식 | 문장 | 확인 |', '|---|---|---|---|---|']
     for row in picked:
-        lines.append(f'| {row["id"]} | {"맞음" if row["label"] == "supported" else "틀림"} | {kinds[row["perturbation"]]} | '
-                     f'{_cell(row["sentence"])} | {_cell(row["passage"], 300)} |  |')
+        lines.append(f'| {row["id"]} | {answer(row)} | {kinds[row["perturbation"]]} | {_cell(row["sentence"])} |  |')
+    for row in picked:
+        label = answer(row) + (f' · {kinds[row["perturbation"]]}' if row['perturbation'] else '')
+        quote = '\n>\n'.join(f'> {" ".join(p.split())}' for p in row['passage'].split('\n\n') if p.strip())
+        lines += ['', f'## {row["id"]} · {label}', '', f'- 문장: {row["sentence"]}', '- 근거 문단(원문 전체):', '', quote]
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
