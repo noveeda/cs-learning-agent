@@ -1,11 +1,11 @@
 /**
  * @file
- * @brief 공통 마크다운의 표·수식·한글 강조와 코드·원시 HTML 보존 경계 검증
+ * @brief 공통 마크다운의 표·수식·한글 강조·각주와 코드·원시 HTML 보존 경계 검증
  */
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { createElement } from 'react';
+import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 
@@ -89,4 +89,30 @@ test('원시 HTML은 이스케이프하고 위험한 링크는 실행 가능한 
 test('수식 명령으로 신뢰하지 않는 링크를 만들지 않는다', () => {
   const html = render(String.raw`$\href{javascript:alert(1)}{x}$ $\url{https://example.com}$`);
   assert.doesNotMatch(html, /<a\b|href=/);
+});
+
+// 하네스 답은 각주 이름이 늘 p1~p3이라, 한 화면의 두 답이 같은 id를 쓰면 두 번째 답의 각주 번호가 첫 답의 각주로 이동함
+test('한 화면의 두 답은 각주 id가 겹치지 않고 각자 자기 각주를 가리킨다', () => {
+  const answer = '스택은 마지막 값을 먼저 꺼낸다.[^p1]\n\n[^p1]: > 원문 인용';
+  const html = renderToStaticMarkup(createElement(Fragment, null,
+    createElement('div', { key: 'a' }, createElement(LearningMarkdown, null, answer)),
+    createElement('div', { key: 'b' }, createElement(LearningMarkdown, null, answer))));
+  const ids = [...html.matchAll(/ id="([^"]+)"/g)].map(m => m[1]);
+  assert.equal(new Set(ids).size, ids.length, `겹친 id: ${ids}`);
+  const [first, second] = html.split('</div>');
+  for (const part of [first, second]) {
+    const ref = part.match(/href="#([^"]+)"[^>]*data-footnote-ref/)[1];
+    assert.match(part, new RegExp(` id="${ref}"`));
+    // 각주 번호가 설명으로 가리키는 숨김 제목("각주")도 같은 답 안의 것이어야 함
+    const label = part.match(/aria-describedby="([^"]+)"/)[1];
+    assert.match(part, new RegExp(` id="${label}"`));
+  }
+});
+
+// 화면 읽기 프로그램이 각주 영역·되돌아가기 링크를 영어로 읽지 않게 함
+test('각주 숨김 라벨과 되돌아가기 링크 이름을 한국어로 출력한다', () => {
+  const html = render('본문[^p1]\n\n[^p1]: 원문');
+  assert.match(html, /<h2[^>]*class="sr-only"[^>]*>각주<\/h2>/);
+  assert.match(html, /aria-label="본문으로 돌아가기"/);
+  assert.doesNotMatch(html, /Footnotes|Back to reference/);
 });
