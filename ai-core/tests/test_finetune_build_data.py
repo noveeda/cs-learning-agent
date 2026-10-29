@@ -5,7 +5,7 @@ import json
 import unittest
 from collections import Counter
 
-from finetune.build_data import (holdout_terms, passes_gateway, refilter_rows, scope_rows, split_rows,
+from finetune.build_data import (holdout_terms, passes_gateway, refilter_rows, run_guarded, scope_rows, split_rows,
                                  training_judge_rows, verified_pool)
 from finetune.capture import recorded_rows
 from finetune.split import normalize_question
@@ -145,6 +145,35 @@ class SplitTests(unittest.TestCase):
         self.assertEqual((train, valid), split_rows(rows, seed=0))
         self.assertNotEqual(valid, split_rows(rows, seed=1)[1])
         self.assertFalse({r['messages'][0]['content'] for r in train} & {r['messages'][0]['content'] for r in valid})
+
+
+class HarvestGuardTests(unittest.TestCase):
+    # 검증 목적: 녹화 중 오류(outcome='error')는 녹화 끝으로 쓰지 않고, 최근 오류가 몰리면 남은 질문을 건너뛰고 멈추는지 확인
+    # - 26B가 재시작되는 동안 질문마다 바로 실패해 오류 기록 6000건이 '녹화 끝'으로 남았던 일을 막음
+    def run_with(self, outcomes):
+        written, done = [], []
+
+        def work(i):
+            done.append(i)
+            return {'id': i, 'record': {'outcome': outcomes[i]}}
+
+        counts, stopped = run_guarded(range(len(outcomes)), work, written.append, workers=1, window=40, max_errors=10)
+        return written, done, counts, stopped
+
+    def test_stops_when_errors_cluster(self):
+        written, done, counts, stopped = self.run_with(['answered'] * 30 + ['error'] * 970)
+        self.assertTrue(stopped)
+        self.assertEqual(len(done), 40)
+        self.assertEqual([r['id'] for r in written], list(range(30)))
+        self.assertEqual(counts, {'ok': 30, 'error': 10})
+
+    def test_scattered_errors_finish_without_writing_errors(self):
+        outcomes = ['error' if i % 10 == 0 else 'no_source' for i in range(200)]
+        written, done, counts, stopped = self.run_with(outcomes)
+        self.assertFalse(stopped)
+        self.assertEqual(len(done), 200)
+        self.assertEqual(len(written), 180)
+        self.assertNotIn('error', {r['record']['outcome'] for r in written})
 
 
 if __name__ == '__main__':
