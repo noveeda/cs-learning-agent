@@ -196,11 +196,10 @@ export HARNESS_SETS_DIR=/home/infoserver/cs-learning-agent/ai-core/outputs/harne
 # (1) 범위 세트: 26B(8000번)가 종류별 학생 질문을 씀 → scope.jsonl, 표본 시트 ~/cs-handoff/scope-sample.md
 .venv/bin/python -m eval.harness_sets_judge scope
 # (2) 맞는 문장 모으기: 26B 하네스로 범위 세트의 직접 질문 120개를 처리 → harvest-logs/*.jsonl
-#     색인과 임베딩은 2장에서 고른 값(bge-m3, RAG_MIN_SCORE=0.51)
-RAG_EMBED_MODEL=bge-m3 RAG_MIN_SCORE=0.51 .venv/bin/python -m eval.harness_sets_judge harvest \
-  --index $HARNESS_SETS_DIR/index-bge-m3.sqlite --limit 120
+#     색인은 확정 색인 RAG_DATA_DIR/index.sqlite(--index를 빼면 이것을 씀), 임베딩·기준은 2-3에서 정한 값(bge-m3, RAG_MIN_SCORE=0.50)
+RAG_EMBED_MODEL=bge-m3 RAG_MIN_SCORE=0.50 .venv/bin/python -m eval.harness_sets_judge harvest --limit 120
 # (3) 판정 세트: verified 문장 절반은 그대로, 절반은 망가뜨림 → judge.jsonl, 표본 시트 ~/cs-handoff/judge-sample.md
-.venv/bin/python -m eval.harness_sets_judge perturb --index $HARNESS_SETS_DIR/index-bge-m3.sqlite --map-commit 69edcaf
+.venv/bin/python -m eval.harness_sets_judge perturb --map-commit bbbce57
 # (4) 채점 세트: Mohler 사람 채점 원본(영어)과 검수한 루브릭 → grading.jsonl
 .venv/bin/python -m eval.harness_sets_judge grading \
   --data /home/infoserver/cs-eval-data/raw/mohler/open_ended.jsonl \
@@ -208,40 +207,46 @@ RAG_EMBED_MODEL=bge-m3 RAG_MIN_SCORE=0.51 .venv/bin/python -m eval.harness_sets_
 ```
 
 - 절 대응표가 검수로 바뀌면 색인을 다시 만든 뒤 (2)·(3)을 다시 실행한다. 이전 `harvest-logs/`는 지우고 실행한다.
-- 지금 세트(3-2)는 **초안 색인**으로 만들었다. 확정 대응표(PR #113, `bbbce57`)의 색인이 `RAG_DATA_DIR/index.sqlite`에 생기면 `--index`를 빼고 다시 만든다.
-
-  ```bash
-  rm -rf $HARNESS_SETS_DIR/harvest-logs
-  RAG_EMBED_MODEL=bge-m3 RAG_MIN_SCORE=0.51 .venv/bin/python -m eval.harness_sets_judge harvest --limit 120
-  .venv/bin/python -m eval.harness_sets_judge perturb --map-commit bbbce57
-  ```
+- 처음 세트는 초안 색인(`index-bge-m3.sqlite`, 대응표 `69edcaf`)으로 만들었고, 확정 색인으로 다시 만들면서 초안 결과는 이름에 `-draft-69edcaf`를 붙여 남겼다.
+  - `judge-draft-69edcaf.jsonl`, `judge-draft-69edcaf.meta.json`, `harvest-logs-draft-69edcaf/`, `~/cs-handoff/judge-sample-draft-69edcaf.md`
 - (1)·(4)는 대응표와 무관하다.
 
-### 3-2. 결과 (2026-10-29, 초안 대응표 PR #113 `69edcaf` 기준 색인)
+### 3-2. 결과 (2026-10-29, 확정 색인: 대응표 `bbbce57`, 문단 956·그림 23, `RAG_MIN_SCORE=0.50`)
 
 | 세트 | 행 | 구성 | 정답의 근거 |
 |---|---:|---|---|
 | `scope.jsonl` | 485 | 직접 305(개념당 5), 비교 60, 지도 밖 60(그중 코드 요청 20), 후속 60 | 질문을 만든 규칙(개념·선수 관계 쌍·지도 밖·직전 개념) |
-| `judge.jsonl` | 590 | 맞음 295, 틀림 295(덧붙이기 109, 개념 바꾸기 84, 반대로 말하기 80, 숫자 바꾸기 22) | 망가뜨린 방식 |
+| `judge.jsonl` | 616 | 맞음 308, 틀림 308(덧붙이기 123, 개념 바꾸기 89, 반대로 말하기 77, 숫자 바꾸기 19) | 망가뜨린 방식 |
 | `grading.jsonl` | 2,273 | 루브릭이 있는 81문항 전체, 사람 통과(평균 4.0 이상) 1,639 | 사람 채점 점수 |
 
 - 범위 세트
   - 비교 질문은 선수 관계(개념 → 선수 개념) 82쌍 중 60쌍에서 만들었다.
   - 문항 은행과 같은 문장, 한자가 섞인 질문은 버리고 다시 만들었다.
 - 판정 세트
-  - 맞는 문장은 26B 하네스가 verified로 낸 문장(근거 문단 1개) 590개다. harvest 120질문의 결과는 답변 110, 근거 없음 7, 원문 대체 3이다.
+  - 맞는 문장은 26B 하네스가 verified로 낸 문장(근거 문단 1개) 617개 중 616개다(반반을 맞추려고 1개 뺌).
+  - harvest는 초안 때와 같은 120질문(seed 0)이다. 초안 색인 결과와 비교하면 아래와 같다.
+
+    | | 초안 색인 `69edcaf` | 확정 색인 `bbbce57` |
+    |---|---:|---:|
+    | 답변 / 근거 없음 / 원문 대체 | 110 / 7 / 3 | 110 / 7 / 3 |
+    | 문장 verified / 확인 필요 | 635 / 71 | 647 / 61 |
+    | 수정 시도 / 수정 실패(`:` 응답) | 86 / 9 | 80 / 0 |
+    | 수정 후 verified | 15 | 19 |
+    | 그림이 붙은 답 | 0 | 8 |
+
+  - 확정 색인 수확은 `:` 수정(PR #122) 뒤라 수정 역할이 실패 없이 동작했다. 모든 역할에서 형식 오류 재시도 경고가 0건이었다.
   - 숫자 바꾸기·반대로 말하기는 코드 규칙으로, 덧붙이기·개념 바꾸기는 26B로 했다.
   - 숫자가 있는 문장은 숫자 바꾸기를 먼저 시도한다. 영문자에 붙은 숫자(`L1`, `IPv4`)는 이름이라 바꾸지 않는다.
 - 채점 세트: `split`(dev·report)은 `eval/mohler.py`의 문항 묶음 분할과 같다.
 - **사용자 표본 확인 요청**
   - `~/cs-handoff/scope-sample.md`: 개념당 직접 질문 1개 + 비교·지도 밖·후속 각 5개
-  - `~/cs-handoff/judge-sample.md`: 맞음 25 + 틀림 25
+  - `~/cs-handoff/judge-sample.md`: 맞음 25 + 틀림 25. 요약 표 아래에 행마다 문장과 근거 문단 원문 전체를 둠
 
 ### 3-3. 한계와 발견
 
 - **채점 측정은 영어 답 기준이다.** Mohler는 번역하지 않았다. 번역도 모델 생성이라 검수 대상이 늘어나기 때문이다(2026-10-29 코디네이터 결정). 한국어 답에서의 거짓 불통과는 석사생 채점 세트가 생기면 다시 잰다.
-- **판정 세트는 초안 대응표 기준이다.** 맞는 문장이 초안 색인의 문단에서 나왔다. 대응표가 바뀌면 3-1의 (2)·(3)으로 다시 만든다.
+- **판정 세트는 확정 대응표(`bbbce57`) 기준이다.** 대응표가 다시 바뀌면 이전 `harvest-logs/`를 옮기거나 지운 뒤 3-1의 (2)·(3)으로 다시 만든다.
 - **26B와 strict JSON schema의 `:` 출력**
   - 문자열 하나(`{"sentence": ...}`)를 schema로 묶으면 26B가 `{"sentence":": "}`를 내는 경우가 많았다. 같은 요청을 schema 없이 보내면 정상 문장이 나왔다.
   - 그래서 교란 요청은 schema 없이 받고 결과를 코드로 검사한다.
-  - 하네스의 생성·수정 역할에서 나온 `:` 문장(PR #115 실측, harvest 중 수정 역할의 `:` 응답)도 같은 원인으로 보인다.
+  - 하네스 생성·판정·수정 역할의 같은 현상은 원인을 찾아 PR #122에서 고쳤다(지시에 공백 없는 JSON 예시). 확정 색인 수확에서 수정 실패 0건으로 확인했다.

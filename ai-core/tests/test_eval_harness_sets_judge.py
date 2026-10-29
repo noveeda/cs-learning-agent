@@ -2,9 +2,11 @@
 # @brief 하네스 측정 세트 생성기(범위·판정·채점, eval.harness_sets_judge)가 정답이 생성 규칙에서 정해지도록 세트를 만드는지 검증
 # - 모델(26B) 대신 결정적 가짜 생성 함수를 넣어, 개수·종류·정답·seed 재현성만 확인함
 import random
+import tempfile
 import unittest
+from pathlib import Path
 
-from eval.harness_sets_judge import (grading_set, negate, number_perturbation, perturbation_set, scope_set,
+from eval.harness_sets_judge import (grading_set, judge_sheet, negate, number_perturbation, perturbation_set, scope_set,
                                      verified_rows_from_logs)
 from serving.concept_map import load_concept_map
 
@@ -123,6 +125,28 @@ class PerturbationTests(unittest.TestCase):
                    {'outcome': 'blocked'}]
         rows = verified_rows_from_logs(records, {'ods:a:0': 'Text A', 'ods:b:0': 'Text B'}.get)
         self.assertEqual(rows, [{'id': 'v0000', 'sentence': '맞음.', 'passage': 'Text A', 'passage_id': 'ods:a:0'}])
+
+
+class JudgeSheetTests(unittest.TestCase):
+    # 검증 목적: 판정 표본 시트가 맞음·틀림을 반반 뽑고, 틀림에는 망가뜨린 방식을 한국어로 적으며,
+    #   사용자가 문장과 대조할 수 있게 근거 문단 원문을 자르지 않고 모두 싣는지 확인
+    def test_judge_sheet_balanced_with_full_passage(self):
+        rows = [{'id': f'judge-{i:04d}', 'sentence': f'문장 {i}번은 검사 대상이다.',
+                 'passage': f'Passage {i} ' + 'long text ' * 120 + f'end {i}.',
+                 'label': 'supported' if i % 2 else 'unsupported', 'perturbation': None if i % 2 else 'negation',
+                 'source_id': f'v{i}'} for i in range(40)]
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'judge-sample.md'
+            judge_sheet(rows, out, n=10, seed=0)
+            text = out.read_text(encoding='utf-8')
+        headers = [line for line in text.splitlines() if line.startswith('## judge-')]
+        self.assertEqual(len(headers), 10)
+        self.assertEqual(sum('· 맞음' in h for h in headers), 5)
+        self.assertEqual(sum('· 틀림 · 반대로 말하기' in h for h in headers), 5)
+        for header in headers:
+            row = rows[int(header.split()[1].split('-')[1])]
+            self.assertIn(f'> {row["passage"]}', text)
+            self.assertIn(row['sentence'], text)
 
 
 class GradingSetTests(unittest.TestCase):
