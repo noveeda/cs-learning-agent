@@ -6,7 +6,7 @@
 """Process state transition and scheduling metric simulators."""
 from typing import Annotated, Literal, Union
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .model import Animation, Arrow, Box, CpuScheduleRequest, Frame, Proc, Strict, build_animation, josa
 from .scheduling import ALGORITHMS, schedule
@@ -29,15 +29,26 @@ class NamedStateOp(Strict):
 ## @brief 프로세스 상태 전이 장면. 프로세스가 하나도 없고 CPU가 비어 있는 상태에서 시작해 사건을 차례로 실행
 # - 처음 준비 큐도 arrive 사건으로 만듦: 새 프로세스가 준비 상태로 들어오는 것도 상태 전이이고, 채팅 도구의 기존 필드(ops·name)만 쓰기 위함
 # - 사건 10개(프레임 11장)는 한 장면을 이전·다음 버튼으로 따라갈 수 있는 교육적 분량 제한
+# - algorithm(선택): 상태판을 그 스케줄링 방식의 관점으로 설명. fcfs는 비선점이라 시간 만료 사건을 거부하고,
+#   캡션에 FCFS·RR 규칙을 적음. 생성(new) 상태는 단순화를 위해 그리지 않음(도착하면 바로 준비 큐)
 class ProcessStateRequest(Strict):
     kind: Literal['process_state']
     ops: list[Annotated[Union[StateOp, NamedStateOp], Field(discriminator='op')]] = Field(min_length=1, max_length=10)
+    algorithm: Literal['fcfs', 'rr'] | None = None
+
+    ## @brief FCFS 관점인데 시간 만료(선점) 사건이 있으면 거부: 비선점 방식을 잘못 가르치지 않게 하기 위함
+    @model_validator(mode='after')
+    def validate_policy(self):
+        if self.algorithm == 'fcfs' and any(op.op == 'timeout' for op in self.ops):
+            raise ValueError('FCFS는 비선점이라 timeout(시간 만료) 사건을 쓸 수 없습니다')
+        return self
 
 
-## @brief 스케줄링 지표 장면. 입력 규칙은 cpu_schedule과 같고, 표가 격자(y=3~6)에 들도록 프로세스는 4개까지
+## @brief 스케줄링 지표 장면. 입력 규칙은 cpu_schedule과 같고, 프로세스는 3개까지
+# - 프레임 상자 상한(40): 시간 눈금 12 + 간트 12 + 표 3줄×4 + 평균 줄 4 = 40. 4개면 44개가 되어 그릴 수 없음
 class ScheduleMetricsRequest(CpuScheduleRequest):
     kind: Literal['schedule_metrics']
-    processes: list[Proc] = Field(min_length=1, max_length=4)
+    processes: list[Proc] = Field(min_length=1, max_length=3)
 
 
 # 상태판 행(y)과 이름. 실행 행은 CPU가 하나라 한 칸만 씀
@@ -51,6 +62,16 @@ EVENTS = {
     'io_done': ('waiting', 'ready', '입출력 끝', '대기 → 준비 큐 맨 뒤'),
     'exit': ('running', 'terminated', '종료', '실행 → 종료'),
     'arrive': (None, 'ready', '도착', '도착 → 준비 큐 맨 뒤'),
+}
+
+# 스케줄링 방식 관점의 제목과 사건별 설명({name}은 옮겨진 프로세스). 없는 사건은 EVENTS의 기본 설명을 씀
+POLICIES = {
+    'fcfs': {'title': 'FCFS 프로세스 상태 전이',
+             'dispatch': 'FCFS: 준비 큐 맨 앞 {name} → 실행, 끝날 때까지 CPU를 놓지 않음(비선점)',
+             'exit': 'FCFS: {name} 실행 → 종료, 그제야 다음 프로세스가 CPU를 받음'},
+    'rr': {'title': 'RR 프로세스 상태 전이',
+           'dispatch': 'RR: 준비 큐 맨 앞 {name} → 실행, 할당량만큼만 실행',
+           'timeout': 'RR: {name} 할당량을 다 써서 실행 → 준비 큐 맨 뒤'},
 }
 
 
@@ -73,6 +94,7 @@ def state_frame(board, caption, moved=None, source=None, arrow=None) -> Frame:
 ## @brief 사건을 차례로 실행하며 상태판을 옮김. 실행할 수 없는 사건은 이유를 담아 ValueError
 def simulate_process_state(req: ProcessStateRequest) -> Animation:
     board = {'ready': [], 'running': [], 'waiting': [], 'terminated': []}
+    policy = POLICIES.get(req.algorithm, {})
     frames = [state_frame(board, '시작: 프로세스 없음, CPU 비어 있음')]
     for event in req.ops:
         start, end, arrow, change = EVENTS[event.op]
@@ -97,8 +119,9 @@ def simulate_process_state(req: ProcessStateRequest) -> Animation:
             if any(name in names for names in board.values()):
                 raise ValueError(f'arrive: {name}{josa(int(name[1]), "은", "는")} 이미 있는 프로세스입니다')
         board[end].append(name)
-        frames.append(state_frame(board, f'{name} {change}', moved=name, source=start, arrow=arrow))
-    return build_animation('process_state', '프로세스 상태 전이', frames)
+        caption = policy[event.op].format(name=name) if event.op in policy else f'{name} {change}'
+        frames.append(state_frame(board, caption, moved=name, source=start, arrow=arrow))
+    return build_animation('process_state', policy.get('title', '프로세스 상태 전이'), frames)
 
 
 ## @brief 지표 장면 한 장. 간트(y=0 눈금, y=1 칸) 아래에 지금까지 계산한 프로세스 표와 평균 줄을 그림

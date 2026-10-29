@@ -2,6 +2,7 @@
 # @brief 프로세스 상태 전이(process_state)와 스케줄링 지표(schedule_metrics) 장면이 손으로 계산한 상태·지표를 그리는지,
 # 실행할 수 없는 사건·그릴 수 없는 입력을 거부하는지 검증
 # - 기대값은 시뮬레이터를 거치지 않고 손으로 계산해 적음: 코드와 같은 실수를 테스트가 따라 하지 않게 하기 위함
+import random
 import unittest
 
 from pydantic import ValidationError
@@ -114,6 +115,40 @@ class ProcessStateTests(unittest.TestCase):
             with self.subTest(request=request), self.assertRaises(ValidationError):
                 AnimationRequestModel.model_validate({'kind': 'process_state', **request})
 
+    # 검증 목적: algorithm을 주면 캡션이 그 방식의 규칙(FCFS 비선점, RR 할당량)을 말하고, FCFS에는 시간 만료가 없음
+    def test_algorithm_captions(self):
+        fcfs = run({'kind': 'process_state', 'algorithm': 'fcfs',
+                    'ops': [{'op': 'arrive', 'name': 'P1'}, {'op': 'dispatch'}, {'op': 'exit'}]})
+        self.assertIn('FCFS', fcfs.title)
+        self.assertIn('FCFS', fcfs.frames[2].caption)
+        self.assertIn('비선점', fcfs.frames[2].caption)
+        rr = run({'kind': 'process_state', 'algorithm': 'rr',
+                  'ops': [{'op': 'arrive', 'name': 'P1'}, {'op': 'dispatch'}, {'op': 'timeout'}]})
+        self.assertIn('할당량', rr.frames[3].caption)
+        plain = states(['P1'], {'op': 'dispatch'})
+        self.assertEqual(plain.frames[2].caption, 'P1 준비 → 실행')
+        with self.assertRaisesRegex(ValidationError, '비선점'):
+            AnimationRequestModel.model_validate({'kind': 'process_state', 'algorithm': 'fcfs',
+                                                  'ops': [{'op': 'arrive', 'name': 'P1'}, {'op': 'dispatch'},
+                                                          {'op': 'timeout'}]})
+
+    # 검증 목적: 스키마를 통과한 무작위 사건 열은 그려지거나, 실행할 수 없는 사건이면 한국어 ValueError로만 거부됨
+    # - Pydantic 프레임 검증 오류(영어)가 새어 나오면 막힘 보충·채팅이 이유를 알 수 없으므로 막음
+    def test_random_valid_requests_simulate_or_explain(self):
+        rng = random.Random(7)
+        names = ['P1', 'P2', 'P3', 'P4', 'P5']
+        for _ in range(500):
+            ops = [rng.choice([{'op': 'dispatch'}, {'op': 'timeout'}, {'op': 'io_request'}, {'op': 'exit'},
+                               {'op': 'io_done', 'name': rng.choice(names)}, {'op': 'arrive', 'name': rng.choice(names)}])
+                   for _ in range(rng.randint(1, 10))]
+            request = AnimationRequestModel.model_validate({'kind': 'process_state', 'ops': ops}).root
+            try:
+                simulate(request)
+            except ValidationError as error:
+                self.fail(f'{ops}: {error}')
+            except ValueError as error:
+                self.assertRegex(str(error), '[가-힣]')
+
 
 class ScheduleMetricsTests(unittest.TestCase):
     # 검증 목적: 비선점 FCFS는 반환 = 완료 - 도착, 대기 = 반환 - 실행, 응답 = 첫 실행 - 도착이고 대기와 응답이 같음
@@ -142,11 +177,14 @@ class ScheduleMetricsTests(unittest.TestCase):
         p1 = [b.x for b in animation.frames[1].boxes if b.y == 1 and b.tone == 'active']
         self.assertEqual(p1, [0, 1, 5])
 
-    # 검증 목적: 표가 격자 안에 들도록 프로세스는 4개까지, rr의 quantum 누락 같은 기존 스케줄 규칙도 그대로 거부
+    # 검증 목적: 한 프레임 상자 상한(40) 안에 들도록 프로세스는 3개까지, rr의 quantum 누락 같은 기존 스케줄 규칙도 그대로 거부
+    # - 4개면 시간 눈금 12 + 간트 12 + 표 4줄×4 + 평균 4 = 44개라 그릴 수 없음(FCFS, 실행 3씩, 모두 0 도착)
     def test_rejects_invalid_requests(self):
         five = [{'name': f'P{i}', 'arrival': 0, 'burst': 1} for i in range(1, 6)]
+        four = [{'name': f'P{i}', 'arrival': 0, 'burst': 3} for i in range(1, 5)]
         bad = [
             {'algorithm': 'fcfs', 'processes': five},
+            {'algorithm': 'fcfs', 'processes': four},
             {'algorithm': 'rr', 'processes': five[:2]},
             {'algorithm': 'fcfs', 'processes': [{'name': 'P1', 'arrival': 0, 'burst': 6},
                                                 {'name': 'P2', 'arrival': 0, 'burst': 6},
@@ -155,6 +193,31 @@ class ScheduleMetricsTests(unittest.TestCase):
         for request in bad:
             with self.subTest(request=request), self.assertRaises(ValidationError):
                 AnimationRequestModel.model_validate({'kind': 'schedule_metrics', **request})
+
+
+    # 검증 목적: 가장 큰 표(3줄)와 가장 긴 간트(12칸)를 함께 그려도 프레임 상자 상한 안에 듦
+    def test_largest_table_fits(self):
+        animation = run({'kind': 'schedule_metrics', 'algorithm': 'fcfs', 'processes': [
+            {'name': f'P{i}', 'arrival': 0, 'burst': 4} for i in range(1, 4)]})
+        self.assertEqual(max(len(f.boxes) for f in animation.frames), 40)
+
+    # 검증 목적: 스키마를 통과한 무작위 입력은 모두 그려짐(검증 통과 ⇒ simulate 성공)
+    def test_random_valid_requests_simulate(self):
+        rng = random.Random(11)
+        checked = 0
+        for _ in range(2000):
+            algorithm = rng.choice(['fcfs', 'sjf', 'rr', 'priority'])
+            processes = [{'name': f'P{i}', 'arrival': rng.randint(0, 9), 'burst': rng.randint(1, 6),
+                          'priority': rng.randint(1, 5)} for i in range(1, rng.randint(1, 4) + 1)]
+            request = {'kind': 'schedule_metrics', 'algorithm': algorithm, 'processes': processes,
+                       'quantum': rng.randint(1, 4)}
+            try:
+                validated = AnimationRequestModel.model_validate(request).root
+            except ValidationError:
+                continue
+            checked += 1
+            self.assertEqual(simulate(validated).kind, 'schedule_metrics', request)
+        self.assertGreater(checked, 500)
 
 
 class RegistrationTests(unittest.TestCase):
