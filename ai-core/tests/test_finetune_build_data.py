@@ -5,7 +5,7 @@ import json
 import unittest
 from collections import Counter
 
-from finetune.build_data import (holdout_terms, passes_gateway, refilter_rows, run_guarded, scope_rows, split_rows,
+from finetune.build_data import (holdout_terms, passes_gateway, refilter_rows, run_guarded, scope_rows, shard_of, split_rows,
                                  training_judge_rows, verified_pool)
 from finetune.capture import recorded_rows
 from finetune.split import normalize_question
@@ -157,23 +157,33 @@ class HarvestGuardTests(unittest.TestCase):
             done.append(i)
             return {'id': i, 'record': {'outcome': outcomes[i]}}
 
-        counts, stopped = run_guarded(range(len(outcomes)), work, written.append, workers=1, window=40, max_errors=10)
+        counts, stopped = run_guarded(range(len(outcomes)), work, written.append, workers=1)
         return written, done, counts, stopped
 
     def test_stops_when_errors_cluster(self):
         written, done, counts, stopped = self.run_with(['answered'] * 30 + ['error'] * 970)
         self.assertTrue(stopped)
-        self.assertEqual(len(done), 40)
+        self.assertEqual(len(done), 35)
         self.assertEqual([r['id'] for r in written], list(range(30)))
-        self.assertEqual(counts, {'ok': 30, 'error': 10})
+        self.assertEqual(counts, {'ok': 30, 'error': 5})
 
     def test_scattered_errors_finish_without_writing_errors(self):
-        outcomes = ['error' if i % 10 == 0 else 'no_source' for i in range(200)]
+        outcomes = ['error' if i % 20 == 0 else 'no_source' for i in range(200)]
         written, done, counts, stopped = self.run_with(outcomes)
         self.assertFalse(stopped)
         self.assertEqual(len(done), 200)
-        self.assertEqual(len(written), 180)
+        self.assertEqual(len(written), 190)
         self.assertNotIn('error', {r['record']['outcome'] for r in written})
+
+
+class ShardTests(unittest.TestCase):
+    # 검증 목적: --shard K/N으로 나눈 녹화 대상이 겹치지 않고 합치면 전체와 같은지 확인(두 26B 서버가 같은 질문을 두 번 녹화하거나 빠뜨리지 않게)
+    def test_shards_partition_questions(self):
+        items = [f'q{i:05d}' for i in range(1003)]
+        parts = [shard_of(items, f'{k}/3') for k in range(3)]
+        self.assertEqual(sorted(sum(parts, [])), items)
+        self.assertFalse(set(parts[0]) & set(parts[1]) or set(parts[1]) & set(parts[2]) or set(parts[0]) & set(parts[2]))
+        self.assertEqual(shard_of(items, '0/1'), items)
 
 
 if __name__ == '__main__':

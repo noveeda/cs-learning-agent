@@ -46,6 +46,28 @@ PY=.venv/bin/python
 - 26B 동시 요청은 `--workers`(상한 12, 26B 서버 자체는 max-num-seqs 8)개다. 판정 단계의 26B 교란 결과는 `perturb-cache.jsonl`에 남아 다시 실행하면 재사용한다.
 - 조건(seed, 26B 모델, 절 대응표 커밋, 제외 개념과 이름 조각, 측정 세트, 단계별 행 수와 거른 이유)은 `meta.json`에 쌓인다.
 
+### 26B 두 대로 나눠 녹화하기
+
+`--shard K/N`은 seed로 섞은 질문 순서에서 인덱스 `i % N == K`인 질문만 녹화한다. 기본값 `0/1`은 전체다. 서버는 `VLLM_BASE_URL`로 고른다.
+
+1. 지금 돌고 있는 녹화를 멈춘다. 이미 쓴 행은 그대로 둔다.
+2. 두 번째 폴더를 만들고 `questions.jsonl`과 지금까지의 `records.jsonl`을 복사한다. 이미 녹화한 질문을 두 번째 서버가 다시 녹화하지 않게 하기 위해서다.
+   ```sh
+   OUT_B=/home/infoserver/cs-learning-agent/ai-core/outputs/finetune-b
+   mkdir -p $OUT_B && cp $OUT/questions.jsonl $OUT/records.jsonl $OUT_B/
+   ```
+3. 두 프로세스를 따로 돌린다.
+   ```sh
+   $PY -m finetune.build_data --stage harvest --out $OUT --shard 0/2 --workers 12 --limit 1000
+   VLLM_BASE_URL=http://127.0.0.1:20340/v1 $PY -m finetune.build_data --stage harvest --out $OUT_B --shard 1/2 --workers 12 --limit 1000
+   ```
+4. 둘 다 끝나면 두 번째 폴더의 새 행만 원본에 붙이고(같은 id는 건너뜀), 녹화 없이 ground·repair 행을 다시 만든다.
+   ```sh
+   $PY -c "import json,sys; a,b=sys.argv[1:]; seen={json.loads(l)['id'] for l in open(a)}; new=[l for l in open(b) if json.loads(l)['id'] not in seen]; open(a,'a').writelines(new); print(len(new),'행 추가')" $OUT/records.jsonl $OUT_B/records.jsonl
+   $PY -m finetune.build_data --stage harvest --out $OUT --limit 0
+   ```
+5. `--limit 0`으로 남은 질문이 0개인지 확인한다. 남았으면(오류로 멈춘 경우) 원본 폴더에서 `--shard` 없이 이어 녹화한다.
+
 ## 3. 거르는 규칙
 
 | 이유 | 뜻 | 처리 |

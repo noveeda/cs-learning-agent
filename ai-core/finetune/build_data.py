@@ -11,7 +11,8 @@
 # 1. 질문 만들기: python -m finetune.build_data --stage questions --out <폴더>
 # 2. 하네스 실행 녹화와 ground·repair 행: python -m finetune.build_data --stage harvest --out <폴더> --limit N --workers 8
 #    (중단돼도 다시 실행하면 이미 녹화한 질문은 건너뜀. --limit 0이면 녹화 없이 ground·repair 행만 다시 만듦)
-#    (시작 전 26B를 확인하고, 최근 40건 중 오류가 10건이면 멈춤. 오류 기록은 남기지 않아 다음 실행에서 다시 녹화)
+#    (시작 전 26B를 확인하고, 최근 40건 중 오류가 5건이면 멈춤. 오류 기록은 남기지 않아 다음 실행에서 다시 녹화)
+#    (26B 여러 대: --shard K/N과 서버마다 VLLM_BASE_URL·--out을 따로 주고, 끝나면 records를 합쳐 --limit 0으로 다시 만듦)
 # 3. 판정 행: python -m finetune.build_data --stage judge --out <폴더> --workers 8
 # 4. 범위 행: python -m finetune.build_data --stage scope --out <폴더>
 # 5. 학습·검증 분할: python -m finetune.build_data --stage split --out <폴더>
@@ -482,12 +483,19 @@ def _harvest_one(question, concept_map, retriever):
             'call_roles': dict(Counter(c['role'] for c in sink)), 'audits': audits}
 
 
+## @brief 녹화 대상을 'K/N' 분할로 나눔: seed 순서 인덱스 i가 i % N == K인 것만 남김(기본 '0/1'은 전체)
+# - 26B 서버 여러 대가 같은 질문을 두 번 녹화하거나 빠뜨리지 않게, 섞은 뒤 순서로만 나눔
+def shard_of(items, shard='0/1'):
+    k, n = (int(x) for x in shard.split('/'))
+    return [item for i, item in enumerate(items) if i % n == k]
+
+
 ## @brief 녹화를 workers개 동시에 돌려 결과를 write로 넘기고, 최근 window건 중 오류가 max_errors건 이상이면 남은 질문을 건너뛰고 멈춤
 # - 반환: ({'ok': 쓴 건수, 'error': 오류 건수}, 멈췄는지)
 # - 오류(outcome='error') 기록은 쓰지 않음: 서버가 내려간 동안의 실패가 '녹화 끝'으로 남으면 다시 실행해도 그 질문을 건너뜀
 # - 26B가 재시작되면 질문마다 곧바로 실패해 수천 건이 몇 분 만에 오류로 끝나므로, 최근 오류 비율로 끊음
-#   (정상 녹화 1,000건에서는 오류가 0건이었음)
-def run_guarded(todo, work, write, workers, window=40, max_errors=10):
+#   기준은 오류 10% 초과(최근 40건 중 5건). 정상 녹화 1,300건에서는 오류가 0건이었음
+def run_guarded(todo, work, write, workers, window=40, max_errors=5):
     recent, counts, lock, stop = deque(maxlen=window), Counter(), threading.Lock(), threading.Event()
 
     def run(item):
@@ -519,7 +527,9 @@ def _harvest_stage(args, concept_map, holdout, terms, measured, trainable):
     done = {r['id'] for r in _read_jsonl(path)}
     candidates = [q for q in _read_jsonl(args.out / 'questions.jsonl') if q['kind'] in ('direct', 'compare')]
     random.Random(args.seed).shuffle(candidates)
-    todo = [q for q in candidates if q['id'] not in done][:args.limit]
+    pending = [q for q in shard_of(candidates, args.shard) if q['id'] not in done]
+    todo = pending[:args.limit]
+    print(f'남은 질문 {len(pending)}개 중 {len(todo)}개 녹화({args.shard})', flush=True)
     if todo:
         try:  # 시작 전 서버 확인: 내려간 서버에 질문을 쏟아 오류만 쌓지 않게 함
             _client()
@@ -588,6 +598,7 @@ def main(argv=None):
     parser.add_argument('--out', type=Path, default=AI_CORE / 'outputs' / 'finetune')
     parser.add_argument('--workers', type=int, default=8, help='26B 동시 요청 수(상한 12: 26B가 max-num-seqs 8로 재시작된 뒤 검색·임베딩 대기분까지 채우도록 허락)')
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--shard', default='0/1', help="harvest: 'K/N'이면 seed 순서 인덱스 i %% N == K인 질문만 녹화(26B 여러 대 분할)")
     parser.add_argument('--measured', type=Path, nargs='*',
                         default=[HARNESS_SETS / 'scope.jsonl', HARNESS_SETS / 'retrieval.jsonl'],
                         help='측정 세트 jsonl(question 필드). 제외 개념 추가 측정 세트가 생기면 함께 넘김')
@@ -597,7 +608,7 @@ def main(argv=None):
     parser.add_argument('--per-edge', type=int, default=6, help='questions: 선수 관계 쌍마다 비교 질문 수')
     parser.add_argument('--outside', type=int, default=250)
     parser.add_argument('--code', type=int, default=120)
-    parser.add_argument('--follow-ups', type=int, default=430, help='questions: 후속 질문 수(약 13%는 직전 개념이 제외 개념)')
+    parser.add_argument('--follow-ups', type=int, default=430, help='questions: 후속 질문 수(약 13%%는 직전 개념이 제외 개념)')
     parser.add_argument('--judge-target', type=int, default=JUDGE_TARGET)
     args = parser.parse_args(argv)
     if args.workers > 12:
