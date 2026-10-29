@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from eval.harness_retrieval import gold_scores, recall_at_k
-from eval.harness_sets import retrieval_set, sample_sheet, usable_question
+from eval.harness_sets import refresh_retrieval_set, retrieval_set, sample_sheet, usable_question
 from rag.index import Chunk, build_index
 from rag.parse import Section
 from rag.search import Retriever
@@ -53,6 +53,32 @@ class RetrievalSetTests(unittest.TestCase):
         picks = {tuple(r['gold_chunk'] for r in retrieval_set(chunks, _concepts_of, _write_question, seed=s))
                  for s in range(5)}
         self.assertGreater(len(picks), 1)
+
+    # 검증 목적: 대응표가 바뀐 뒤 세트를 고칠 때, 정답 문단이 아직 그 개념에 대응되는 행은 질문까지 그대로 두고
+    #   대응이 끊긴 행만 빼서 같은 개념의 안 쓴 문단으로 채우는지 확인(남은 행의 질문을 다시 만들면 측정이 흔들림)
+    def test_refresh_keeps_valid_rows_and_tops_up(self):
+        old = [{'id': 'stack#0', 'concept': 'stack', 'question': 'kept', 'gold_chunk': 'ods:stack:0'},
+               {'id': 'stack#1', 'concept': 'stack', 'question': 'stale', 'gold_chunk': 'ods:queue:0'},
+               {'id': 'heap#0', 'concept': 'heap', 'question': 'gone concept', 'gold_chunk': 'ods:heap:0'}]
+        chunks = _chunks({'stack': 4, 'queue': 3})
+        written = []
+
+        def write(chunk):
+            written.append(chunk.id)
+            return f'Q {chunk.id}'
+
+        rows, dropped = refresh_retrieval_set(old, chunks, _concepts_of, write, per_concept=3)
+        self.assertEqual(dropped, 2)
+        self.assertIn(old[0], rows)
+        stack = [r for r in rows if r['concept'] == 'stack']
+        self.assertEqual(len(stack), 3)
+        self.assertEqual(len({r['gold_chunk'] for r in stack}), 3)
+        self.assertTrue(all(_concepts_of(r['gold_chunk']) == (r['concept'],) for r in rows))
+        self.assertEqual(sum(r['concept'] == 'queue' for r in rows), 3)
+        self.assertNotIn('heap', {r['concept'] for r in rows})
+        self.assertNotIn('ods:stack:0', written)
+        self.assertEqual(len({r['id'] for r in rows}), len(rows))
+        self.assertEqual(len(written), 5)
 
     # 검증 목적: 표본 시트가 개념마다 먼저 하나씩 골라 n개를 쓰고, 정답 문단 원문을 함께 보여 주는지 확인
     def test_sample_sheet_one_per_concept_first(self):
