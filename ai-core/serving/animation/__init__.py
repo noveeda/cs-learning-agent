@@ -14,6 +14,7 @@ from .graph import simulate_graph_traversal, simulate_tree_traversal
 from .hierarchical import simulate_bst, simulate_hash_table, simulate_heap
 from .linear import simulate_array, simulate_linked_list, simulate_queue, simulate_stack
 from .model import Animation, AnimationRequest, AnimationRequestModel
+from .arch import ARCH_FORMATS, ARCH_SIMULATORS  # model 뒤에 가져옴: model이 arch 요청을 합집합에 넣는 순환 import
 from .network import NETWORK_FORMATS, NETWORK_SIMULATORS
 from .scheduling import simulate_cpu_schedule
 from .sorting import simulate_sort
@@ -32,6 +33,7 @@ SIMULATORS = {
     'tree_traversal': simulate_tree_traversal,
     'cpu_schedule': simulate_cpu_schedule,
     'call_stack': simulate_call_stack,
+    **ARCH_SIMULATORS,
     **DB_SIMULATORS,
     **NETWORK_SIMULATORS,
 }
@@ -95,6 +97,7 @@ SCENE_FORMATS = {
     'cpu_schedule': {'kind': 'cpu_schedule', 'algorithm': 'fcfs', 'quantum': 2,
                      'processes': [{'name': 'P1', 'arrival': 0, 'burst': 3, 'priority': 2},
                                    {'name': 'P2', 'arrival': 1, 'burst': 2, 'priority': 1}]},
+    **ARCH_FORMATS,
     **DB_SCENE_FORMATS,
     **NETWORK_FORMATS,
 }
