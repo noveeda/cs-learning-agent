@@ -1,6 +1,7 @@
 /**
  * @file
  * @brief 모의 막힘 세션 API로 [막혔어요]·붙여넣기 진입, 진단→결과→보충→확인→서술→요약→복귀, 새로고침 재개, 503 재시도·409 복구를 브라우저에서 검증
+ * - 이해 확인 결과 화면: 적용 문제로 통과를 정하고 서술은 충분 여부·빠진 항목 피드백으로만 보여 주는지 검증
  */
 import { readFileSync } from "node:fs";
 import { test, expect, type Page, type Route } from "@playwright/test";
@@ -116,6 +117,7 @@ const views = {
     concept: linkedList,
     passed: true,
     rubric_met: [true, true],
+    explanation_enough: true,
   },
   summary: {
     kind: "summary",
@@ -391,6 +393,7 @@ test("E1 [막혔어요]: 진단→결과→보충→확인→서술→요약→�
   await sheet.getByRole("button", { name: "설명 제출" }).click();
   await expect(sheet).toContainText("이해 확인을 통과했어요.");
   await expect(sheet).toContainText("서술 기준 2/2개");
+  await expect(sheet).toContainText("설명도 충분해요.");
   await sheet.getByRole("button", { name: "다음", exact: true }).click();
   await expect(sheet.locator(".stuck-results")).toContainText("이해 확인 통과");
   await expect(
@@ -535,6 +538,81 @@ test("1단계 개념(선수 개념 없음)은 빈틈 없음 대신 기초 개념
   await expect(sheet).not.toContainText("빈틈은 선수 개념부터");
   await expect(sheet.getByRole("button", { name: "보충 시작" })).toBeVisible();
 });
+
+// 이해 확인 결과 화면 경우별 기대 문구; 엔진(stuck.py _explain)이 만드는 view 모양과 옛 저장 세션 모양
+const resultCases = [
+  {
+    name: "적용 문제를 맞히면 서술이 부족해도 통과하고 빠진 설명 항목을 보여 줌",
+    view: {
+      ...views.result,
+      rubric_met: [true, false, false],
+      explanation_enough: false,
+      rubric_missed: [
+        "맨 앞 노드의 참조만 바꾼다는 점",
+        "원소를 옮기지 않는다는 점",
+      ],
+    },
+    shown: [
+      "이해 확인을 통과했어요.",
+      "설명에 이 내용을 더하면 더 좋아요.",
+      "맨 앞 노드의 참조만 바꾼다는 점",
+      "원소를 옮기지 않는다는 점",
+    ],
+    hidden: ["설명도 충분해요."],
+    button: "다음",
+  },
+  {
+    name: "적용 문제를 틀리면 서술을 모두 채워도 다시 설명을 안내함",
+    view: { ...views.result, passed: false, retry: true },
+    shown: [
+      "아직 확인을 통과하지 못했어요.",
+      "적용 문제를 맞히면 이해한 것으로 봐요.",
+    ],
+    hidden: [
+      "모두 통과해야",
+      "설명에 이 내용을 더하면",
+      "설명도 충분해요.",
+    ],
+    button: "다시 설명 듣기",
+  },
+  {
+    name: "서술 채점이 실패하면 서술 피드백 없이 통과 결과만 보여 줌",
+    view: { kind: "result", concept: linkedList, passed: true },
+    shown: ["이해 확인을 통과했어요."],
+    hidden: ["서술 기준", "설명도 충분해요.", "설명에 이 내용을"],
+    button: "다음",
+  },
+  {
+    name: "충분 여부가 없는 옛 저장 결과는 서술 기준 개수만 보여 줌",
+    view: {
+      kind: "result",
+      concept: linkedList,
+      passed: true,
+      rubric_met: [true, false],
+    },
+    shown: ["이해 확인을 통과했어요.", "서술 기준 1/2개를 충족했어요."],
+    hidden: ["설명도 충분해요.", "설명에 이 내용을"],
+    button: "다음",
+  },
+];
+
+for (const resultCase of resultCases) {
+  test(`이해 확인 결과: ${resultCase.name}`, async ({ page }) => {
+    await mockStuck(page, { stage: "return", view: resultCase.view }, []);
+    await openStackLesson(page);
+    await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+    const sheet = panel(page);
+    for (const text of resultCase.shown) {
+      await expect(sheet).toContainText(text);
+    }
+    for (const text of resultCase.hidden) {
+      await expect(sheet).not.toContainText(text);
+    }
+    await expect(
+      sheet.getByRole("button", { name: resultCase.button, exact: true }),
+    ).toBeVisible();
+  });
+}
 
 test("E2 붙여넣기: 지원 범위 밖 안내 후 원래 학습으로 돌아감", async ({
   page,
