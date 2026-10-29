@@ -27,22 +27,22 @@ const animation: AnimationData = {
 
 /** @brief 외부 모델·저장 API만 목업하고 실제 채팅/막힘 경로로 재생기를 엶 */
 async function openPlayer(page: Page, context: "chat" | "stuck" = "chat", data = animation) {
-  await page.route("**/api/concept-map", route => route.fulfill({ json: { ...conceptMap, stuck_supported: ["stack"] } }));
+  await page.route("**/api/concept-map", route => route.fulfill({ json: { ...conceptMap, stuck_supported: ["linked-list"] } }));
   await page.route("**/api/conversations/*", route => route.fulfill({ json: { messages: context === "chat" ? [{
     role: "assistant", content: "BFS를 단계별로 살펴봅니다.", status: "complete",
     artifacts: [{ artifact_id: "motion-fixture", kind: "animation", animation: data }],
   }] : [] } }));
   await page.route("**/api/stuck/sessions**", route => route.fulfill({ json: {
     id: "0123456789abcdef0123456789abcdef", version: 1, stage: "check",
-    entry: { kind: "roadmap", concept: "stack", return_to: "#/learn?concept=stack" },
-    view: { kind: "remediation", concept: { id: "stack", title: "스택" }, attempt: 1, is_target: true,
+    entry: { kind: "roadmap", concept: "linked-list", return_to: "#/learn?concept=linked-list" },
+    view: { kind: "remediation", concept: { id: "linked-list", title: "연결 리스트" }, attempt: 1, is_target: true,
       text: "계산된 BFS의 큐를 확인합니다.", animation: data,
-      item: { id: "stack-c1", format: "short_exact", question: "앞 원소는?" },
+      item: { id: "linked-list-c1", format: "short_exact", question: "앞 원소는?" },
     },
   } }));
   await page.goto(context === "stuck" ? "/#/roadmap" : "/");
   if (context === "stuck") {
-    await page.getByRole("button", { name: "스택 · 미학습", exact: true }).click();
+    await page.getByRole("button", { name: "연결 리스트 · 미학습", exact: true }).click();
     await page.getByRole("button", { name: "학습 시작", exact: true }).click();
     await page.getByRole("button", { name: "막혔어요", exact: true }).click();
   }
