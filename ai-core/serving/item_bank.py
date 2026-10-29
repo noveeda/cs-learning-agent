@@ -39,6 +39,12 @@ class Item(BaseModel):
     # 지문 옆에 보여 줄 정지 도식(선택); 그릴 구조가 없는 개념 문항은 없음(null)으로 둠
     figure: Figure | None = None
 
+    ## @brief 도식 누설 검사에 쓰는 지문 글: 질문과 (선택형이면) 보기 글을 이어 붙임
+    # - 보기 글도 지문으로 보아 보기와 같은 값의 라벨을 누설로 잘못 거르지 않음; 정답 키·해설은 넣지 않음
+    @property
+    def stem(self) -> str:
+        return ' '.join([self.question, *(self.options or {}).values()])
+
     ## @brief 목적·형식·정답 필드의 조합을 검증해 결정적 채점이 가능한 문항만 남김
     @model_validator(mode='after')
     def consistent_shape(self):
@@ -64,7 +70,7 @@ class Item(BaseModel):
         elif self.rubric:
             raise ValueError(f'{self.id}: 루브릭은 서술 문항에만 둡니다.')
         # 도식은 지문 대조 검사(누설·라벨 폭·겹침)를 통과한 것만 문항 은행에 들어오게 함
-        if self.figure and (problems := check_figure(self.figure, self.question)):
+        if self.figure and (problems := check_figure(self.figure, self.stem)):
             raise ValueError(f'{self.id}: 도식이 지문 검사를 통과하지 못했습니다: ' + ' / '.join(problems))
         return self
 

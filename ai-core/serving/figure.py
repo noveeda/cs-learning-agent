@@ -64,7 +64,7 @@ class FigureTable(BaseModel):
     id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,24}$')
     name: str = Field(default='', max_length=MAX_LABEL)
     columns: list[str] = Field(min_length=1, max_length=5)
-    rows: list[list[str]] = Field(default_factory=list, max_length=6)
+    rows: list[list[str]] = Field(default_factory=list, max_length=12)
     keys: list[str] = Field(default_factory=list)
     x: float = Coordinate
     y: float = Coordinate
@@ -178,14 +178,14 @@ def _segments_cross(a, b, c, d) -> bool:
 
 
 ## @brief 도식을 지문과 대조해 오류 문장 목록 반환(빈 목록이면 통과)
-# - 누설: 모든 라벨·표 글이 지문(question)에 그대로 있어야 함(빈 칸·이름 없는 표는 대조할 글이 없어 건너뜀); 계산 결과·정답 보기 글을 그려 넣는 것을 막음
-#   선택지 글은 허용하지 않음: 보기 하나만 그림에 옮기면 그 보기가 답이라는 신호가 되기 때문
+# - 누설: 모든 라벨·표 글이 지문 글(stem: 질문 + 선택형 보기, Item.stem)에 그대로 있어야 함(빈 칸·이름 없는 표는 건너뜀); 계산 결과·정답 보기 글을 그려 넣는 것을 막음
+#   보기 글을 포함하는 것은 보기와 같은 값의 라벨을 오탐하지 않기 위함; 초안 생성 모델에는 보기를 주지 않아 보기만 골라 그리는 일은 막음
 # - 라벨 폭: 어림 폭이 도형·표 칸 안에 들어가야 함
 # - 겹침: 도형·표 경계 상자가 겹치면 안 되고(맞닿음은 허용), 선이 양 끝이 아닌 도형을 지나거나 다른 선과 엇갈리면 안 됨
 #   선이 엇갈리면 가운데에 놓이는 선 라벨끼리 겹쳐 어느 값이 어느 선인지 헷갈리기 때문
-def check_figure(figure: Figure, question: str) -> list[str]:
+def check_figure(figure: Figure, stem: str) -> list[str]:
     errors = []
-    allowed = _normalize(question)
+    allowed = _normalize(stem)
     texts = [(f'도형 {n.id}', n.label) for n in figure.nodes]
     texts += [(f'선 {e.source}→{e.target}', e.label) for e in figure.edges if e.label]
     for table in figure.tables:
