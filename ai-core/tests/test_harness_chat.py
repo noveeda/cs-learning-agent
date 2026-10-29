@@ -20,7 +20,7 @@ from serving.api import BUSY, app
 from serving.concept_map import load_concept_map
 from serving.context import history_messages
 from serving.harness import BLOCKED_TEXT, NEEDS_CHECK_MARK, Grounding
-from serving.harness_chat import chat_events, harness_enabled, previous_grounding
+from serving.harness_chat import DEFAULT_MIN_SCORE, build_retriever, chat_events, harness_enabled, previous_grounding
 from serving.harness_log import HarnessLog
 from serving.stuck_llm import PROMPTS
 
@@ -223,6 +223,18 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers['content-type'], 'image/png')
         self.assertEqual(response.content, b'\x89PNG fake')
+
+
+class BuildRetrieverTests(unittest.TestCase):
+    # 검증 목적: 운영 검색기가 RAG_MIN_SCORE가 없을 때 측정으로 정한 기본 하한을 쓰고, 환경 변수가 있으면 그 값을 따르는지 확인
+    #   (하한이 0이면 관련 없는 문단도 근거로 넘어가 "근거 없음" 대신 엉뚱한 근거로 답하게 됨)
+    def test_build_retriever_min_score_default_and_env(self):
+        with patch.dict(os.environ):
+            os.environ.pop('RAG_MIN_SCORE', None)
+            self.assertEqual(build_retriever().min_score, DEFAULT_MIN_SCORE)
+            self.assertGreater(DEFAULT_MIN_SCORE, 0.0)
+        with patch.dict(os.environ, {'RAG_MIN_SCORE': '0.3'}):
+            self.assertEqual(build_retriever().min_score, 0.3)
 
 
 class ChatEventsTests(unittest.TestCase):
