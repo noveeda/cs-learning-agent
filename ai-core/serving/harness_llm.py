@@ -4,7 +4,7 @@
 # - 모든 역할은 JSON schema로 형식을 묶고, 받은 뒤 harness.py 검증 규칙으로 다시 확인함(실패하면 _call이 재시도)
 # - 판정 근거 구절의 문단 대조와 단계 흐름은 하지 않음: 호출 순서와 판정 처리는 하네스 흐름(계획 Task 6)이 정함
 import json
-from typing import Literal
+from typing import Callable, Literal
 
 from serving.concept_map import ConceptMap
 from serving.harness import MAX_SENTENCE_CHARS, MAX_SENTENCES, validate_sentences
@@ -18,6 +18,15 @@ def _sentence_schema(source_keys):
     return {'type': 'object', 'additionalProperties': False, 'required': ['text', 'sources'],
             'properties': {'text': {'type': 'string', 'maxLength': MAX_SENTENCE_CHARS},
                            'sources': {'type': 'array', 'minItems': 1, 'items': {'type': 'string', 'enum': sorted(source_keys)}}}}
+
+
+## @brief 5-1 범위 결정의 user 입력(개념 지도 전체·직전 턴 개념·질문)을 만듦
+# - 게이트웨이 밖으로 뽑아 둔 이유: 미세조정 학습 예시(finetune.examples.scope_row)가 운영과 글자 그대로 같은 입력을 쓰게 하기 위함
+# - title_of: 개념 ID를 제목으로 바꾸는 함수. 지도에 없는 ID는 ID를 그대로 돌려줌(StuckModelGateway._title과 같음)
+def scope_payload(question: str, previous: list[str], concept_map: ConceptMap, title_of: Callable[[str], str]) -> dict:
+    return {'concepts': [{'id': c.id, 'title': c.title, 'description': c.description} for c in concept_map.concepts],
+            'previous': [{'id': p, 'title': title_of(p)} for p in previous],
+            'question': question}
 
 
 ## @brief 하네스판 모델 게이트웨이; 막힘 흐름의 역할(explain 등)도 그대로 물려받아 쓸 수 있음
@@ -44,10 +53,7 @@ class HarnessGateway(StuckModelGateway):
                 raise ValueError(f'지도에 없는 개념이거나 none이 섞임: {concepts}')
             return concepts, follow_up
 
-        user = {'concepts': [{'id': c.id, 'title': c.title, 'description': c.description} for c in concept_map.concepts],
-                'previous': [{'id': p, 'title': self._title(p)} for p in previous],
-                'question': question}
-        return self._call('scope', user, parse, _schema('scope', schema))
+        return self._call('scope', scope_payload(question, previous, concept_map, self._title), parse, _schema('scope', schema))
 
     ## @brief 5-3 근거 기반 생성; 근거 키별 원문으로 (문장, 근거 키 묶음) 목록을 받음
     # - sources: {'p1': 문단 원문, 'a1': 애니메이션 단계 설명, ...}. 키 목록이 곧 허용 근거 번호
