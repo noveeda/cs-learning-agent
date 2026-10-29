@@ -1,15 +1,32 @@
 ## @file
 # @brief 자료구조·알고리즘(dsa) 과목의 새 장면 시뮬레이터와 개념별 예시 장면(scenes.json)을 검증
 # - 시뮬레이터: 계산한 상태가 실제 알고리즘 결과와 같은지, 경계 입력과 실행할 수 없는 입력을 한국어 오류로 거부하는지 확인
+# - scenes.json: 화면에 남는 dsa 개념마다 서로 다른 장면 3개가 있고, 모두 검증·실행되며 분량 상한을 지키는지 확인
+import json
 import unittest
+from pathlib import Path
 
 from pydantic import ValidationError
 from serving.animation import SCENE_FORMATS, SIMULATORS, simulate
 from serving.animation.model import AnimationRequestModel
 
+SCENES_PATH = Path(__file__).resolve().parents[1] / 'content' / 'dsa' / 'scenes.json'
+# 화면에 남는 dsa 개념(과목 안 선수 관계 5단계 이하). 6단계 이상 18개는 화면에서 가려 장면을 만들지 않음
+VISIBLE_CONCEPTS = {
+    'memory-address', 'reference', 'recursion', 'logarithm', 'big-o', 'complexity-analysis', 'recurrence-relation',
+    'array', 'dynamic-array', 'linked-list', 'hash-function', 'tree', 'binary-tree', 'binary-search', 'heap',
+    'sorting-basics', 'graph', 'dynamic-programming',
+}
 # 이 과목이 추가한 장면 종류
 DSA_KINDS = {'dsa_memory', 'dsa_reference', 'dynamic_array', 'list_walk', 'dsa_search', 'selection_sort',
              'log_steps', 'growth', 'loop_count', 'recursion_tree', 'dsa_recursion', 'fib_dp', 'dsa_tree', 'graph_parts'}
+# 장면 하나의 권장 프레임 수 상한: 막힘 보충 한 번에 끝까지 따라갈 수 있는 분량
+SCENE_FRAME_LIMIT = 12
+# 라벨 글자 수 상한: 테두리 상자(cell·node·slot)는 세 글자까지 줄이지 않고 들어감, 이름표(label)는 칸 두 개 폭
+BOX_LABEL_LIMIT = 3
+NAME_LABEL_LIMIT = 12
+
+
 ## @brief dict 요청을 스키마로 검증한 뒤 시뮬레이터를 실행
 def run(data: dict):
     return simulate(AnimationRequestModel.model_validate(data).root)
@@ -324,6 +341,46 @@ class GraphPartsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run({'kind': 'graph_parts', 'nodes': ['A', 'B'], 'edges': [['A', 'B']], 'directed': True,
                  'ops': [{'op': 'components'}]})
+
+
+## @brief 프레임 수열을 비교용 값으로 바꿈(상자 위치·라벨·tone과 화살표)
+def frame_signature(animation):
+    return [(sorted((b.x, b.y, b.label, b.shape, b.tone) for b in f.boxes),
+             sorted((a.source, a.target) for a in f.arrows)) for f in animation.frames]
+
+
+class SceneFileTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.scenes = json.loads(SCENES_PATH.read_text(encoding='utf-8'))
+
+    # 검증 목적: 화면에 남는 개념 전부에 장면이 정확히 3개씩 있고, 가린 개념의 장면은 없는지 확인
+    def test_every_visible_concept_has_three_scenes(self):
+        self.assertEqual(set(self.scenes), VISIBLE_CONCEPTS)
+        for concept, scenes in self.scenes.items():
+            self.assertEqual(len(scenes), 3, concept)
+
+    # 검증 목적: 모든 장면이 스키마 검증·시뮬레이션을 통과하고 프레임 수·라벨 길이 상한을 지키는지 확인
+    def test_scenes_run_within_limits(self):
+        for concept, scenes in self.scenes.items():
+            for index, scene in enumerate(scenes):
+                with self.subTest(concept=concept, index=index):
+                    animation = run(scene)
+                    self.assertLessEqual(len(animation.frames), SCENE_FRAME_LIMIT)
+                    for frame in animation.frames:
+                        for box in frame.boxes:
+                            limit = NAME_LABEL_LIMIT if box.shape == 'label' else BOX_LABEL_LIMIT
+                            self.assertLessEqual(len(box.label), limit, box.label)
+
+    # 검증 목적: 한 개념의 장면 3개가 요청도 프레임 수열도 서로 달라, 숫자만 바꾼 같은 장면이 아님을 확인
+    # - 같은 kind끼리는 연산 순서·관점이 달라야 하므로 kind 외 입력 필드(연산·알고리즘·모드)가 하나 이상 달라야 함
+    def test_three_scenes_are_distinct(self):
+        for concept, scenes in self.scenes.items():
+            with self.subTest(concept=concept):
+                requests = [json.dumps(s, sort_keys=True) for s in scenes]
+                self.assertEqual(len(set(requests)), 3)
+                signatures = [json.dumps(frame_signature(run(s))) for s in scenes]
+                self.assertEqual(len(set(signatures)), 3)
 
 
 if __name__ == '__main__':
