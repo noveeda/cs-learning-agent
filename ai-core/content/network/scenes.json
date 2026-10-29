@@ -1,0 +1,42 @@
+{
+  "network-layers": [
+    {"kind": "encapsulation", "mode": "send", "data_bytes": 100},
+    {"kind": "encapsulation", "mode": "router"},
+    {"kind": "encapsulation", "mode": "osi"}
+  ],
+  "ip-subnet": [
+    {"kind": "subnet", "mode": "mask", "address": [192, 168, 10, 77], "prefix": 26},
+    {"kind": "subnet", "mode": "split", "address": [192, 168, 10, 0], "prefix": 24, "new_prefix": 26},
+    {"kind": "subnet", "mode": "same", "address": [192, 168, 1, 10], "other": [192, 168, 1, 200], "prefix": 25}
+  ],
+  "routing": [
+    {"kind": "link_state", "mode": "dijkstra", "nodes": ["A", "B", "C", "D", "E"], "source": "A",
+     "links": [{"a": "A", "b": "B", "cost": 2}, {"a": "A", "b": "C", "cost": 1}, {"a": "B", "b": "D", "cost": 3},
+               {"a": "C", "b": "D", "cost": 5}, {"a": "C", "b": "E", "cost": 6}, {"a": "D", "b": "E", "cost": 1}]},
+    {"kind": "link_state", "mode": "forward", "nodes": ["A", "B", "D", "C"], "source": "A", "destination": "D",
+     "links": [{"a": "A", "b": "B", "cost": 2}, {"a": "A", "b": "C", "cost": 5}, {"a": "B", "b": "C", "cost": 1},
+               {"a": "B", "b": "D", "cost": 4}, {"a": "C", "b": "D", "cost": 1}]},
+    {"kind": "prefix_match", "destination": [10, 1, 2, 5],
+     "entries": [{"prefix": [10, 0, 0, 0], "length": 8, "hop": "R1"}, {"prefix": [10, 1, 0, 0], "length": 16, "hop": "R2"},
+                 {"prefix": [10, 1, 2, 0], "length": 24, "hop": "R3"}, {"prefix": [0, 0, 0, 0], "length": 0, "hop": "R4"}]}
+  ],
+  "tcp-reliability": [
+    {"kind": "tcp", "mode": "handshake", "client_isn": 100, "server_isn": 300},
+    {"kind": "tcp", "mode": "transfer", "seq": 1, "mss": 100, "segments": 4, "lost": [2]},
+    {"kind": "tcp", "mode": "transfer", "seq": 1, "mss": 200, "segments": 3, "lost_acks": [1]}
+  ],
+  "flow-congestion-control": [
+    {"kind": "flow_window", "buffer": 4, "cwnd": 8, "mss": 100,
+     "ops": [{"op": "send"}, {"op": "ack"}, {"op": "send"}, {"op": "read", "count": 1}, {"op": "ack"}, {"op": "send"}]},
+    {"kind": "flow_window", "buffer": 6, "cwnd": 2, "mss": 100,
+     "ops": [{"op": "send"}, {"op": "send"}, {"op": "ack"}, {"op": "send"}, {"op": "read", "count": 3}, {"op": "ack"},
+             {"op": "send"}]},
+    {"kind": "congestion", "ssthresh": 8, "rounds": 12,
+     "losses": [{"round": 6, "type": "timeout"}, {"round": 11, "type": "dup_ack"}]}
+  ],
+  "dns": [
+    {"kind": "dns", "mode": "iterative", "name": ["www", "example", "com"]},
+    {"kind": "dns", "mode": "recursive", "name": ["mail", "school", "kr"]},
+    {"kind": "dns", "mode": "cache", "name": ["www", "example", "com"], "ttl": 300, "queries": [0, 120, 400, 650]}
+  ]
+}

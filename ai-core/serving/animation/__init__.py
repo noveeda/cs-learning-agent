@@ -19,6 +19,7 @@ from .hierarchical import simulate_bst, simulate_hash_table, simulate_heap
 from .linear import simulate_array, simulate_linked_list, simulate_queue, simulate_stack
 from .model import Animation, AnimationRequest, AnimationRequestModel
 from .arch import ARCH_FORMATS, ARCH_SIMULATORS  # model 뒤에 가져옴: model이 arch 요청을 합집합에 넣는 순환 import
+from .network import NETWORK_FORMATS, NETWORK_SIMULATORS
 from .scheduling import simulate_cpu_schedule
 from .sorting import simulate_sort
 
@@ -38,6 +39,7 @@ SIMULATORS = {
     'call_stack': simulate_call_stack,
     **ARCH_SIMULATORS,
     **DB_SIMULATORS,
+    **NETWORK_SIMULATORS,
 }
 # 과목별 장면 모듈의 시뮬레이터(요청 모델은 model.py의 AnimationRequest에 합쳐 둠)
 SIMULATORS.update(dsa_linear.SIMULATORS | dsa_analysis.SIMULATORS | dsa_structure.SIMULATORS)
@@ -103,6 +105,7 @@ SCENE_FORMATS = {
                                    {'name': 'P2', 'arrival': 1, 'burst': 2, 'priority': 1}]},
     **ARCH_FORMATS,
     **DB_SCENE_FORMATS,
+    **NETWORK_FORMATS,
 }
 SCENE_FORMATS.update(dsa_linear.FORMATS | dsa_analysis.FORMATS | dsa_structure.FORMATS)
 
