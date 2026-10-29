@@ -9,6 +9,7 @@ from pathlib import Path
 
 from serving.animation import simulate
 from serving.animation.model import AnimationRequestModel
+from serving.animation.scheduling import schedule
 
 CONTENT = Path(__file__).resolve().parents[1] / 'content' / 'os'
 # 장면 하나의 권장 분량(이전·다음 버튼으로 따라가는 단계 수)과 상자 라벨 길이: 도형 위주로 글을 최소화하기 위한 상한
@@ -65,6 +66,26 @@ class OsScenesTests(unittest.TestCase):
                     self.assertNotEqual(requests[i], requests[j])
                     self.assertNotEqual([f.model_dump() for f in a.frames], [f.model_dump() for f in b.frames])
                     self.assertNotEqual([f.caption for f in a.frames], [f.caption for f in b.frames])
+
+    # 검증 목적: RR 장면에 "할당량이 끝난 시각 = 새 프로세스 도착 시각"인 동점이 없어야 함
+    # - 이 동점에서 큐 순서는 교재마다 달라(새 도착 먼저 / 선점된 프로세스 먼저) 장면이 한쪽 규칙만 가르치게 됨
+    def test_rr_scenes_avoid_quantum_arrival_ties(self):
+        for concept, requests in self.scenes.items():
+            for index, request in enumerate(requests):
+                if request.get('algorithm') != 'rr' or request['kind'] == 'process_state':
+                    continue
+                validated = AnimationRequestModel.model_validate(request).root
+                arrivals = {p.arrival for p in validated.processes}
+                for proc, _, end, _, done in schedule(validated):
+                    with self.subTest(concept=concept, index=index, time=end):
+                        self.assertFalse(proc and not done and end in arrivals)
+
+    # 검증 목적: 상태판 장면을 스케줄링 개념에 쓸 때는 그 방식의 관점(algorithm)으로 캡션을 붙여 규칙이 보이게 함
+    def test_state_boards_for_algorithms_name_the_policy(self):
+        for concept in ('fcfs', 'round-robin'):
+            for request in self.scenes[concept]:
+                if request['kind'] == 'process_state':
+                    self.assertEqual(request.get('algorithm'), ALGORITHM[concept])
 
 
 if __name__ == '__main__':
