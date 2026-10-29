@@ -30,8 +30,8 @@ const TABLE_FONT = 13;
 const WIDE = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/;
 // 그림 둘레 여백: 선 라벨과 테두리가 잘리지 않게 함
 const MARGIN = 16;
-// 좁은 화면에서 줄일 수 있는 최소 폭; 더 줄이면 글자가 읽히지 않으므로 그보다 좁으면 도식만 가로로 밀어 봄
-const MIN_WIDTH = 400;
+// 좁은 화면에서 줄일 수 있는 최소 폭; 막힘 패널(폭 420px) 안쪽에 맞게 줄이되, 더 좁으면 글자가 읽히지 않으므로 도식만 가로로 밀어 봄
+const MIN_WIDTH = 320;
 // 같은 두 도형을 반대 방향으로 잇는 선끼리 겹치지 않게 옆으로 비키는 거리
 const PARALLEL_OFFSET = 7;
 
