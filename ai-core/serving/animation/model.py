@@ -312,10 +312,14 @@ class CallStackRequest(Strict):
         return self
 
 
+# 과목별 새 장면 요청: 해당 모듈이 이 파일의 Strict·Box를 쓰므로 위 정의가 끝난 뒤에 가져옴(순환 import 방지)
+from .arch import ARCH_REQUESTS  # noqa: E402
+
 # 모델이 고르는 장면 요청 전체. kind 값으로 요청 타입을 구분함
 AnimationRequest = Annotated[
     Union[ArrayRequest, LinkedListRequest, StackRequest, QueueRequest, HashTableRequest, BSTRequest, HeapRequest,
-          GraphTraversalRequest, SortRequest, TreeTraversalRequest, CpuScheduleRequest, CallStackRequest],
+          GraphTraversalRequest, SortRequest, TreeTraversalRequest, CpuScheduleRequest, CallStackRequest,
+          *ARCH_REQUESTS],
     Field(discriminator='kind')]
 
 

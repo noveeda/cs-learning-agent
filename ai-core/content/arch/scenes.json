@@ -1,0 +1,387 @@
+{
+  "binary-twos-complement": [
+    {
+      "kind": "twos_complement",
+      "operation": "encode",
+      "bits": 4,
+      "a": -6
+    },
+    {
+      "kind": "twos_complement",
+      "operation": "add",
+      "bits": 4,
+      "a": 5,
+      "b": 4
+    },
+    {
+      "kind": "twos_complement",
+      "operation": "extend",
+      "bits": 4,
+      "a": -3,
+      "to_bits": 8
+    }
+  ],
+  "instruction-cycle": [
+    {
+      "kind": "instruction_cycle",
+      "length": 4,
+      "start": 0,
+      "detail": "phase",
+      "memory": {
+        "A": 3,
+        "B": 4,
+        "C": 0
+      },
+      "program": [
+        {
+          "opcode": "LOAD",
+          "var": "A"
+        },
+        {
+          "opcode": "ADD",
+          "var": "B"
+        },
+        {
+          "opcode": "STORE",
+          "var": "C"
+        }
+      ]
+    },
+    {
+      "kind": "instruction_cycle",
+      "length": 2,
+      "start": 100,
+      "detail": "instruction",
+      "memory": {
+        "A": 3,
+        "B": 4,
+        "C": 0
+      },
+      "program": [
+        {
+          "opcode": "LOAD",
+          "var": "A"
+        },
+        {
+          "opcode": "ADD",
+          "var": "B"
+        },
+        {
+          "opcode": "ADD",
+          "var": "B"
+        },
+        {
+          "opcode": "STORE",
+          "var": "C"
+        }
+      ]
+    },
+    {
+      "kind": "instruction_cycle",
+      "length": 4,
+      "start": 0,
+      "detail": "phase",
+      "memory": {
+        "A": 3,
+        "B": 4,
+        "C": 0
+      },
+      "program": [
+        {
+          "opcode": "LOAD",
+          "var": "A"
+        },
+        {
+          "opcode": "JUMP",
+          "target": 12
+        },
+        {
+          "opcode": "ADD",
+          "var": "B"
+        },
+        {
+          "opcode": "STORE",
+          "var": "C"
+        }
+      ]
+    }
+  ],
+  "pipelining-hazards": [
+    {
+      "kind": "pipeline",
+      "forwarding": false,
+      "instructions": [
+        {
+          "opcode": "add",
+          "dest": "r1",
+          "srcs": [
+            "r2",
+            "r3"
+          ]
+        },
+        {
+          "opcode": "sub",
+          "dest": "r4",
+          "srcs": [
+            "r5",
+            "r6"
+          ]
+        },
+        {
+          "opcode": "add",
+          "dest": "r7",
+          "srcs": [
+            "r8",
+            "r9"
+          ]
+        },
+        {
+          "opcode": "lw",
+          "dest": "r2",
+          "srcs": [
+            "r3"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "pipeline",
+      "forwarding": true,
+      "instructions": [
+        {
+          "opcode": "add",
+          "dest": "r1",
+          "srcs": [
+            "r2",
+            "r3"
+          ]
+        },
+        {
+          "opcode": "sub",
+          "dest": "r4",
+          "srcs": [
+            "r1",
+            "r5"
+          ]
+        },
+        {
+          "opcode": "add",
+          "dest": "r6",
+          "srcs": [
+            "r4",
+            "r1"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "pipeline",
+      "forwarding": true,
+      "instructions": [
+        {
+          "opcode": "lw",
+          "dest": "r1",
+          "srcs": [
+            "r2"
+          ]
+        },
+        {
+          "opcode": "add",
+          "dest": "r3",
+          "srcs": [
+            "r1",
+            "r4"
+          ]
+        },
+        {
+          "opcode": "sub",
+          "dest": "r5",
+          "srcs": [
+            "r6",
+            "r7"
+          ]
+        }
+      ]
+    }
+  ],
+  "memory-hierarchy": [
+    {
+      "kind": "memory_hierarchy",
+      "levels": [
+        {
+          "name": "L1",
+          "slots": 1,
+          "latency": 1
+        },
+        {
+          "name": "L2",
+          "slots": 2,
+          "latency": 10
+        },
+        {
+          "name": "DRAM",
+          "slots": 2,
+          "latency": 100
+        }
+      ],
+      "accesses": [
+        "a",
+        "b",
+        "a",
+        "a"
+      ]
+    },
+    {
+      "kind": "memory_hierarchy",
+      "levels": [
+        {
+          "name": "L1",
+          "slots": 2,
+          "latency": 1
+        },
+        {
+          "name": "DRAM",
+          "slots": 3,
+          "latency": 100
+        }
+      ],
+      "accesses": [
+        "a",
+        "b",
+        "c",
+        "a",
+        "b",
+        "c"
+      ]
+    },
+    {
+      "kind": "memory_hierarchy",
+      "levels": [
+        {
+          "name": "L1",
+          "slots": 4,
+          "latency": 2
+        },
+        {
+          "name": "DRAM",
+          "slots": 3,
+          "latency": 50
+        }
+      ],
+      "accesses": [
+        "a",
+        "b",
+        "a",
+        "a",
+        "b",
+        "a",
+        "c",
+        "a"
+      ]
+    }
+  ],
+  "cache-locality": [
+    {
+      "kind": "cache",
+      "block_size": 16,
+      "lines": 4,
+      "addresses": [
+        0,
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ]
+    },
+    {
+      "kind": "cache",
+      "block_size": 8,
+      "lines": 4,
+      "addresses": [
+        8,
+        20,
+        8,
+        20,
+        8
+      ]
+    },
+    {
+      "kind": "cache",
+      "block_size": 8,
+      "lines": 4,
+      "addresses": [
+        0,
+        32,
+        0,
+        32
+      ]
+    }
+  ],
+  "virtual-memory-pages": [
+    {
+      "kind": "paging",
+      "address_bits": 8,
+      "offset_bits": 5,
+      "page_table": [
+        3,
+        7,
+        5,
+        1,
+        null,
+        null,
+        0,
+        2
+      ],
+      "addresses": [
+        77,
+        200
+      ]
+    },
+    {
+      "kind": "paging",
+      "address_bits": 7,
+      "offset_bits": 4,
+      "page_table": [
+        2,
+        null,
+        6,
+        4,
+        null,
+        1,
+        null,
+        null
+      ],
+      "addresses": [
+        37,
+        42,
+        90
+      ],
+      "tlb_size": 2
+    },
+    {
+      "kind": "paging",
+      "address_bits": 6,
+      "offset_bits": 3,
+      "page_table": [
+        1,
+        null,
+        4,
+        null,
+        0,
+        null,
+        null,
+        2
+      ],
+      "addresses": [
+        27,
+        29
+      ],
+      "free_frames": [
+        6
+      ]
+    }
+  ]
+}
