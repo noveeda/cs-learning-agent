@@ -23,9 +23,17 @@ def harness_enabled() -> bool:
     return os.getenv('CS_HARNESS') == '1'
 
 
+## @brief 근거 문단 유사도 하한 기본값: bge-m3 정답 점수 분포의 하위 5%(docs/harness-measurement.md 2-3, 확정 대응표 기준)
+# - 이 값보다 질문과 덜 비슷한 문단은 근거로 쓰지 않아 엉뚱한 근거 대신 근거 없음으로 끝남
+# - 점수 척도가 임베딩 모델마다 달라 rag.search의 기본값(0.0)이 아니라 운영 검색기를 만드는 여기에 둠. 모델을 바꾸면 다시 잼
+DEFAULT_MIN_SCORE = 0.50
+
+
 ## @brief 공용 색인(RAG_DATA_DIR/index.sqlite)과 환경 변수 임베더로 검색기를 만듦; 색인이 없으면 검색 결과가 비어 근거 없음으로 끝남
+# - 하한은 RAG_MIN_SCORE, 없으면 DEFAULT_MIN_SCORE
 def build_retriever() -> Retriever:
-    return Retriever(DATA_DIR / 'index.sqlite', Embedder.from_env())
+    return Retriever(DATA_DIR / 'index.sqlite', Embedder.from_env(),
+                     float(os.getenv('RAG_MIN_SCORE', DEFAULT_MIN_SCORE)))
 
 
 ## @brief 마지막 assistant 턴에 저장된 grounding artifact를 Grounding으로 되살림; 없으면 None

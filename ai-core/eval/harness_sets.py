@@ -4,9 +4,11 @@
 #   정답 문단은 "질문을 만든 문단"이라는 생성 규칙으로 정해지므로 사람이 정답을 다는 단계가 없음
 # - 실행: python -m eval.harness_sets retrieval → ai-core/outputs/harness-sets/retrieval.jsonl(Git 밖)과
 #   사용자 표본 시트(기본 ~/cs-handoff/retrieval-sample.md, 개념당 1개)
+# - 대응표가 바뀌면 --refresh 기존세트로 대응이 끊긴 행만 다시 만듦(남은 행의 질문은 그대로)
 # - 측정 데이터는 운영 서빙 모델(gemma-4-26B-A4B, 8000번)로만 만들고 외부 API는 쓰지 않음
 """Harness measurement sets: retrieval set (question -> gold chunk) generated with the serving model."""
 import argparse
+import itertools
 import json
 import os
 import random
@@ -60,6 +62,38 @@ def retrieval_set(chunks: list[Chunk], concepts_of: Callable[[str], tuple[str, .
         rows += [{'id': f'{concept}#{n}', 'concept': concept, 'question': question, 'gold_chunk': chunk.id}
                  for n, (chunk, question) in enumerate((c, q) for c, q in questions if q)]
     return rows
+
+
+## @brief 절 대응표가 바뀐 뒤 기존 검색 세트를 고침: 아직 유효한 행은 그대로 두고, 끊긴 행만 새 행으로 바꿈
+# - 유효한 행: 정답 문단이 지금 문단 목록에 있고 그 문단에 행의 개념 꼬리표가 아직 붙어 있음. 질문을 다시 만들지 않아
+#   대응표와 무관한 행의 측정값이 흔들리지 않음
+# - 개념마다 per_concept개가 되도록 그 개념의 아직 안 쓴 문단에서 seed로 골라 write_question으로 채움
+# - 대응표에서 빠진 개념의 행은 버림. 반환값은 (새 세트, 버린 행 수)
+def refresh_retrieval_set(rows: list[dict], chunks: list[Chunk], concepts_of: Callable[[str], tuple[str, ...]],
+                          write_question: Callable[[Chunk], str], per_concept: int = 3,
+                          seed: int = 0) -> tuple[list[dict], int]:
+    known = {chunk.id for chunk in chunks}
+    kept = [r for r in rows if r['gold_chunk'] in known and r['concept'] in concepts_of(r['gold_chunk'])]
+    by_concept = defaultdict(list)
+    for chunk in chunks:
+        for concept in concepts_of(chunk.id):
+            by_concept[concept].append(chunk)
+    rng = random.Random(seed)
+    refreshed = []
+    for concept in sorted(by_concept):
+        mine = [r for r in kept if r['concept'] == concept]
+        used = {r['gold_chunk'] for r in mine}
+        pool = sorted((c for c in by_concept[concept] if c.id not in used), key=lambda c: c.id)
+        taken = {r['id'] for r in mine}
+        # 새 행 id는 남은 행과 겹치지 않는 가장 작은 번호부터 씀
+        numbers = (n for n in itertools.count() if f'{concept}#{n}' not in taken)
+        for chunk in rng.sample(pool, min(max(per_concept - len(mine), 0), len(pool))):
+            question = write_question(chunk)
+            if question:
+                mine.append({'id': f'{concept}#{next(numbers)}', 'concept': concept, 'question': question,
+                             'gold_chunk': chunk.id})
+        refreshed += mine
+    return refreshed, len(rows) - len(kept)
 
 
 ## @brief 사용자가 질문-정답 문단 짝을 직접 확인할 표본 시트(마크다운)를 out에 씀
@@ -126,8 +160,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--out', type=Path, default=SETS_DIR / 'retrieval.jsonl')
     parser.add_argument('--sheet', type=Path, default=SAMPLE_SHEET)
     parser.add_argument('--section-map', type=Path, help='절 대응표 JSON(기본: 저장소 content/rag/section-map.json)')
+    parser.add_argument('--refresh', type=Path,
+                        help='기존 세트 파일: 대응이 끊긴 행만 새로 만들고 나머지 행은 그대로 둡니다.')
     args = parser.parse_args(argv)
-    # 절 대응표 모듈(Task 2)은 별도 PR이라, 함수·테스트만 쓰는 경우에는 없어도 이 모듈을 불러올 수 있게 실행할 때만 읽음
+    # 교재 원문·대응표·개념 지도를 읽는 모듈은 명령을 실행할 때만 불러옴. 함수·테스트만 쓸 때 실행 데이터에 기대지 않게 함
     from rag.fetch import DATA_DIR
     from rag.index import chunk_section, load_sections
     from rag.section_map import load_section_map
@@ -144,8 +180,15 @@ def main(argv: list[str] | None = None) -> int:
         chunk = by_id[chunk_id]
         return section_map.concepts_for(chunk.book, chunk.section_id)
 
-    rows = retrieval_set(chunks, concepts_of, model_question_writer(concept_titles, concepts_of),
-                         per_concept=args.per_concept, seed=args.seed)
+    writer = model_question_writer(concept_titles, concepts_of)
+    if args.refresh:
+        previous = [json.loads(line) for line in args.refresh.read_text().splitlines() if line.strip()]
+        rows, dropped = refresh_retrieval_set(previous, chunks, concepts_of, writer,
+                                              per_concept=args.per_concept, seed=args.seed)
+        print(f'{args.refresh}: {len(previous)}행 중 {dropped}행 제외, '
+              f'{len(rows) - (len(previous) - dropped)}행 새로 만듦')
+    else:
+        rows = retrieval_set(chunks, concepts_of, writer, per_concept=args.per_concept, seed=args.seed)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in rows))
     concepts = {row['concept'] for row in rows}
