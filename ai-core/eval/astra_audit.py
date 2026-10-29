@@ -20,7 +20,7 @@ AI_CORE = Path(__file__).resolve().parents[1]
 if str(AI_CORE) not in sys.path:
     sys.path.insert(0, str(AI_CORE))
 
-# 기본 검사 모델: 보정 시험(판정 세트 100행)에서 sol이 검출률·오경보율 모두 astra와 3%p 이내라 sol을 씀(docs/finetune.md 2절)
+# 기본 검사 모델: 보정 시험(판정 세트 100행)에서 sol이 검출률·오경보율 모두 astra와 3%p 이내라 sol을 씀(docs/finetune.md 6절)
 # - 이름은 계획 문구(astra 독립 검사)를 따라 astra_audit로 두고, 모델은 --model·--astra-model로 바꿀 수 있음
 DEFAULT_MODEL = 'gpt-6.1-sol'
 # codex 한 번 호출의 제한 시간(초): 40문장 배치 응답을 기다리되, 멈춘 호출이 측정 전체를 붙잡지 않게 함

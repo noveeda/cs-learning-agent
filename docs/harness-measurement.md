@@ -250,3 +250,330 @@ RAG_EMBED_MODEL=bge-m3 RAG_MIN_SCORE=0.50 .venv/bin/python -m eval.harness_sets_
   - 문자열 하나(`{"sentence": ...}`)를 schema로 묶으면 26B가 `{"sentence":": "}`를 내는 경우가 많았다. 같은 요청을 schema 없이 보내면 정상 문장이 나왔다.
   - 그래서 교란 요청은 schema 없이 받고 결과를 코드로 검사한다.
   - 하네스 생성·판정·수정 역할의 같은 현상은 원인을 찾아 PR #122에서 고쳤다(지시에 공백 없는 JSON 예시). 확정 색인 수확에서 수정 실패 0건으로 확인했다.
+
+## 4. 모델별 측정 (Task 11)
+
+측정 도구: `ai-core/eval/harness_measure.py`. 결과 원본(`rows.jsonl`, `metrics.json`, `report.md`, `meta.json`, `gpu.csv`)은 Git 밖 `ai-core/outputs/harness-measure/<모델>/`에 있다.
+
+### 4-1. 모델 파일
+
+- 위치는 `~/.cache/cs-llm/`(저장소 밖)이다. 내려받은 뒤 Hugging Face의 LFS sha256과 대조했다.
+- 저장소는 ggml-org 공식을 먼저 찾고, 그 양자화가 없으면 unsloth, 그다음 bartowski 순으로 골랐다.
+  - ggml-org에는 Q4_0·Q8_0만 있고 Q4_K_M이 없다. 그래서 Q4_K_M은 unsloth에서 받았다.
+  - unsloth에는 12B가 없어 12B Q4_K_M은 bartowski에서 받았다.
+
+| 모델 | Hugging Face 저장소(리비전) | 파일 | 크기 |
+|---|---|---|---:|
+| E4B Q4_K_M | `unsloth/gemma-4-E4B-it-GGUF` (`bfc15c3`) | `gemma-4-E4B-it-Q4_K_M.gguf` | 4.98GB |
+| E4B Q8_0 | `ggml-org/gemma-4-E4B-it-GGUF` (`a69f018`) | `gemma-4-E4B-it-Q8_0.gguf` | 8.03GB |
+| 12B Q4_K_M | `bartowski/gemma-4-12B-it-GGUF` (`2ae7d41`) | `gemma-4-12B-it-Q4_K_M.gguf` | 7.66GB |
+| E2B Q4_K_M | `unsloth/gemma-4-E2B-it-GGUF` (`0314792`) | `gemma-4-E2B-it-Q4_K_M.gguf` | 3.11GB |
+| 12B QAT Q4_0 (Google 공식) | `google/gemma-4-12B-it-qat-q4_0-gguf` (`29d0977`) | `gemma-4-12b-it-qat-q4_0.gguf` | 6.98GB |
+| 12B MTP 드래프트 헤드 | `unsloth/gemma-4-12B-it-qat-GGUF` (`980b060`) | `mtp-gemma-4-12B-it.gguf`(Q4_0) | 0.25GB |
+
+```sh
+mkdir -p ~/.cache/cs-llm && cd ~/.cache/cs-llm
+# 저장소 리비전 고정(전체 해시)
+curl -L -o gemma-4-E4B-it-Q4_K_M.unsloth.gguf \
+  https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/bfc15c382204943c3a8fff0c750b94ae2364d7a3/gemma-4-E4B-it-Q4_K_M.gguf
+curl -L -o gemma-4-E4B-it-Q8_0.ggml-org.gguf \
+  https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/a69f018d7678a2b9f5e705f8903d6fb29b9b25dc/gemma-4-E4B-it-Q8_0.gguf
+curl -L -o gemma-4-12B-it-Q4_K_M.bartowski.gguf \
+  https://huggingface.co/bartowski/gemma-4-12B-it-GGUF/resolve/2ae7d41be21ca62de00a2d320ee9cec50daa3aa6/gemma-4-12B-it-Q4_K_M.gguf
+curl -L -o gemma-4-E2B-it-Q4_K_M.unsloth.gguf \
+  https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/0314792d7f1f7e229411f620751375812bb9faf2/gemma-4-E2B-it-Q4_K_M.gguf
+curl -L -o gemma-4-12b-it-qat-q4_0.google.gguf \
+  https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/resolve/29d097773436b69ff9feafd636ab4cf873786537/gemma-4-12b-it-qat-q4_0.gguf
+curl -L -o mtp-gemma-4-12B-it.unsloth.gguf \
+  https://huggingface.co/unsloth/gemma-4-12B-it-qat-GGUF/resolve/980b060c40a8539ac159e0501a3e0f66a6365af3/mtp-gemma-4-12B-it.gguf
+```
+
+- sha256(LFS)
+  - E4B Q4_K_M `85a896a0…1fab87`, E4B Q8_0 `34be82b1…8ce80a`, 12B Q4_K_M `3962624d…671509`, E2B Q4_K_M `740185b2…ec34b8`
+  - 12B QAT Q4_0 `93567e57…8a538b`, MTP 헤드 `fcb35dea…c6f4f6`
+
+**다른 12B급 거르기 후보(사용자 승인, 2026-10-29)**
+
+- 회사 공식 GGUF를 먼저 찾았다. 없으면 ggml-org → unsloth → bartowski 순으로 찾았다.
+  - Ministral은 mistralai 공식 GGUF가 있어 그것을 받았다.
+  - Midm·Kanana는 네 곳 모두에 Q4_K_M GGUF가 없었다. 그래서 공식 safetensors를 받아 직접 변환했다(코디네이터 결정 A안).
+- 변환은 미세조정 뒤 GGUF 변환에도 같은 경로를 쓴다. 학습 환경 `~/.venvs/cs-train`(torch 2.13 cu130, transformers 5.21)에 모자란 것만 더했다.
+  - 원본 safetensors는 `~/.cache/cs-llm/src/`, 변환본은 `~/.cache/cs-llm/`에 둔다(저장소 밖). 중간 BF16 파일은 지웠다.
+
+| 모델 | 원본(리비전) | 파일 | 크기 | sha256 |
+|---|---|---|---:|---|
+| Ministral 3 14B Q4_K_M | `mistralai/Ministral-3-14B-Instruct-2512-GGUF` (`74fac47`) | `Ministral-3-14B-Instruct-2512-Q4_K_M.gguf` | 8.24GB | `824e0f33…8cc613` |
+| Midm 2.0 Base Q4_K_M | `K-intelligence/Midm-2.0-Base-Instruct` (`35479c5`) safetensors → 변환 | `Midm-2.0-Base-Instruct-Q4_K_M.converted.gguf` | 7.03GB | `5e2759fa…6fc683` |
+| Kanana 1.5 8B Q4_K_M | `kakaocorp/kanana-1.5-8b-instruct-2505` (`c963a5f`) safetensors → 변환 | `kanana-1.5-8b-instruct-2505-Q4_K_M.converted.gguf` | 4.92GB | `c0713691…71c069` |
+
+```sh
+cd ~/.cache/cs-llm
+curl -L -o Ministral-3-14B-Instruct-2512-Q4_K_M.mistralai.gguf \
+  https://huggingface.co/mistralai/Ministral-3-14B-Instruct-2512-GGUF/resolve/74fac473c43357d7fb2671713608183cc72496d0/Ministral-3-14B-Instruct-2512-Q4_K_M.gguf
+
+# 변환 도구 준비(한 번): 변환 스크립트의 의존성과 양자화 도구
+uv pip install --python ~/.venvs/cs-train/bin/python sentencepiece protobuf   # cs-train에는 pip이 없어 uv로 설치
+cmake --build ~/llama.cpp/build --config Release -j 16 --target llama-quantize   # 1-1과 같은 빌드 디렉터리
+
+# 공식 safetensors 받기(리비전 고정)
+~/.venvs/cs-train/bin/python -c "from huggingface_hub import snapshot_download as d
+d('K-intelligence/Midm-2.0-Base-Instruct', revision='35479c5fc9a18a5db7cc6dbadcf1db68db7beab0', local_dir='src/Midm-2.0-Base-Instruct')
+d('kakaocorp/kanana-1.5-8b-instruct-2505', revision='c963a5f4f6496c749f94064a20b33028b0db9f19', local_dir='src/kanana-1.5-8b-instruct-2505')"
+
+# 변환(CPU만): safetensors → BF16 GGUF → Q4_K_M
+for name in Midm-2.0-Base-Instruct kanana-1.5-8b-instruct-2505; do
+  CUDA_VISIBLE_DEVICES= PYTHONPATH=~/llama.cpp/gguf-py ~/.venvs/cs-train/bin/python ~/llama.cpp/convert_hf_to_gguf.py \
+    src/$name --outtype bf16 --outfile $name-BF16.gguf
+  CUDA_VISIBLE_DEVICES= ~/llama.cpp/build/bin/llama-quantize $name-BF16.gguf $name-Q4_K_M.converted.gguf Q4_K_M 16
+  rm $name-BF16.gguf
+done
+```
+
+- sha256 전체
+  - Ministral `824e0f3373e69b84f2cae46fdcb9bd1ebc6ab3bfc7acc125d818b7b8178cc613`(LFS와 대조)
+  - Midm 변환본 `5e2759fa04ca1414e8de25b127d76e8dbe0fa5ba3c8b666beaba656f416fc683`
+  - Kanana 변환본 `c0713691b06d3d6f968bd3fee97b792ff341e180357dc28a8958c79e6371c069`
+
+### 4-2. 서버 설정
+
+- 작은 모델은 모두 GPU 1번(`CUDA_VISIBLE_DEVICES=1`)에만 띄운다. GPU 0번은 운영 26B다.
+- 공통: `--jinja`(GGUF에 든 gemma 4 대화 템플릿), `-fa on`. 사고 모드는 요청마다 `chat_template_kwargs.enable_thinking=false`로 끈다(운영과 같은 인자).
+- **정확도 측정(병렬):** `-ngl 99 -np 4 -c 32768`(요청 칸 4개, 칸마다 8192토큰). 여러 모델을 GPU 1번에 함께 띄워 동시에 쟀다(합계 23GB 이하).
+- **시간·메모리 측정(단독):** 로컬 도구처럼 요청 하나만 받는 `-np 1 -c 8192`로 쟀다.
+  - GPU 1번에 그 모델 하나만 띄웠고, 26B(8000)에는 이 작업의 다른 측정 요청을 보내지 않았다.
+  - 메모리 기준: 8GB 카드(nvidia-smi 총량 8,188MiB)에서 화면 출력·드라이버 몫 약 0.3GB를 남긴 **최대 7,900MiB**다.
+    - `-ngl`은 맞춤 요청(2,625토큰 요약 요청 하나)을 처리하는 동안 GPU 1번 사용량을 0.2초마다 읽은 최댓값으로 맞췄다. 아래 표의 메모리·속도가 그 값이다.
+  - `-ngl`은 기준 안에 드는 가장 큰 값으로 정했다. 모자라는 층은 CPU가 계산한다.
+
+| 설정 | `-ngl`(층 48개+출력층) | 최대 메모리(맞춤 요청) | 생성 속도(3090, 맞춤 요청) |
+|---|---:|---:|---:|
+| 12B QAT Q4_0 | 99(전부) | 7,706MiB | 83토큰/초 |
+| 12B QAT Q4_0 + MTP | 47(층 1개+출력층 CPU) | 7,766MiB | 92토큰/초 |
+| 12B Q4_K_M | 45 | 7,750MiB | 15토큰/초 |
+| 12B Q4_K_M + MTP | 43 | 7,752MiB | 25토큰/초 |
+
+- 기준을 넘은 설정
+  - 12B Q4_K_M을 전부 올리면 `-c 4096`이어도 8,282MiB(`-c 8192` 8,350MiB)로 8GB를 넘는다. `-ngl 46`은 7,904MiB, `-ngl 47`은 8,056MiB였다.
+  - QAT에 MTP를 붙이고 전부 올리면 8,026MiB다. MTP 드래프트 헤드가 약 0.3GB를 더 쓴다(4-7).
+  - QAT+MTP `-ngl 48`(출력층만 CPU)은 맞춤 요청에서 7,896MiB였지만 하네스 시간 측정 중 7,912MiB까지 올라 기준을 넘었다. 그래서 `-ngl 47`로 다시 쟀다(4-6에 둘 다 적음).
+  - 문맥 길이를 8192→4096으로 줄여도 70MiB쯤만 준다. gemma 4는 대부분 층이 1024토큰 슬라이딩 창이라 KV 캐시가 작기 때문이다.
+
+```sh
+# 시간(예: 12B QAT + MTP → 20330, 하나씩 차례로)
+CUDA_VISIBLE_DEVICES=1 ~/llama.cpp/build/bin/llama-server -m ~/.cache/cs-llm/gemma-4-12b-it-qat-q4_0.google.gguf \
+  --alias gemma-4-12B-QAT-Q4_0 --host 127.0.0.1 --port 20330 --jinja -ngl 47 -fa on -np 1 -c 8192 \
+  -md ~/.cache/cs-llm/mtp-gemma-4-12B-it.unsloth.gguf --spec-type draft-mtp
+cd ai-core && HARNESS_SETS_DIR=… RAG_DATA_DIR=… RAG_EMBED_MODEL=bge-m3 .venv/bin/python -m eval.harness_measure \
+  --base-url http://127.0.0.1:20330/v1 --model gemma-4-12B-QAT-Q4_0 --tasks timing --gpu 1 --out outputs/harness-measure/12b-qat-mtp47
+```
+
+```sh
+# 정확도(예: 12B Q4_K_M → 20322)
+CUDA_VISIBLE_DEVICES=1 nohup ~/llama.cpp/build/bin/llama-server -m ~/.cache/cs-llm/gemma-4-12B-it-Q4_K_M.bartowski.gguf \
+  --alias gemma-4-12B-Q4_K_M --host 127.0.0.1 --port 20322 --jinja -ngl 99 -fa on -np 4 -c 32768 > ~/cs-llm-logs/12b-q4.log 2>&1 &
+```
+
+- 포트: E4B Q4 20320, E2B Q4 20321, 12B Q4 20322, E4B Q8 20323, 12B QAT 20324, Midm 20326, Ministral 20327, 단독 시간 측정 20330
+- llama.cpp에서 하네스를 바꾸지 않고 그대로 돌렸다. `response_format`(JSON schema)·`chat_template_kwargs`·`top_k`를 llama-server가 받는다. 그래서 운영(vLLM) 코드는 바뀌지 않았다.
+
+### 4-3. 측정 방법
+
+- **정확도는 병렬, 시간은 단독**으로 쟀다.
+  - 정확도(범위·판정·채점·답 전체)는 여러 모델을 GPU 1번에 함께 띄우고 모델마다 동시 요청 4개(`--workers 4`)로 쟀다.
+  - 시간·최대 메모리는 마지막에 GPU 1번에 모델 하나만 띄우고 요청을 하나씩 순서대로 보내 쟀다. 병렬 측정 때의 `gpu.csv`는 모델별 최대 메모리로 쓰지 않는다.
+- 세트: 3절의 범위 세트 485문항, 판정 세트 616문장, 채점 세트 2,273답, 답 전체는 범위 세트 485문항 전부다(층화 표본 없이 전체).
+- 시간 표본: 검색 세트에서 개념을 돌아가며 하나씩 뽑은 60문항이다(`--timing-n 60 --seed 0`, 모든 모델 같은 질문).
+- 검색(정답 문단 상위 3개 회수율)은 모델과 무관하다. 2-3의 bge-m3 확정 색인 값을 그대로 쓴다.
+- 노출 지표는 표시 없이 나간 문장(답변 완료 답의 verified 문장)을 26B(8000)로 다시 판정해 어긋난 비율이다.
+  - 사용자 표본 기준 값은 사용자 확인이 끝나지 않아 "대기"로 둔다.
+- 26B(운영 8000번)는 읽기 호출만 했다. 동시 요청 수는 측정 프로세스 전체 합으로 묶었다(`--prod-slots`, 잠금 파일 칸; 사용자 허락으로 정확도 측정 때 4, 시간·교차 측정 때 2).
+- 26B 시간은 운영 서버를 다른 작업과 함께 쓰는 상태에서 잰 **참고값**이다. 조건: `--max-num-seqs 8`(사용자 승인으로 재시작, 다른 옵션 동일), Task 3 수집(harvest) 동시 실행.
+
+### 4-4. 3090 → RTX 4060 보정
+
+- 출처: llama.cpp CUDA 성능 게시판 [discussion #15013](https://github.com/ggml-org/llama.cpp/discussions/15013)(Llama 2 7B Q4_0, `llama-bench`, flash attention 켬)
+  - RTX 3090: 생성(tg128) 161.89토큰/초, 프롬프트 처리(pp512) 5,560토큰/초
+  - RTX 4060 Ti 8GB: 생성 64.03토큰/초, 프롬프트 처리 3,803토큰/초
+  - 데스크톱 RTX 4060은 표에 없다. Vulkan 게시판([#10879](https://github.com/ggml-org/llama.cpp/discussions/10879))에도 노트북용 4060만 있다.
+- 생성 속도 비는 161.89 / 64.03 = 2.53이다. 4060은 메모리 대역폭이 272GB/s로 4060 Ti(288GB/s)보다 낮아 2.53 × 288/272 ≈ **2.68**로 잡는다.
+- 하네스 시간은 대부분 짧은 JSON 출력과 프롬프트 처리라 생성 비(2.68)를 전체에 곱하면 보수적(느린 쪽) 추정이다. 프롬프트 처리 비는 1.46이다.
+- 일부 층을 CPU가 계산하는 설정(Q4_K_M `-ngl 45`·`43`, QAT+MTP `-ngl 48`·`47`)은 CPU 몫이 GPU 비를 따르지 않아 이 보정이 맞지 않는다. 이 측정 서버의 CPU 기준 참고값으로만 본다.
+
+### 4-5. 정확도 결과 (병렬 측정)
+
+- E4B·E2B는 사용자 결정(2026-10-29, 12B + 하네스 + RAG + 미세조정)으로 제외했다. 그 전에 끝난 값만 참고로 남긴다.
+  - E4B Q8_0은 답 전체를 107개만 재고 멈췄다(부분 값). 앞쪽 직접 질문이 대부분이라 다른 모델과 직접 비교할 수 없다.
+- Midm·Ministral은 거르기(범위·판정)만 쟀다(4-8).
+
+| 지표 | 26B-A4B AWQ | 12B Q4_K_M | 12B QAT Q4_0 | E4B Q4_K_M | E4B Q8_0 (답 107개) | E2B Q4_K_M | Midm 2.0 Q4_K_M | Ministral 3 14B Q4_K_M |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 범위 정확도 | 89.7% | 87.8% | 85.8% | 84.5% | 88.2% | 73.2% | 15.0% | 72.8% |
+| 판정 검출률 | 71.1% | 68.5% | 64.3% | 38.0% | 38.0% | 35.7% | 48.0% | 81.5% |
+| 판정 오경보율 | 0.7% | 3.6% | 1.6% | 4.9% | 4.9% | 7.5% | 13.0% | 29.2% |
+| 채점 거짓 통과율 | 4.7% | 5.2% | 4.9% | 10.6% | 10.2% | 25.1% | - | - |
+| 채점 거짓 불통과율 | 40.5% | 33.6% | 38.0% | 29.5% | 27.3% | 43.5% | - | - |
+| 범위 · direct | 87.2% | 82.0% | 79.0% | 82.3% | 85.9% | 77.7% | 2.0% | 62.0% |
+| 범위 · compare | 86.7% | 95.0% | 95.0% | 90.0% | 90.0% | 68.3% | 78.3% | 91.7% |
+| 범위 · outside | 98.3% | 98.3% | 98.3% | 76.7% | 90.0% | 30.0% | 13.3% | 98.3% |
+| 범위 · follow_up | 96.7% | 100.0% | 98.3% | 98.3% | 96.7% | 98.3% | 20.0% | 83.3% |
+| 검출 · addition | 51.2% | 59.4% | 52.8% | 9.8% | 10.6% | 10.6% | 25.2% | 73.2% |
+| 검출 · swap_concept | 78.6% | 64.0% | 60.7% | 39.3% | 39.3% | 36.0% | 44.9% | 85.4% |
+| 검출 · negation | 88.3% | 87.0% | 84.4% | 80.5% | 77.9% | 64.9% | 87.0% | 87.0% |
+| 검출 · number | 94.7% | 73.7% | 73.7% | 42.1% | 47.4% | 79.0% | 52.6% | 94.7% |
+| 노출(26B 판정) | 0.1% (2/1967) | 5.5% (118/2165) | 5.9% (125/2126) | 7.3% (148/2033) | 9.9% (53/534) | 10.5% (230/2197) | - | - |
+| 노출(사용자 표본) | 대기 | 대기 | 대기 | 대기 | 대기 | 대기 | - | - |
+| 확인 필요 비율 | 5.9% | 5.6% | 4.0% | 3.2% | 1.5% | 6.0% | - | - |
+| 근거 없음 비율 | 16.5% | 16.8% | 16.6% | 17.6% | 4.7% | 22.3% | - | - |
+| 원문 대체 비율 | 0.9% | 2.6% | 1.2% | 0.9% | 1.9% | 1.3% | - | - |
+| 한자 섞인 문장 | 0 | 0 | 0 | 0 | 0 | 0 | - | - |
+| 답 결과(answered/blocked/no_source/fallback/generation_failed) | 350/61/70/4/0 | 342/61/71/3/8 | 348/62/70/3/2 | 357/47/77/4/0 | 100/0/5/2/0 | 357/18/104/6/0 | - | - |
+
+- 12B 두 파일 비교
+  - Q4_K_M이 범위(87.8% 대 85.8%)와 판정 검출(68.5% 대 64.3%)에서 앞선다.
+  - QAT는 오경보(1.6% 대 3.6%)와 채점 거짓 통과(4.9% 대 5.2%)가 조금 낮다. 노출은 비슷하다(5.5% 대 5.9%).
+- 12B Q4_K_M의 원문 대체 2.6%에는 생성 실패 8건이 들어 있다. 병렬 부하에서 문장 쓰기 호출이 30초 제한을 넘은 경우다(4-11).
+
+### 4-6. 시간·메모리 결과 (단독 측정)
+
+- 60문항을 하나씩 보냈다. 시간은 질문을 보낸 때부터 첫 문장 표시(첫 `text_delta`)까지, 답 끝(`done`)까지다.
+- 12B는 GPU 1번에 그 서버 하나만 띄웠다(`-np 1 -c 8192`, `-ngl`은 4-2 표). 최대 메모리는 측정 중 1초마다 읽은 GPU 1번 사용량의 최댓값이다.
+- 26B는 운영 서버(8000)를 이 작업에서 옵션을 바꾸지 않고 그대로 쟀다. 조건은 `--max-num-seqs 8`, Task 3 수집(harvest) 동시 실행이다. 대기열이 생길 수 있어 참고값이다.
+
+| 시간 지표 | 26B-A4B AWQ (운영 공유) | 12B Q4_K_M | 12B Q4_K_M + MTP | 12B QAT Q4_0 | 12B QAT Q4_0 + MTP (-ngl 47) | 12B QAT Q4_0 + MTP (-ngl 48, 7.9GB 초과) |
+|---|---:|---:|---:|---:|---:|---:|
+| 첫 문장 중앙값 / 90% (3090) | 7.5 / 9.7초 | 23.5 / 29.3초 | 18.2 / 22.7초 | 8.8 / 10.7초 | 9.6 / 11.7초 | 8.9 / 12.0초 |
+| 첫 문장 90% (4060 추정 ×2.68) | - | 78.6초 | 60.8초 | 28.6초 | 31.3초 | 32.1초 |
+| 전체 중앙값 / 90% (3090) | 15.3 / 21.5초 | 45.1 / 63.0초 | 34.9 / 49.0초 | 16.6 / 23.0초 | 18.0 / 24.0초 | 16.0 / 23.9초 |
+| 전체 90% (4060 추정 ×2.68) | - | 168.7초 | 131.3초 | 61.5초 | 64.4초 | 64.2초 |
+| 표본 수 (answered/blocked/no_source/기타) | 60 (52/5/3/0) | 60 (53/5/2/0) | 60 (54/4/2/0) | 60 (54/3/3/0) | 60 (54/3/3/0) | 60 (54/3/3/0) |
+| GPU 1번 최대 메모리 | - | 7774 MiB | 7770 MiB | 7708 MiB | 7782 MiB | 7912 MiB |
+
+- 답변 완료 질문의 단계별 시간 중앙값(3090, 초)
+
+| 설정 | 범위 결정 | 검색 | 문장 쓰기 | 일치 검사 | 문장 수 |
+|---|---:|---:|---:|---:|---:|
+| 26B (운영 공유) | 1.0 | 0.1 | 5.2 | 8.4 | 6 |
+| 12B QAT | 1.9 | 0.1 | 5.0 | 8.3 | 6 |
+| 12B QAT + MTP (`-ngl 47`) | 2.1 | 0.1 | 5.5 | 9.1 | 5 |
+| 12B Q4_K_M (`-ngl 45`) | 3.8 | 0.1 | 15.2 | 21.8 | 6 |
+| 12B Q4_K_M + MTP (`-ngl 43`) | 3.0 | 0.1 | 12.0 | 17.8 | 6 |
+
+- 읽는 법
+  - 12B QAT는 8GB 안에 다 들어가 3090에서 26B와 비슷한 시간이다. 그래도 첫 문장 90% 값이 3090에서 이미 10.7초로 10초 기준을 넘는다.
+  - 12B Q4_K_M은 8GB에 다 들어가지 않는다. 층 3개와 출력층을 CPU가 계산해 QAT보다 2.7배쯤 느리다.
+  - 시간의 대부분은 일치 검사(문장마다 판정 호출)와 문장 쓰기다.
+    - 하네스의 모든 역할(범위·쓰기·판정·고치기)이 JSON schema 출력을 쓴다. llama.cpp는 이 문법 제약을 CPU에서 처리한다.
+    - 병렬 측정 때 12B의 GPU 사용률이 24%쯤에 머문 것도 이 때문으로 본다(추정).
+
+### 4-7. MTP 추측 디코딩
+
+- 드래프트 헤드: `unsloth/gemma-4-12B-it-qat-GGUF`(`980b060`)의 `mtp-gemma-4-12B-it.gguf`. 서버에 `-md <헤드> --spec-type draft-mtp`를 더한다.
+- 메모리: 같은 `-ngl`에서 MTP를 켜면 GPU 1번 사용량이 **304MiB** 는다(QAT `-ngl 48` 7,562→7,866MiB, Q4_K_M `-ngl 43` 7,402→7,706MiB, 대기 상태).
+  - 그래서 7.9GB 안에 넣으려면 QAT는 `-ngl 47`, Q4_K_M은 `-ngl 43`으로 층을 더 CPU에 내려야 한다.
+- 속도
+  - 일반 답(질문 2개, 온도 0, 최대 300토큰) 생성 속도는 두 배쯤이다.
+    - QAT: 51~55 → 84~116토큰/초
+    - Q4_K_M: 11~12 → 25~29토큰/초
+    - 드래프트 수락률은 48~69%다.
+  - 하네스 전체 시간(4-6)
+    - Q4_K_M: 줄었다(전체 90% 63.0 → 49.0초).
+    - QAT: 줄지 않았다(23.0 → 24.0초). 출력이 짧은 JSON 호출이 대부분이고, MTP 자리를 내느라 층 하나와 출력층을 CPU로 내렸기 때문이다.
+- 출력 동일성(온도 0, 같은 `-ngl`, 일반 답 2개 + JSON 판정 1개; 원본 `ai-core/outputs/harness-measure/mtp-same/`)
+  - QAT: 3개 모두 달랐다. 125~414번째 글자부터 표현이 갈렸고(예: "순서가 있는 방식으로" → "선형적(Linear)으로"), 내용 방향은 같았다.
+  - Q4_K_M: 2개 달랐다(216·233번째 글자부터 쉼표·어미 차이). 1개는 같았다.
+  - JSON 판정의 결론(`verdict`)은 네 경우 모두 같았다(`unsupported`). 이유 문장은 달랐다.
+  - 즉 MTP를 켜면 온도 0이어도 글자 단위로 같은 출력이 나오지 않는다. 검증 단계가 여러 토큰을 한 번에 계산해 수치 경로가 달라지는 것으로 본다(추정).
+
+### 4-8. 다른 12B급 모델 거르기 (범위·판정만)
+
+- 통과 기준: 범위 정확도와 판정 검출률이 둘 다 gemma 12B 중 나은 쪽(Q4_K_M: 87.8%, 68.5%)보다 5%p 넘게 낮지 않을 것(즉 82.8% 이상, 63.5% 이상)
+- 같은 하네스·세트·설정(`--workers 4`, `-ngl 99 -np 4 -c 32768`, 사고 모드 인자 동일)으로 쟀다.
+
+| 모델 | 범위 정확도 (직접/비교/범위 밖/후속) | 판정 검출률 | 오경보율 | 결과 |
+|---|---|---:|---:|---|
+| Midm 2.0 Base Q4_K_M(변환) | 15.0% (2.0 / 78.3 / 13.3 / 20.0) | 48.0% | 13.0% | 불통과 |
+| Ministral 3 14B Q4_K_M | 72.8% (62.0 / 91.7 / 98.3 / 83.3) | 81.5% | 29.2% | 불통과(범위 15.0%p 낮음) |
+| Kanana 1.5 8B Q4_K_M(변환) | - | - | - | 측정 불가 |
+
+- Midm: 직접 질문의 98%에서 개념을 2개 이상 골랐다(정답 개념은 95.7%에 들어 있음). 범위 결정은 정답 개념 집합과 정확히 같아야 맞으므로 거의 다 틀렸다. 범위 밖 질문도 대부분 지도 안 개념으로 보냈다.
+- Ministral: 검출률은 26B보다 높지만 오경보가 29.2%로, 맞는 문장 셋 중 하나쯤을 "확인 필요"로 돌린다. 직접 질문에서 개념을 2개 이상 고른 비율이 37.7%다(12B Q4_K_M 16.7%).
+- Kanana: 측정 불가
+  - 변환한 GGUF에서 `<|eot_id|>`(128009)가 생성 끝으로 처리되지 않고 글자로 출력된다.
+  - 그래서 JSON schema 응답 끝에 그 글자가 남고, llama-server가 500("The model produced output that does not match the expected peg-native format")을 낸다.
+  - GGUF의 `tokenizer.ggml.eos_token_id`는 128009로 맞게 들어갔고 `eot_token_id`는 비어 있다.
+  - 규칙대로 고치지 않았다. 메타데이터를 덮어쓰면(`--override-kv`) 될 수도 있지만 확인하지 않았다.
+- 두 모델 다 통과하지 못해 채점·답 전체·시간 측정은 하지 않았다.
+
+### 4-9. 26B 판정기 교차 (바탕 모델 QAT)
+
+- 답 전체(485문항)를 다시 쟀다. 범위·쓰기·고치기는 12B QAT(GPU 1번, `-np 4 -c 32768`)가 하고, 판정 역할만 26B(8000)로 보냈다(`--judge-url`).
+  - 처음에는 판정 검출이 나은 Q4_K_M으로 시작했다가, 바탕 모델이 QAT로 정해져 10문항에서 멈추고 QAT로 다시 쟀다. 멈춘 값은 쓰지 않는다.
+  - 26B로 가는 판정·노출 호출은 합쳐 동시 2개 이하로 묶었다.
+
+| 지표 | 12B QAT (자기 판정) | 12B QAT + 26B 판정 | 26B (기준) |
+|---|---:|---:|---:|
+| 노출(26B 판정) | 5.9% (125/2126) | 0.19% (4/2102) | 0.1% (2/1967) |
+| 확인 필요 비율 | 4.0% | 5.4% | 5.9% |
+| 근거 없음 비율 | 16.6% | 16.6% | 16.5% |
+| 원문 대체 비율 | 1.2% | 1.7% | 0.9% |
+| 한자 섞인 문장 | 0 | 0 | 0 |
+| 답 결과(answered/blocked/no_source/fallback/generation_failed) | 348/62/70/3/2 | 346/62/70/5/2 | 350/61/70/4/0 |
+
+- 읽는 법
+  - 판정만 26B로 바꾸면 노출이 5.9%에서 0.19%로 떨어진다. 확인 필요 비율은 4.0%에서 5.4%로 26B 수준에 가까워진다.
+  - 즉 12B 하네스의 노출은 주로 판정(일치 검사) 역할에서 생긴다. 미세조정에서 판정 역할을 먼저 다룰 근거다.
+  - 다만 이 0.19%는 같은 26B가 판정하고 다시 검사한 값이라 26B 자기 판정(0.1%)처럼 낮게 나오는 쪽이다(4-11). 판정을 26B만큼 할 때 기대할 수 있는 가장 좋은 쪽 값으로 본다.
+
+### 4-10. 8-4 전환 판단
+
+- 기준: 단계별 지표가 26B보다 5%p 이상 나쁘지 않음, 노출 2% 이하, 한자 0건, 첫 문장 90% 10초·전체 90% 30초(35초까지 허용).
+- 시간은 4060 추정(×2.68)으로 판단한다. 3090 값만으로도 결론이 같은 경우는 그렇다고 적는다.
+
+| 모델 | 단계별(26B 대비) | 노출(26B 판정) | 한자 | 시간(4060 추정 90%) | 판정 |
+|---|---|---:|---:|---|---|
+| **12B Q4_K_M** | 통과(가장 큰 차이 오경보 +2.9%p) | 5.5% ✗ | 0 | 첫 78.6초·전체 168.7초 ✗(MTP 60.8·131.3초 ✗) | **불통과**: 노출·시간 |
+| **12B QAT Q4_0** | 판정 검출 64.3%(26B 71.1%, −6.8%p) ✗ | 5.9% ✗ | 0 | 첫 28.6초·전체 61.5초 ✗(MTP 31.3·64.4초 ✗) | **불통과**: 검출·노출·시간 |
+| E4B Q4_K_M | - | - | - | - | 제외(사용자 결정) |
+| E4B Q8_0 | - | - | - | - | 제외(사용자 결정) |
+| E2B Q4_K_M | - | - | - | - | 제외(사용자 결정) |
+| Midm 2.0 / Ministral 3 14B | - | - | - | - | 거르기 불통과(4-8) |
+| Kanana 1.5 8B | - | - | - | - | 측정 불가(4-8) |
+
+- 시간은 3090 값만으로도 두 12B 모두 불통과다.
+  - QAT 첫 문장 90% 값이 3090에서 10.7초다. Q4_K_M은 29.3초다.
+  - Q4_K_M은 일부 층이 CPU라 4060 보정이 맞지 않는다(4-4). 그래도 3090 값이 이미 기준을 넘는다.
+- 결론: 지금 하네스 그대로는 12B 두 파일 모두 8-4 기준을 통과하지 못한다.
+  - 품질 쪽 걸림돌은 노출이다(5.5~5.9%, 기준 2%). 판정 검출률이 26B보다 낮아 틀린 문장이 "확인 필요" 없이 나간다.
+  - 시간 쪽 걸림돌은 문장마다 판정을 부르는 일치 검사와 JSON 출력이다.
+
+**바탕 모델 결정: 12B QAT Q4_0 (사용자 결정, 2026-10-29)**
+
+- 설계의 선택 순서(노출 → 판정 → 8GB → 시간)를 그대로 쓰면 판정 검출 4.2%p 차이(68.5% 대 64.3%)로 Q4_K_M이다.
+- 그러나 8GB 조건에서 Q4_K_M은 다 올라가지 않아 일부 층을 CPU가 계산한다. 그래서 QAT보다 2.7배 느리다(3090 단독, 전체 90% 63.0초 대 23.0초).
+- 판정 차이는 미세조정으로 메울 수 있는 대상이지만, 속도 차이는 파일 크기에서 오는 구조적 차이다. 그래서 시간을 우선해 **QAT Q4_0**을 바탕 모델로 정했다.
+- 근거 표
+
+| 항목 | 12B Q4_K_M | 12B QAT Q4_0 |
+|---|---:|---:|
+| 범위 정확도 | 87.8% | 85.8% |
+| 판정 검출률 / 오경보율 | 68.5% / 3.6% | 64.3% / 1.6% |
+| 채점 거짓 통과 / 거짓 불통과 | 5.2% / 33.6% | 4.9% / 38.0% |
+| 노출(26B 판정) | 5.5% | 5.9% |
+| 8GB 안 `-ngl` | 45(층 3개+출력층 CPU) | 99(전부 GPU) |
+| 최대 메모리(단독) | 7,774MiB | 7,708MiB |
+| 첫 문장 / 전체 90%(3090 단독) | 29.3 / 63.0초 | 10.7 / 23.0초 |
+
+### 4-11. 한계
+
+- 판정 세트의 "맞는 문장"은 26B 하네스가 verified로 낸 문장에서 왔다(3-1). 그래서 26B 오경보율(0.7%)은 낮게 나오는 쪽으로 기울어 있다.
+- 노출 지표는 26B 판정기로 쟀다.
+  - 26B 자신의 노출(0.1%)은 같은 모델이 다시 판정한 값이라 낮게 나온다.
+  - 26B 판정기의 틀린 문장 검출률이 71%이므로, 다른 모델의 노출도 실제보다 낮게 잡힌 하한이다.
+  - 사용자 표본 기준 값은 아직 "대기"다.
+- 정확도는 여러 모델을 GPU 1번에 함께 올린 병렬 부하에서 쟀다. 12B Q4_K_M은 문장 쓰기 호출 28번이 30초 제한을 넘었고, 그중 8건은 재시도도 넘어 생성 실패가 됐다.
+- E4B Q8_0 답 전체는 107개만 재고 사용자 결정으로 멈췄다. 세트 앞쪽(직접 질문 위주)만 들어 있어 다른 모델 값과 직접 비교하지 않는다.
+- 26B 시간은 운영 서버를 다른 작업과 함께 쓸 때 잰 참고값이다(`--max-num-seqs 8`, Task 3 수집 동시 실행). 26B의 GPU 메모리는 운영 서버라 따로 재지 않았다.
+- 4060 값은 공개 게시판의 다른 모델(Llama 2 7B) 비율로 옮긴 추정이다. 데스크톱 4060 실측이 없어 4060 Ti 값을 대역폭 비로 보정했다. CPU로 일부 층을 내린 설정에는 맞지 않는다.
+- 메모리 기준 7,900MiB는 화면 출력 몫을 어림한 값이다. 화면을 쓰지 않는 8GB 카드라면 Q4_K_M은 `-ngl 47`(8,056MiB)까지 올릴 수 있다.
+- MTP 동일성은 질문 3개만 확인했다.
+- 26B 판정기 교차(4-9)는 판정 역할과 노출 검사가 같은 26B라 노출 값이 낮게 나오는 쪽이다.
