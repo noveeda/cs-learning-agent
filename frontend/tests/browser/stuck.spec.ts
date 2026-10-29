@@ -462,6 +462,41 @@ test("이미 알아요·바로 설명은 문항 없이 해당 입력만 보냄",
   ]);
 });
 
+test("지문 도식이 있는 진단 문항은 지문 위에 정지 도식을, 없는 문항은 글만 보여 줌", async ({
+  page,
+}) => {
+  // 문항 은행 저장 형식 그대로 온 도식: head → [7] → [3]; 패널 안쪽(약 356px)보다 넓게 펼쳐 축소 여부를 확인
+  const figure = {
+    nodes: [
+      { id: "h", label: "head", shape: "text", x: 0, y: 0 },
+      { id: "a", label: "7", shape: "cell", x: 1, y: 0 },
+      { id: "b", label: "3", shape: "cell", x: 4.5, y: 0 },
+    ],
+    edges: [{ from: "h", to: "a" }, { from: "a", to: "b", label: "next" }],
+  };
+  await mockStuck(page, { stage: "diagnose", view: { ...views.q2, item: { ...views.q2.item, figure } } }, [
+    { stage: "diagnose", view: views.q1 },
+  ]);
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  const drawing = panel(page).getByRole("img", { name: "문항 지문 도식" });
+  await expect(drawing).toBeVisible();
+  await expect(drawing.locator(".figure-node")).toHaveCount(3);
+  // 도식이 지문 글보다 위에 있고, 420px 패널 안에서 가로로 넘치지 않아야 함
+  const figureBox = (await drawing.boundingBox())!;
+  const questionBox = (await panel(page).locator(".stuck-question").boundingBox())!;
+  expect(figureBox.y + figureBox.height).toBeLessThanOrEqual(questionBox.y);
+  expect(await panel(page).locator(".item-figure").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  // 390px 모바일 시트에서도 도식 때문에 페이지가 가로로 넘치지 않음
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(drawing).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await panel(page).getByRole("textbox").fill("주소");
+  await panel(page).getByRole("button", { name: "답 제출" }).click();
+  await expect(panel(page).locator(".stuck-question")).toHaveText(views.q1.item.question);
+  await expect(panel(page).locator(".item-figure")).toHaveCount(0);
+});
+
 test("1단계 개념(선수 개념 없음)은 빈틈 없음 대신 기초 개념 안내를 보여 줌", async ({
   page,
 }) => {

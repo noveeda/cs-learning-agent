@@ -4,6 +4,7 @@
  * - 화면 내용(view)은 AI core 엔진이 만들고 Spring이 저장한 체크포인트를 그대로 받음; 정답 키는 오지 않음
  */
 import type { AnimationData } from "./animation";
+import type { FigureData } from "./ItemFigure";
 
 /** @brief 막힘이 시작된 곳; return_to는 복귀할 해시 경로(예: #/learn?concept=stack) */
 export type Entry =
@@ -18,6 +19,8 @@ export type ItemView = {
   format: "multiple_choice" | "short_exact" | "explanation";
   question: string;
   options?: Record<string, string>;
+  // 지문 도식(문항 은행에 미리 저장된 정지 그림); 도식이 없는 문항·필드 도입 전 저장 세션이면 없음
+  figure?: FigureData;
 };
 
 /** @brief 진단 결과의 판정 근거 한 줄; 학습자가 본 문항과 낸 답(건너뛰기·문항 없음이면 null) */

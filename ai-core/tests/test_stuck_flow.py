@@ -546,5 +546,24 @@ class RepositoryDataTests(unittest.TestCase):
             self.assertEqual(client.post('/stuck/step', json={'state': opted, 'input': {'type': 'continue'}}).status_code, 503)
 
 
+class ItemFigureViewTests(unittest.TestCase):
+    # 검증 목적: 진단 문항 화면에 문항 은행의 도식이 저장 형식(from·to) 그대로 실리고, 도식 없는 문항에는 figure 키가 없음
+    # - 정답 키는 여전히 화면에 나가지 않는지도 함께 확인(도식 추가가 문항 노출 범위를 넓히지 않게 함)
+    def test_diagnosis_view_carries_figure_only_when_present(self):
+        figure = {'nodes': [{'id': 'a', 'label': 'alpha', 'shape': 'box', 'x': 0, 'y': 0},
+                            {'id': 'b', 'label': 'd1', 'shape': 'circle', 'x': 2, 'y': 0}],
+                  'edges': [{'from': 'a', 'to': 'b'}]}
+        items = [Item.model_validate({**i.model_dump(exclude_none=True), 'figure': figure}) if i.id == 'alpha-d1' else i
+                 for i in small_items([c.id for c in small_map().concepts])]
+        session = Session(self, items=items)
+        views = {}
+        while session.state.stage == 'diagnose':
+            views[session.state.pending] = session.state.view['item']
+            session.send({'type': 'answer', 'item': session.state.pending, 'answer': '틀린 답'})
+        self.assertEqual(views['alpha-d1']['figure'], figure)
+        self.assertNotIn('figure', views['beta-d1'])
+        self.assertTrue(all('answer' not in view for view in views.values()))
+
+
 if __name__ == '__main__':
     unittest.main()
