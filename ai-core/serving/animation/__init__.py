@@ -20,6 +20,7 @@ from .linear import simulate_array, simulate_linked_list, simulate_queue, simula
 from .model import Animation, AnimationRequest, AnimationRequestModel
 from .arch import ARCH_FORMATS, ARCH_SIMULATORS  # model 뒤에 가져옴: model이 arch 요청을 합집합에 넣는 순환 import
 from .network import NETWORK_FORMATS, NETWORK_SIMULATORS
+from .process import simulate_process_state, simulate_schedule_metrics
 from .scheduling import simulate_cpu_schedule
 from .sorting import simulate_sort
 
@@ -40,6 +41,7 @@ SIMULATORS = {
     **ARCH_SIMULATORS,
     **DB_SIMULATORS,
     **NETWORK_SIMULATORS,
+    'process_state': simulate_process_state, 'schedule_metrics': simulate_schedule_metrics,
 }
 # 과목별 장면 모듈의 시뮬레이터(요청 모델은 model.py의 AnimationRequest에 합쳐 둠)
 SIMULATORS.update(dsa_linear.SIMULATORS | dsa_analysis.SIMULATORS | dsa_structure.SIMULATORS)
@@ -106,6 +108,8 @@ SCENE_FORMATS = {
     **ARCH_FORMATS,
     **DB_SCENE_FORMATS,
     **NETWORK_FORMATS,
+    'process_state': {'kind': 'process_state', 'ops': [{'op': 'arrive', 'name': 'P1'}, {'op': 'dispatch'}, {'op': 'exit'}]},
+    'schedule_metrics': {'kind': 'schedule_metrics', 'algorithm': 'fcfs', 'processes': [{'name': 'P1', 'arrival': 0, 'burst': 3}]},
 }
 SCENE_FORMATS.update(dsa_linear.FORMATS | dsa_analysis.FORMATS | dsa_structure.FORMATS)
 
