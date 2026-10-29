@@ -12,6 +12,9 @@ from .model import Animation, Arrow, Box, Frame, Strict, Value, build_animation,
 
 # Frame.caption 상한. 값이 긴 장면은 짧은 문장으로 바꿈
 CAPTION_MAX = 80
+# Frame.boxes 상한(model.py와 같은 값). 상자가 많아지는 종류는 검증기에서 미리 세어 한국어 이유로 거부
+# - 그리는 도중 Pydantic 영어 오류로 죽으면 장면을 고른 쪽이 무엇을 줄여야 할지 알 수 없기 때문
+MAX_BOXES = 40
 
 
 ## @brief 캡션이 상한을 넘으면 짧은 대안 문장으로 바꿈
@@ -89,6 +92,7 @@ def side(row_id: str, y: int, width: int, left: str | None = None, right: str | 
 
 
 ## @brief 10진 수를 비트열로: 음수는 |a| → 모든 비트 반전 → +1 순서로, 마지막은 자릿값 검산
+# - 최솟값(-2^(bits-1))만 예외: |a|가 같은 폭의 양수로 표현되지 않으므로 MSB만 1인 비트열을 바로 보임
 def encode_frames(req: TwosComplementRequest) -> list[Frame]:
     a, width = req.a, req.bits
     result = bit_string(a, width)
@@ -96,6 +100,14 @@ def encode_frames(req: TwosComplementRequest) -> list[Frame]:
         row = bit_boxes('r', 1, result) + side('r', 1, width, right=str(a))
         return [Frame(boxes=row, arrows=[], caption=f'{a}{josa(a, "은", "는")} 양수: 그대로 {width}비트 2진수 {result}'),
                 Frame(boxes=weight_boxes(result) + row, arrows=[], caption=f'검산: {check_sum(result)}')]
+    if a == -2 ** (width - 1):
+        # 최솟값은 +|a|를 같은 폭으로 쓸 수 없어(+8은 4비트 범위 밖) 반전·+1 단계를 그리지 않고 비트열을 바로 설명
+        row = bit_boxes('r', 1, result) + side('r', 1, width, right=str(a))
+        tones = {k: 'active' for k in range(width) if result[width - 1 - k] == '1'}
+        return [Frame(boxes=row, arrows=[], caption=f'{a}{josa(a, "은", "는")} {width}비트 최솟값: '
+                                                    f'+{-a}{josa(-a, "은", "는")} {width}비트에 없으므로 MSB만 1인 {result}'),
+                Frame(boxes=weight_boxes(result) + bit_boxes('r', 1, result, tones=tones) + side('r', 1, width, right=str(a)),
+                      arrows=[], caption=f'검산: {check_sum(result)}')]
     plain = bit_string(-a, width)
     inverted = ''.join('1' if bit == '0' else '0' for bit in plain)
     first = bit_boxes('p', 1, plain) + side('p', 1, width, f'|{a}|', str(-a))
@@ -158,7 +170,7 @@ def extend_frames(req: TwosComplementRequest) -> list[Frame]:
             Frame(boxes=original + bit_boxes('e', 2, short, 'new') + label, arrows=[],
                   caption=f'{wide}비트로 늘리기: 아래 {width}자리는 그대로 복사'),
             Frame(boxes=original + copied + filled + label, arrows=arrows,
-                  caption=f'새 위 {wide - width}자리에 부호 비트 {short[0]}를 복사 → {result}'),
+                  caption=f'새 위 {wide - width}자리에 부호 비트 {short[0]}을 복사 → {result}'),
             Frame(boxes=weight_boxes(result) + original + bit_boxes('e', 2, result) + side('e', 2, wide, f'{wide}비트', str(a)),
                   arrows=[], caption=fit(f'검산: {check_sum(result)}, 값이 그대로', f'검산: 값 {a} 그대로'))]
 
@@ -196,7 +208,7 @@ class InstructionCycleRequest(Strict):
     memory: dict[Var, Value] = Field(min_length=1, max_length=4)
     program: list[CycleInstr] = Field(min_length=1, max_length=6)
 
-    ## @brief JUMP는 프로그램 안 명령어 주소만, 나머지는 memory에 있는 변수만 쓰게 함
+    ## @brief JUMP는 프로그램 안 명령어 주소만, 나머지는 memory에 있는 변수만 쓰게 하고, 끝까지 실행되는지 확인
     @model_validator(mode='after')
     def validate_program(self):
         addresses = [self.start + i * self.length for i in range(len(self.program))]
@@ -206,6 +218,9 @@ class InstructionCycleRequest(Strict):
                     raise ValueError(f'주소 {address} JUMP: target은 명령어 주소 {addresses} 중 하나여야 합니다')
             elif ins.var not in self.memory or ins.target is not None:
                 raise ValueError(f'주소 {address} {ins.opcode}: var는 memory에 있는 변수여야 합니다')
+        # 끝나지 않는 반복·ACC 범위 초과·단계 수 초과는 실제로 실행해 봐야 알 수 있어 검증 단계에서 한 번 실행함
+        # (검증을 통과한 요청은 항상 그려진다는 계약을 지키기 위함)
+        simulate_instruction_cycle(self)
         return self
 
 
@@ -303,15 +318,20 @@ class PipelineRequest(Strict):
     forwarding: bool
     instructions: list[PipeInstr] = Field(min_length=2, max_length=5)
 
-    ## @brief lw의 원본 개수와 전체 사이클 수(격자 10칸)를 확인
+    ## @brief lw의 원본 개수, 전체 사이클 수(격자 10칸), 한 화면 상자 수를 확인
     @model_validator(mode='after')
     def validate_pipeline(self):
         for ins in self.instructions:
             if ins.opcode == 'lw' and len(ins.srcs) != 1:
                 raise ValueError('lw는 주소 레지스터 하나만 읽습니다(srcs 1개)')
-        total = pipeline_schedule(self)[-1]['e'] + 2
+        rows = pipeline_schedule(self)
+        total = rows[-1]['e'] + 2
         if total > MAX_CYCLES:
             raise ValueError(f'총 {total}사이클: 격자 {MAX_CYCLES}칸을 넘습니다. 명령어나 의존성을 줄이세요')
+        # 마지막 프레임 상자 = 사이클 머리 + 명령어 이름표 2개씩 + 명령어별 IF~WB 칸(정지 포함)
+        boxes = total + 2 * len(rows) + sum(row['e'] + 2 - row['f'] + 1 for row in rows)
+        if boxes > MAX_BOXES:
+            raise ValueError(f'상자 {boxes}개: 한 화면 상한 {MAX_BOXES}개를 넘습니다. 명령어나 정지를 줄이세요')
         return self
 
 
@@ -340,11 +360,16 @@ def pipeline_schedule(req: PipelineRequest) -> list[dict]:
     return rows
 
 
-## @brief 명령어 i의 사이클 → 단계 이름. 기다리는 사이클은 '-'
-def stage_map(row: dict) -> dict[int, str]:
-    stages = {row['f']: 'IF', row['d']: 'ID', row['e']: 'EX', row['e'] + 1: 'MEM', row['e'] + 2: 'WB'}
-    for cycle in range(row['f'] + 1, row['e']):
-        stages.setdefault(cycle, '-')
+## @brief 명령어 i의 사이클 → (단계 이름, 정지 여부)
+# - 정지 중인 명령어는 다음 단계로 못 가고 지금 단계에 머묾: 앞 명령어가 막혀 IF에 남거나(뒤 명령어), 값을 기다리며 ID에 남음
+#   빈 칸 대신 머무는 단계를 정지 표시로 반복해 그려, WB와 같은 사이클의 레지스터 읽기가 ID 칸에서 일어나는 것이 보이게 함
+def stage_map(row: dict) -> dict[int, tuple[str, bool]]:
+    stages = {row['f']: ('IF', False), row['d']: ('ID', False), row['e']: ('EX', False), row['e'] + 1: ('MEM', False),
+              row['e'] + 2: ('WB', False)}
+    for cycle in range(row['f'] + 1, row['d']):
+        stages[cycle] = ('IF', True)
+    for cycle in range(row['d'] + 1, row['e']):
+        stages[cycle] = ('ID', True)
     return stages
 
 
@@ -355,7 +380,7 @@ def pipe_name(ins: PipeInstr) -> str:
 
 ## @brief 사이클별 프레임과 전달 화살표를 만듦
 # - 화살표: forwarding이면 소비 명령어 EX 바로 전 사이클의 생산 명령어 칸(EX 또는 MEM) → 소비 명령어 EX 칸('fwd')
-#   forwarding이 없으면 생산 명령어 WB 칸 → 소비 명령어가 같은 사이클에 레지스터를 읽는 칸
+#   forwarding이 없으면 생산 명령어 WB 칸 → 소비 명령어가 같은 사이클에 레지스터를 읽는 ID 칸
 #   레지스터 파일에서 이미 읽을 수 있는 먼 의존은 화살표 없음. 두 원본이 같은 생산 명령어면 화살표 하나만 그림
 def simulate_pipeline(req: PipelineRequest) -> Animation:
     rows = pipeline_schedule(req)
@@ -380,13 +405,13 @@ def simulate_pipeline(req: PipelineRequest) -> Animation:
         names += [Box(id=f'n{i}', label=pipe_name(ins), x=0, y=1 + i, shape='label'),
                   Box(id=f's{i}', label=','.join(ins.srcs), x=1, y=1 + i, shape='label')]
 
-    ## @brief cycle까지 진행한 표. 현재 사이클 열은 active, 기다리는 칸은 removed
+    ## @brief cycle까지 진행한 표. 현재 사이클 열은 active, 정지해 같은 단계에 머무는 칸은 removed
     def table(cycle):
         boxes = []
         for i, stages in enumerate(maps):
-            for c, stage in sorted(stages.items()):
+            for c, (stage, stalled) in sorted(stages.items()):
                 if c <= cycle:
-                    tone = 'removed' if stage == '-' else 'active' if c == cycle else 'normal'
+                    tone = 'removed' if stalled else 'active' if c == cycle else 'normal'
                     boxes.append(Box(id=f'i{i}c{c}', label=stage, x=1 + c, y=1 + i, shape='cell', tone=tone))
         arrows = [Arrow(source=s, target=t, label=label) for c, s, t, label, *_ in links if c <= cycle]
         return header + names + boxes, arrows
@@ -406,23 +431,26 @@ def simulate_pipeline(req: PipelineRequest) -> Animation:
 
 
 ## @brief 한 사이클의 설명: 전달(forwarding)·레지스터 읽기 → 정지 → 동시에 처리되는 명령어 수 순서로 고름
+# - 한 사이클에 EX(또는 ID)에 있는 소비 명령어는 하나뿐이라, 같은 사이클의 화살표는 모두 같은 소비 명령어로 감
+#   두 값을 한꺼번에 전달하면(예: r1은 MEM에서, r4는 EX에서) 둘 다 적음
 def describe_cycle(req, rows, maps, links, cycle) -> str:
-    for c, _, _, label, j, i, src in links:
-        if c == cycle:
-            producer, consumer = pipe_name(req.instructions[j]), pipe_name(req.instructions[i])
-            obj = f'{src}{josa(int(src[1]), "을", "를")}'
-            if label:
-                return f'{cycle}: {producer}의 결과 {obj} {consumer} EX로 바로 전달(forwarding)'
-            return (f'{cycle}: {producer}{josa(int(producer[-1]), "이", "가")} WB에서 {obj} 쓰고 '
-                    f'{consumer}{josa(int(consumer[-1]), "이", "가")} 같은 사이클에 읽음')
+    now = [link for link in links if link[0] == cycle]
+    if now:
+        consumer = pipe_name(req.instructions[now[0][5]])
+        sources = ', '.join(f'{pipe_name(req.instructions[j])}의 {src}' for _, _, _, _, j, _, src in now)
+        last = now[-1][6]
+        obj = f'{sources}{josa(int(last[1]), "을", "를")}'
+        if now[0][3]:
+            return f'{cycle}: {obj} {consumer} EX로 바로 전달(forwarding)'
+        return f'{cycle}: WB에서 쓴 {obj} {consumer}{josa(int(consumer[-1]), "이", "가")} 같은 사이클 ID에서 읽음'
     for i, row in enumerate(rows):
-        if maps[i].get(cycle) == '-' and row['deps'] and cycle > row['d']:
+        if maps[i].get(cycle, ('', False))[1] and row['deps'] and cycle > row['d']:
             j, src, _ = max(row['deps'], key=lambda dep: dep[2])
             name = pipe_name(req.instructions[i])
             return f'{cycle}: {name}{josa(int(name[-1]), "이", "가")} {pipe_name(req.instructions[j])}의 {src} 값을 기다려 정지'
-    busy = [i for i, stages in enumerate(maps) if stages.get(cycle, '-') != '-']
+    busy = [i for i, stages in enumerate(maps) if cycle in stages and not stages[cycle][1]]
     if len(busy) == 1:
-        return f'{cycle}: {pipe_name(req.instructions[busy[0]])} {maps[busy[0]][cycle]}'
+        return f'{cycle}: {pipe_name(req.instructions[busy[0]])} {maps[busy[0]][cycle][0]}'
     return f'{cycle}: 명령어 {len(busy)}개가 서로 다른 단계를 동시에 처리'
 
 
@@ -450,14 +478,22 @@ class MemoryHierarchyRequest(Strict):
     levels: list[Level] = Field(min_length=2, max_length=4)
     accesses: list[Item] = Field(min_length=1, max_length=10)
 
-    ## @brief 계층 이름 중복·순서, 맨 아래 계층 용량을 확인
+    ## @brief 계층 이름 중복·순서, 아래로 갈수록 느리고 큰지, 맨 아래 계층 용량, 한 화면 상자 수를 확인
     @model_validator(mode='after')
     def validate_levels(self):
         order = [LEVEL_ORDER.index(level.name) for level in self.levels]
         if order != sorted(set(order)):
             raise ValueError('levels는 L1 → L2 → DRAM → SSD 순서로 중복 없이 적어야 합니다')
+        # '위일수록 빠르고 작음' 설명과 그림이 맞도록: 아래 계층일수록 느리고(latency 증가) 칸이 많거나 같음
+        for upper, lower in zip(self.levels, self.levels[1:]):
+            if upper.latency >= lower.latency or upper.slots > lower.slots:
+                raise ValueError(f'{upper.name} → {lower.name}: 아래 계층은 latency가 더 크고 칸이 많거나 같아야 합니다')
         if self.levels[-1].slots < len(set(self.accesses)):
             raise ValueError(f'맨 아래 {self.levels[-1].name}에 데이터 {len(set(self.accesses))}개가 모두 들어가야 합니다')
+        # 마지막 프레임 상자 = 계층마다 이름·latency 2개 + 칸 + 접근마다 데이터·비용 2개
+        boxes = 2 * len(self.levels) + sum(level.slots for level in self.levels) + 2 * len(self.accesses)
+        if boxes > MAX_BOXES:
+            raise ValueError(f'상자 {boxes}개: 한 화면 상한 {MAX_BOXES}개를 넘습니다. 계층·칸·접근 수를 줄이세요')
         return self
 
 
@@ -545,11 +581,12 @@ class CacheRequest(Strict):
     addresses: list[Annotated[int, Field(ge=0, le=255)]] = Field(min_length=1, max_length=10)
 
 
-## @brief 주소마다 블록·라인을 계산해 적중·미스(빈 라인, 다른 블록이 있던 충돌)를 기록하고 마지막에 적중률을 보임
+## @brief 주소마다 블록·라인을 계산해 적중·최초 미스(처음 쓰는 블록)·충돌 미스(밀려났던 블록)를 기록하고 마지막에 적중률을 보임
 # - 배치: 라인 행(x=0 번호, x=1 저장된 블록, x=2 바이트 범위), y=4·5 주소 → 블록 → 라인, y=6 접근 주소, y=7 적중·미스
 def simulate_cache(req: CacheRequest) -> Animation:
     stored: list[int | None] = [None] * req.lines
     history = []  # (주소, 적중 여부)
+    seen = set()  # 한 번이라도 캐시에 올라온 블록. 처음 쓰는 블록의 미스(최초·강제 미스)와 충돌 미스를 가르는 기준
 
     ## @brief 현재 캐시와 기록을 그림. current는 (주소, 블록, 라인, 라인 tone) 또는 None
     def frame(caption, current=None):
@@ -587,10 +624,14 @@ def simulate_cache(req: CacheRequest) -> Animation:
         old = stored[line]
         if old == block:
             caption, tone = f'{head}: 적중', 'active'
-        elif old is None:
-            caption, tone = f'{head}: 비어 있어 미스, 블록 {block} 저장', 'new'
+        elif block not in seen:
+            # 처음 쓰는 블록은 라인이 비었든 다른 블록이 있었든 캐시 구조와 관계없이 피할 수 없는 최초(강제) 미스
+            replaced = '' if old is None else f', 블록 {old} 교체'
+            caption, tone = f'{head}: 처음 쓰는 블록이라 최초 미스{replaced}', 'new'
         else:
-            caption, tone = f'{head}: 블록 {old} 자리라 충돌 미스, 교체', 'new'
+            # 전에 올라왔던 블록이 같은 라인을 쓰는 다른 블록에 밀려나 다시 읽는 경우만 충돌 미스
+            caption, tone = f'{head}: 블록 {old}에 밀려났던 블록이라 충돌 미스', 'new'
+        seen.add(block)
         stored[line] = block
         history.append((address, old == block))
         frames.append(frame(caption, (address, block, line, tone)))
@@ -619,7 +660,7 @@ class PagingRequest(Strict):
     tlb_size: int = Field(default=0, ge=0, le=4)
     addresses: list[Annotated[int, Field(ge=0, le=255)]] = Field(min_length=1, max_length=3)
 
-    ## @brief 표 길이 = 2^(주소 비트 - 오프셋 비트), 주소 범위, 프레임 중복을 확인
+    ## @brief 표 길이 = 2^(주소 비트 - 오프셋 비트), 주소 범위, 프레임 중복, 폴트에 쓸 빈 프레임을 확인
     @model_validator(mode='after')
     def validate_paging(self):
         pages = 2 ** (self.address_bits - self.offset_bits)
@@ -631,6 +672,8 @@ class PagingRequest(Strict):
         used = [f for f in self.page_table if f is not None] + self.free_frames
         if len(set(used)) != len(used):
             raise ValueError('같은 물리 프레임을 두 번 쓸 수 없습니다(page_table·free_frames)')
+        # 페이지 폴트에 쓸 빈 프레임이 모자란지는 접근 순서대로 실행해 봐야 알 수 있어 검증 단계에서 한 번 실행함
+        simulate_paging(self)
         return self
 
 
@@ -694,7 +737,12 @@ def simulate_paging(req: PagingRequest) -> Animation:
                     raise ValueError(f'페이지 {page}: 빈 프레임이 없어 페이지 폴트를 처리할 수 없습니다. free_frames를 주세요')
                 table[page] = free.pop(0)
                 caption = f'SSD에서 페이지 {page}{josa(page, "을", "를")} 프레임 {table[page]}에 적재, 표 갱신'
-                frames.append(frame(caption, va, tones={f'pt{page}': 'new', 'ssd': 'active'}, arrows=[('ssd', f'pt{page}')]))
+                tones = {f'pt{page}': 'new', 'ssd': 'active'}
+                if req.tlb_size:
+                    # 폴트 처리 뒤에도 변환 결과를 TLB에 넣어 다음 접근이 TLB에서 끝나게 함
+                    tones.update(remember(tlb, req.tlb_size, page, table[page]))
+                    caption += ', TLB에 기록'
+                frames.append(frame(caption, va, tones=tones, arrows=[('ssd', f'pt{page}')]))
             else:
                 where = f'{prefix}페이지 테이블' if prefix else '페이지 테이블'
                 tones = {f'pt{page}': 'active'}
@@ -705,8 +753,6 @@ def simulate_paging(req: PagingRequest) -> Animation:
                     caption = f'{where}: 페이지 {page} → 프레임 {table[page]}'
                 frames.append(frame(caption, va, tones=tones))
             f = table[page]
-            if req.tlb_size and all(p != page for p, _ in tlb):
-                remember(tlb, req.tlb_size, page, f)
         physical = f * size + offset
         frames.append(frame(f'물리 주소 = {f}×{size} + {offset} = {physical}', va, (physical, f, offset)))
     return build_animation('paging', '가상 주소 → 물리 주소 변환', frames)

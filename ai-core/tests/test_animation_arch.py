@@ -3,6 +3,7 @@
 # 그릴 수 없는 입력을 거부하는지, 개념별 예시 장면 3개(content/arch/scenes.json)가 모두 실행되고 서로 다른지 검증
 # - 기대값은 시뮬레이터를 거치지 않고 손으로 계산해 적음: 코드와 같은 실수를 테스트가 따라 하지 않게 하기 위함
 import json
+import random
 import unittest
 from pathlib import Path
 
@@ -45,10 +46,13 @@ class TwosComplementTests(unittest.TestCase):
         self.assertEqual(row(animation.frames[-1], 1), '0101')
         self.assertEqual(row(animation.frames[-1], 2), '')
 
-    # 검증 목적: 표현 범위의 가장 작은 수(-8)도 반전·+1 뒤 1000으로 돌아옴
+    # 검증 목적: 최솟값(-8)은 +8을 4비트로 쓸 수 없으므로 '8을 4비트로' 같은 틀린 절대값 단계 없이 1000을 바로 설명
     def test_encode_minimum_value(self):
         animation = run({'kind': 'twos_complement', 'operation': 'encode', 'bits': 4, 'a': -8})
-        self.assertEqual(row(animation.frames[-1], 3), '1000')
+        captions = [f.caption for f in animation.frames]
+        self.assertEqual(row(animation.frames[-1], 1), '1000')
+        self.assertFalse(any('8을' in c for c in captions), captions)
+        self.assertIn('최솟값', captions[0])
 
     # 검증 목적: 5 + 4 = 9는 4비트 범위(-8..7)를 넘어 1001(-7)이 되는 부호 있는 오버플로
     def test_add_detects_signed_overflow(self):
@@ -72,6 +76,7 @@ class TwosComplementTests(unittest.TestCase):
         last = animation.frames[-1]
         self.assertEqual(row(last, 1), '1101')
         self.assertEqual(row(last, 2), '11111101')
+        self.assertIn('부호 비트 1을', animation.frames[2].caption)
 
     # 검증 목적: 비트 수 범위 밖 값, add의 b 누락, 줄어드는 extend를 거부
     def test_rejects_invalid_inputs(self):
@@ -116,13 +121,13 @@ class InstructionCycleTests(unittest.TestCase):
         self.assertEqual(len(animation.frames), 1 + 3 * 3 + 1)
         self.assertEqual(box(animation.frames[6], 'pc').label, '12')
 
-    # 검증 목적: 프로그램 밖 점프 주소, 메모리에 없는 변수, 끝나지 않는 반복을 거부
+    # 검증 목적: 프로그램 밖 점프 주소, 메모리에 없는 변수, 끝나지 않는 반복을 요청 검증 단계에서 거부
     def test_rejects_invalid_programs(self):
         with self.assertRaises(ValidationError):
             run(program(('LOAD', 'A'), ('JUMP', 6)))
         with self.assertRaises(ValidationError):
             run(program(('LOAD', 'D')))
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValidationError):
             run(program(('LOAD', 'A'), ('JUMP', 0)))
 
 
@@ -130,6 +135,11 @@ class InstructionCycleTests(unittest.TestCase):
 def pipe(*rows, forwarding):
     return {'kind': 'pipeline', 'forwarding': forwarding,
             'instructions': [{'opcode': op, 'dest': dest, 'srcs': list(srcs)} for op, dest, *srcs in rows]}
+
+
+## @brief 마지막 프레임에서 i번째 명령어가 정지한(removed) 사이클 번호
+def stalled(animation, i):
+    return [int(b.id.split('c')[1]) for b in animation.frames[-1].boxes if b.id.startswith(f'i{i}c') and b.tone == 'removed']
 
 
 ## @brief 마지막 프레임에서 i번째 명령어의 사이클별 단계 라벨(1사이클부터, 빈 사이클은 '', 끝난 뒤 빈 사이클은 뺌)
@@ -158,16 +168,26 @@ class PipelineTests(unittest.TestCase):
         self.assertIn(('i0c3', 'i1c4'), arrows)
 
     # 검증 목적: forwarding이 없으면 레지스터 파일 쓰기(WB)까지 2사이클 정지, 뒤 명령어도 함께 밀림
+    # - 정지 중인 명령어는 머무는 단계(ID, 뒤 명령어는 IF)를 removed 톤으로 반복해 그림
     def test_no_forwarding_stalls_two_cycles(self):
         animation = run(pipe(('add', 'r1', 'r2', 'r3'), ('sub', 'r4', 'r1', 'r5'), ('add', 'r6', 'r7', 'r8'),
                              forwarding=False))
-        self.assertEqual(stages(animation, 1), ['', 'IF', 'ID', '-', '-', 'EX', 'MEM', 'WB'])
-        self.assertEqual(stages(animation, 2), ['', '', 'IF', '-', '-', 'ID', 'EX', 'MEM', 'WB'])
+        self.assertEqual(stages(animation, 1), ['', 'IF', 'ID', 'ID', 'ID', 'EX', 'MEM', 'WB'])
+        self.assertEqual(stages(animation, 2), ['', '', 'IF', 'IF', 'IF', 'ID', 'EX', 'MEM', 'WB'])
+        self.assertEqual((stalled(animation, 1), stalled(animation, 2)), ([4, 5], [4, 5]))
+
+    # 검증 목적: WB와 같은 사이클 레지스터 읽기 화살표는 소비 명령어가 머무는 ID 칸을 가리킴(빈 대기 칸이 아님)
+    def test_register_read_arrow_points_to_id_cell(self):
+        animation = run(pipe(('add', 'r1', 'r2', 'r3'), ('sub', 'r4', 'r1', 'r5'), forwarding=False))
+        frame = animation.frames[5]
+        self.assertIn(('i0c5', 'i1c5'), [(a.source, a.target) for a in frame.arrows])
+        self.assertEqual((box(frame, 'i0c5').label, box(frame, 'i1c5').label), ('WB', 'ID'))
 
     # 검증 목적: load 직후 사용(load-use)은 forwarding이 있어도 1사이클 정지, MEM → EX로 전달
     def test_load_use_needs_one_stall_with_forwarding(self):
         animation = run(pipe(('lw', 'r1', 'r2'), ('add', 'r3', 'r1', 'r4'), forwarding=True))
-        self.assertEqual(stages(animation, 1), ['', 'IF', 'ID', '-', 'EX', 'MEM', 'WB'])
+        self.assertEqual(stages(animation, 1), ['', 'IF', 'ID', 'ID', 'EX', 'MEM', 'WB'])
+        self.assertEqual(stalled(animation, 1), [4])
         arrows = [(a.source, a.target) for a in animation.frames[5].arrows]
         self.assertIn(('i0c4', 'i1c5'), arrows)
 
@@ -175,6 +195,20 @@ class PipelineTests(unittest.TestCase):
     def test_same_producer_twice_draws_one_arrow(self):
         animation = run(pipe(('add', 'r1', 'r2', 'r3'), ('add', 'r4', 'r1', 'r1'), forwarding=True))
         self.assertEqual([(a.source, a.target) for a in animation.frames[-1].arrows], [('i0c3', 'i1c4')])
+
+    # 검증 목적: 같은 사이클에 두 값을 전달하면(r1은 MEM에서, r4는 EX에서) 캡션이 둘 다 말함
+    def test_same_cycle_forwards_name_both_values(self):
+        animation = run(pipe(('add', 'r1', 'r2', 'r3'), ('sub', 'r4', 'r1', 'r5'), ('add', 'r6', 'r4', 'r1'), forwarding=True))
+        caption = animation.frames[5].caption
+        self.assertIn('add r1의 r1', caption)
+        self.assertIn('sub r4의 r4', caption)
+
+    # 검증 목적: 상자 수 상한(40)을 넘는 장면은 Pydantic 영어 오류 대신 한국어 이유로 거부(명령어 5개는 표가 45칸 이상)
+    def test_rejects_too_many_boxes_in_korean(self):
+        rows = [('add', f'r{k}', 'r9') for k in range(1, 6)]
+        with self.assertRaises(ValidationError) as caught:
+            run(pipe(*rows, forwarding=True))
+        self.assertIn('상자', str(caught.exception))
 
     # 검증 목적: lw의 원본 레지스터 개수 오류, 10사이클(격자 폭)을 넘는 장면을 거부
     def test_rejects_invalid_pipelines(self):
@@ -210,7 +244,7 @@ class MemoryHierarchyTests(unittest.TestCase):
 
     # 검증 목적: 단일 캐시의 평균 접근 시간 = 적중 시간 + 미스율 × 미스 페널티(2 + 3/8 × 50 = 20.75)
     def test_amat_matches_formula(self):
-        animation = run(hierarchy([('L1', 4, 2), ('DRAM', 3, 50)], 'abaabaca'))
+        animation = run(hierarchy([('L1', 2, 2), ('DRAM', 3, 50)], 'abaabaca'))
         self.assertEqual(costs(animation).count('52'), 3)
         self.assertIn('20.75', animation.frames[-1].caption)
 
@@ -220,6 +254,20 @@ class MemoryHierarchyTests(unittest.TestCase):
                        [('L1', 1, 1), ('DRAM', 2, 1000)]):
             with self.subTest(levels=levels), self.assertRaises(ValidationError):
                 run(hierarchy(levels, 'ab'))
+
+    # 검증 목적: '위일수록 빠르고 작음' 설명과 그림이 맞도록 위 계층이 아래보다 칸이 많거나 느린 요청을 거부
+    def test_rejects_upper_level_larger_or_slower(self):
+        for levels in ([('L1', 4, 2), ('DRAM', 3, 50)], [('L1', 1, 100), ('DRAM', 2, 10)],
+                       [('L1', 1, 1), ('L2', 3, 10), ('DRAM', 2, 100)]):
+            with self.subTest(levels=levels), self.assertRaises(ValidationError):
+                run(hierarchy(levels, 'ab'))
+
+    # 검증 목적: 4계층·칸이 많은 장면이 상자 상한(40)을 넘으면 한국어 이유로 거부
+    def test_rejects_too_many_boxes_in_korean(self):
+        levels = [('L1', 6, 1), ('L2', 6, 10), ('DRAM', 6, 100), ('SSD', 6, 999)]
+        with self.assertRaises(ValidationError) as caught:
+            run(hierarchy(levels, 'abcdefabcd'))
+        self.assertIn('상자', str(caught.exception))
 
 
 ## @brief 직접 사상 캐시 장면 요청 축약
@@ -245,11 +293,14 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(outcomes(animation), ['미스', '미스', '적중', '적중', '적중'])
 
     # 검증 목적: 블록 0과 4가 같은 라인(0)에 사상되어 서로 밀어내는 충돌 미스
+    # - 블록 4의 첫 접근(주소 32)은 블록 0을 밀어내도 처음 쓰는 블록이라 최초(강제) 미스, 다시 쓰는 3·4번째만 충돌 미스
     def test_conflicting_blocks_evict_each_other(self):
         animation = run(cache(8, 4, [0, 32, 0, 32]))
+        captions = [f.caption for f in animation.frames]
         self.assertEqual(outcomes(animation), ['미스'] * 4)
         self.assertEqual(box(animation.frames[-1], 'line0').label, '4')
-        self.assertIn('충돌', animation.frames[2].caption)
+        self.assertEqual(['최초 미스' in c for c in captions[1:5]], [True, True, False, False])
+        self.assertEqual(['충돌 미스' in c for c in captions[1:5]], [False, False, True, True])
 
     # 검증 목적: 2의 거듭제곱이 아닌 블록 크기, 범위 밖 주소를 거부
     def test_rejects_invalid_cache(self):
@@ -289,7 +340,15 @@ class PagingTests(unittest.TestCase):
         self.assertEqual(box(animation.frames[-1], 'pt3').label, '3:6')
         self.assertEqual(box(animation.frames[-1], 'pav').label, '=53')
 
-    # 검증 목적: 표 길이 불일치, 주소 범위 초과, 빈 프레임 없는 폴트, 중복 프레임을 거부
+    # 검증 목적: 페이지 폴트로 적재한 페이지도 TLB에 기록하는 모습을 그리고, 같은 페이지 다음 접근은 TLB 적중
+    def test_page_fault_fills_tlb(self):
+        animation = run(paging(6, 3, [1, None, 4, None, 0, None, None, 2], [27, 29], tlb_size=2, free_frames=[6]))
+        load = animation.frames[2]
+        self.assertIn('TLB에 기록', load.caption)
+        self.assertEqual((box(load, 'tlb0').label, box(load, 'tlb0').tone), ('3:6', 'new'))
+        self.assertIn('TLB 적중', animation.frames[5].caption)
+
+    # 검증 목적: 표 길이 불일치, 주소 범위 초과, 빈 프레임 없는 폴트, 중복 프레임을 요청 검증 단계에서 거부
     def test_rejects_invalid_paging(self):
         with self.assertRaises(ValidationError):
             run(paging(8, 5, [0, 1], [3]))
@@ -297,8 +356,71 @@ class PagingTests(unittest.TestCase):
             run(paging(6, 3, [0, 1, 2, 3, 4, 5, 6, 7], [64]))
         with self.assertRaises(ValidationError):
             run(paging(6, 3, [0, 0, 2, 3, 4, 5, 6, 7], [1]))
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValidationError):
             run(paging(6, 3, [None, 1, 2, 3, 4, 5, 6, 7], [1]))
+
+
+## @brief 종류별 무작위 요청 생성기. 스키마 경계 근처 값을 고르게 섞어 검증기와 시뮬레이터의 어긋남을 찾음
+def random_request(kind: str, rng: random.Random) -> dict:
+    if kind == 'twos_complement':
+        bits = rng.randint(3, 8)
+        low, high = -2 ** (bits - 1), 2 ** (bits - 1) - 1
+        return {'kind': kind, 'operation': rng.choice(['encode', 'add', 'extend']), 'bits': bits,
+                'a': rng.choice([low, high, rng.randint(low, high)]), 'b': rng.randint(low, high),
+                'to_bits': rng.randint(bits, 8)}
+    if kind == 'instruction_cycle':
+        length, start, size = rng.choice([1, 2, 4]), rng.choice([0, 100, 200]), rng.randint(1, 6)
+        addresses = [start + i * length for i in range(size)]
+        program = [{'opcode': 'JUMP', 'target': rng.choice(addresses)} if rng.random() < 0.15
+                   else {'opcode': rng.choice(['LOAD', 'ADD', 'STORE']), 'var': rng.choice('ABCD')} for _ in range(size)]
+        return {'kind': kind, 'length': length, 'start': start, 'detail': rng.choice(['phase', 'instruction']),
+                'memory': {v: rng.choice([0, 9, 400, 999]) for v in 'ABCD'}, 'program': program}
+    if kind == 'pipeline':
+        regs = [f'r{k}' for k in range(1, 10)]
+        instructions = []
+        for _ in range(rng.randint(2, 5)):
+            opcode = rng.choice(['add', 'sub', 'lw'])
+            srcs = rng.sample(regs[:4], 1 if opcode == 'lw' else rng.randint(1, 2))
+            instructions.append({'opcode': opcode, 'dest': rng.choice(regs[:4]), 'srcs': srcs})
+        return {'kind': kind, 'forwarding': rng.random() < 0.5, 'instructions': instructions}
+    if kind == 'memory_hierarchy':
+        names = sorted(rng.sample(['L1', 'L2', 'DRAM', 'SSD'], rng.randint(2, 4)), key=['L1', 'L2', 'DRAM', 'SSD'].index)
+        slots = sorted(rng.randint(1, 6) for _ in names)
+        latencies = sorted(rng.sample(range(1, 1000), len(names)))
+        return {'kind': kind, 'levels': [{'name': n, 'slots': k, 'latency': t} for n, k, t in zip(names, slots, latencies)],
+                'accesses': [rng.choice('abcdef') for _ in range(rng.randint(1, 10))]}
+    if kind == 'cache':
+        return {'kind': kind, 'block_size': rng.choice([1, 2, 4, 8, 16]), 'lines': rng.choice([2, 4]),
+                'addresses': [rng.randint(0, 255) for _ in range(rng.randint(1, 10))]}
+    address_bits = rng.randint(4, 8)
+    offset_bits = rng.randint(max(1, address_bits - 3), min(6, address_bits - 1))
+    pages = 2 ** (address_bits - offset_bits)
+    frames = rng.sample(range(8), 8)
+    table = [frames.pop() if rng.random() < 0.6 else None for _ in range(pages)]
+    return {'kind': 'paging', 'address_bits': address_bits, 'offset_bits': offset_bits, 'page_table': table,
+            'free_frames': frames[:rng.randint(0, min(4, len(frames)))], 'tlb_size': rng.randint(0, 4),
+            'addresses': [rng.randint(0, 2 ** address_bits - 1) for _ in range(rng.randint(1, 3))]}
+
+
+## @brief 검증을 통과한 요청은 반드시 그려져야 함(검증 통과 ⇒ simulate 성공)
+# - 실패하면 모델·데이터가 고른 입력이 장면 생성 중 영어 Pydantic 오류(상자 40개 초과 등)로 죽는 상황이 됨
+class RandomInputTests(unittest.TestCase):
+    # 검증 목적: 종류마다 무작위 입력 500개 중 검증을 통과한 것은 모두 simulate 성공, 통과 비율도 충분(시험이 비지 않게)
+    def test_valid_requests_always_simulate(self):
+        rng = random.Random(20261030)
+        for kind in sorted(ARCH_KINDS):
+            valid = 0
+            for _ in range(500):
+                data = random_request(kind, rng)
+                try:
+                    request = AnimationRequestModel.model_validate(data).root
+                except ValidationError:
+                    continue
+                valid += 1
+                with self.subTest(kind=kind, data=data):
+                    simulate(request)
+            with self.subTest(kind=kind):
+                self.assertGreater(valid, 100)
 
 
 ## @brief 개념별 예시 장면 데이터(scenes.json)가 실행되고 개념마다 서로 다른 3개인지 검증

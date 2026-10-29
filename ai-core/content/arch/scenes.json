@@ -220,7 +220,7 @@
         },
         {
           "name": "DRAM",
-          "slots": 2,
+          "slots": 3,
           "latency": 100
         }
       ],
@@ -259,7 +259,7 @@
       "levels": [
         {
           "name": "L1",
-          "slots": 4,
+          "slots": 2,
           "latency": 2
         },
         {
