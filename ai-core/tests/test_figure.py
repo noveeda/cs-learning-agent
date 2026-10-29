@@ -165,6 +165,15 @@ class ItemFigureTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, '지문'):
             Item.model_validate(self.item(figure=leaked))
 
+    # 검증 목적: 선택형 문항은 보기 글도 지문으로 보아, 보기와 같은 값의 라벨(정점 이름 등)을 누설로 잘못 거르지 않음
+    def test_multiple_choice_options_count_as_stem(self):
+        nodes = [{'id': 'r', 'label': 'R2', 'shape': 'box', 'x': 0, 'y': 0}]
+        item = self.item(format='multiple_choice', question='최장 접두사 일치로 고를 다음 홉은?',
+                         options={'A': 'R2', 'B': 'R1', 'C': 'R3', 'D': '없음'}, answer='A', figure={'nodes': nodes})
+        self.assertEqual(Item.model_validate(item).stem, '최장 접두사 일치로 고를 다음 홉은? R2 R1 R3 없음')
+        with self.assertRaisesRegex(ValidationError, '지문'):
+            Item.model_validate({**item, 'options': {'A': 'R5', 'B': 'R1', 'C': 'R3', 'D': '없음'}})
+
 
 if __name__ == '__main__':
     unittest.main()
