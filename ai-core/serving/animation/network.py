@@ -40,6 +40,8 @@ def mask_of(prefix: int) -> int:
 TCP_HEADER, IP_HEADER, ETH_HEADER, ETH_TRAILER = 20, 20, 14, 4
 # 이더넷 MTU 1500에서 TCP·IP 헤더를 뺀 최대 데이터(MSS): 한 프레임에 담을 수 있는 응용 데이터 상한
 MAX_SEGMENT_DATA = 1500 - TCP_HEADER - IP_HEADER
+# 이더넷 최소 데이터 46B에서 TCP·IP 헤더를 뺀 값: 이보다 작은 데이터는 프레임에 패딩이 붙음
+MIN_SEGMENT_DATA = 46 - TCP_HEADER - IP_HEADER
 
 
 ## @brief 계층 모델 장면
@@ -47,10 +49,12 @@ MAX_SEGMENT_DATA = 1500 - TCP_HEADER - IP_HEADER
 # - router: 호스트 → 라우터 → 호스트로 갈 때 라우터는 인터넷 계층까지만 열어 보는 모습
 # - osi: OSI 7계층이 TCP/IP 4계층에 대응하는 관계
 # - data_bytes는 send에서만 씀. 1460은 이더넷 한 프레임에 들어가는 상한
+# - 하한 6: 이더넷 최소 프레임 64B(헤더 14 + 최소 데이터 46 + FCS 4)를 패딩 없이 채우는 값(6 + TCP 20 + IP 20 = 46)
+#   더 작으면 실제로는 패딩이 붙어 장면의 크기 계산(헤더 합만 더함)이 틀리기 때문
 class EncapsulationRequest(Strict):
     kind: Literal['encapsulation']
     mode: Literal['send', 'router', 'osi']
-    data_bytes: int = Field(default=100, ge=1, le=MAX_SEGMENT_DATA)
+    data_bytes: int = Field(default=100, ge=MIN_SEGMENT_DATA, le=MAX_SEGMENT_DATA)
 
 
 # 송신 캡슐화의 행(y)별 계층 이름·붙는 칸·단위 이름. 데이터 칸을 x=5에 맞춰 헤더가 왼쪽으로 쌓이는 계단을 그림
@@ -94,21 +98,21 @@ def simulate_send(req: EncapsulationRequest) -> list[Frame]:
 ROUTER_DEVICES = [('A', 1, '호스트A', (1, 2, 3, 4)), ('R', 5, '라우터', (3, 4)), ('B', 9, '호스트B', (1, 2, 3, 4))]
 LAYER_SHORT = {1: '응용', 2: '전송', 3: 'IP', 4: '링크'}
 # 패킷의 이동 경로: (패킷 칸 x, y, 단위 약어, 강조할 계층 칸 id, 설명)
-# - 패킷은 계층 칸 오른쪽(x+1)에, 선로 위에서는 y=5에 둠
-# - 단위 약어: DATA 데이터, SEG 세그먼트, PKT 패킷, FRM 프레임, BITS 비트(한글은 칸 폭을 넘쳐 영문 약어로 씀)
+# - 패킷은 계층 칸 오른쪽(x+1)에 둠. 캡슐화·역캡슐화 모두 계층마다 프레임 하나
+# - 선로 전송은 따로 프레임을 두지 않고 링크 계층 설명에 합침: 수신 쪽 계층을 모두 그리면서 장면을 12장 안에 두기 위함
+# - 단위 약어: DATA 데이터, SEG 세그먼트, PKT 패킷, FRM 프레임(한글은 칸 폭을 넘쳐 영문 약어로 씀)
 ROUTER_PATH = [
     (2, 1, 'DATA', 'A-1', 'A 응용 계층이 보낼 데이터를 만듦'),
     (2, 2, 'SEG', 'A-2', 'A 전송 계층: TCP 헤더를 붙여 세그먼트'),
     (2, 3, 'PKT', 'A-3', 'A 인터넷 계층: 목적지 B의 IP 주소를 담은 IP 헤더'),
-    (2, 4, 'FRM', 'A-4', 'A 링크 계층: 다음 장비(라우터) 주소로 프레임 헤더'),
-    (3, 5, 'BITS', None, '물리 선로로 비트 전송 → 라우터'),
-    (6, 4, 'FRM', 'R-4', '라우터 링크 계층: 프레임 헤더를 벗김'),
+    (2, 4, 'FRM', 'A-4', 'A 링크 계층: 라우터 주소로 프레임 헤더를 붙여 선로로 보냄'),
+    (6, 4, 'FRM', 'R-4', '라우터 링크 계층: 프레임을 받아 프레임 헤더를 벗김'),
     (6, 3, 'PKT', 'R-3', '라우터 인터넷 계층: 목적지 IP로 다음 홉 결정(TCP는 열지 않음)'),
-    (6, 4, 'FRM', 'R-4', '라우터 링크 계층: 다음 링크용 새 프레임 헤더를 씌움'),
-    (7, 5, 'BITS', None, '물리 선로로 비트 전송 → 호스트B'),
-    (10, 4, 'FRM', 'B-4', 'B 링크 계층: 프레임 헤더를 벗김'),
+    (6, 4, 'FRM', 'R-4', '라우터 링크 계층: 새 프레임 헤더를 씌워 다음 링크로 보냄'),
+    (10, 4, 'FRM', 'B-4', 'B 링크 계층: 프레임을 받아 프레임 헤더를 벗김'),
     (10, 3, 'PKT', 'B-3', 'B 인터넷 계층: 목적지 IP가 자기 주소임을 확인하고 IP 헤더를 벗김'),
-    (10, 1, 'DATA', 'B-1', 'B 전송 계층이 TCP 헤더를 벗기고 응용 계층에 데이터 전달'),
+    (10, 2, 'SEG', 'B-2', 'B 전송 계층: TCP 헤더를 벗기고 포트 번호로 받을 응용을 찾음'),
+    (10, 1, 'DATA', 'B-1', 'B 응용 계층이 데이터를 받음'),
 ]
 
 
@@ -287,8 +291,10 @@ def simulate_split(req: SubnetRequest) -> list[Frame]:
 
 
 ## @brief 같은 서브넷 판단. 두 주소에 같은 마스크를 AND해 네트워크 주소를 비교
+# - 강조·캡션은 마지막 네트워크 비트가 든 옥텟((prefix − 1) // 8): /24면 셋째 옥텟(AND 255), /25면 넷째 옥텟(AND 128)
+#   경계 다음 옥텟(/24의 넷째, AND 0)은 모두 0이 되어 두 주소를 가르는 자리가 아니기 때문
 def simulate_same(req: SubnetRequest) -> list[Frame]:
-    index, _ = boundary(req.prefix)
+    index = (req.prefix - 1) // 8
     mask = to_octets(mask_of(req.prefix))
     nets = [to_octets(to_int(a) & mask_of(req.prefix)) for a in (req.address, req.other)]
     rows = octet_row('a', 'A', req.address, 0) + octet_row('b', 'B', req.other, 1)
@@ -505,7 +511,9 @@ def simulate_prefix_match(req: PrefixMatchRequest) -> Animation:
              Box(id='hopHead', label='다음홉', x=7, y=1, shape='label')]
     rows = []
     for i, e in enumerate(req.entries):
-        rows += [Box(id=f'prefix{i}', label=f'{ip(e.prefix)}/{e.length}', x=1, y=2 + i, shape='label'),
+        # 주소와 길이를 따로 그림: '192.168.100.128/25'처럼 붙이면 이름표 상한 16자를 넘기 때문(주소만은 최대 15자)
+        rows += [Box(id=f'prefix{i}', label=ip(e.prefix), x=1, y=2 + i, shape='label'),
+                 Box(id=f'length{i}', label=f'/{e.length}', x=3, y=2 + i, shape='label'),
                  Box(id=f'hop{i}', label=e.hop, x=7, y=2 + i, shape='cell')]
     frames = [Frame(boxes=head + rows, arrows=[], caption=f'목적지 {ip(req.destination)}: 표의 모든 항목과 접두사를 비교')]
     best = None
@@ -525,7 +533,8 @@ def simulate_prefix_match(req: PrefixMatchRequest) -> Animation:
         caption = '일치하는 항목이 없음 → 패킷 폐기'
     else:
         chosen = req.entries[best]
-        rows = [Box(**{**b.model_dump(), 'tone': 'active'}) if b.id in (f'prefix{best}', f'hop{best}') else b for b in rows]
+        rows = [Box(**{**b.model_dump(), 'tone': 'active'}) if b.id in (f'prefix{best}', f'length{best}', f'hop{best}') else b
+                for b in rows]
         rows.append(Box(id='chosen', label=chosen.hop, x=10, y=2 + best, shape='cell', tone='new'))
         caption = f'일치한 것 중 가장 긴 /{chosen.length} 선택 → 다음 홉 {chosen.hop}'
     arrows = [Arrow(source=f'hop{best}', target='chosen')] if best is not None else []
@@ -761,6 +770,12 @@ class CongestionRequest(Strict):
         return self
 
 
+## @brief 숫자 뒤 '(으)로'를 한국어 읽기에 맞춰 고름
+# - 받침이 없거나 ㄹ 받침(일·칠·팔)이면 '로', 나머지 받침(영·삼·육·십·백)이면 '으로'. model.josa는 ㄹ 받침을 구분하지 않아 따로 둠
+def ro(number: int) -> str:
+    return '으로' if str(abs(number))[-1] in '036' else '로'
+
+
 ## @brief cwnd 변화 계산. 반환: RTT별 (cwnd, ssthresh, 손실 종류 또는 None)
 def congestion_rounds(req: CongestionRequest) -> list[tuple]:
     losses = {loss.round: loss.type for loss in req.losses}
@@ -795,13 +810,19 @@ def simulate_congestion(req: CongestionRequest) -> Animation:
                 arrows.append(Arrow(source=f'c{k - 1}', target=f'c{k}', head=False))
         previous = rows[r - 1] if r else None
         if loss:
-            new = max(cwnd // 2, 2)
-            caption = (f'RTT {r + 1}: cwnd {cwnd}에서 타임아웃 → ssthresh {new}, 다음 cwnd 1' if loss == 'timeout'
-                       else f'RTT {r + 1}: cwnd {cwnd}에서 3중복 ACK → ssthresh {new}, 다음 cwnd {new}(절반)')
+            # 절반이 2보다 작으면 하한 2가 적용되므로 캡션에 '최소 2'를 밝힘(cwnd 2·3에서 '절반'과 값이 어긋나지 않게)
+            new, floored = max(cwnd // 2, 2), cwnd // 2 < 2
+            caption = (f'RTT {r + 1}: cwnd {cwnd}에서 타임아웃 → ssthresh {new}{"(최소 2)" if floored else ""}, 다음 cwnd 1'
+                       if loss == 'timeout' else
+                       f'RTT {r + 1}: cwnd {cwnd}에서 3중복 ACK → ssthresh {new}, 다음 cwnd {new}'
+                       f'({"절반, 최소 2" if floored else "절반"})')
         elif previous is None:
             caption = f'RTT 1: cwnd 1로 느린 시작(ssthresh {threshold}). 아래 줄 th = ssthresh'
+        elif previous[2] == 'timeout':
+            caption = f'RTT {r + 1}: 타임아웃 뒤 cwnd {cwnd}{ro(cwnd)} 느린 시작부터 다시(ssthresh {threshold})'
         elif previous[2]:
-            caption = f'RTT {r + 1}: 손실 뒤 cwnd {cwnd}로 다시 시작(ssthresh {threshold})'
+            # 3중복 ACK 뒤 cwnd = ssthresh라 느린 시작으로 돌아가지 않고 혼잡 회피(+1)로 이어감
+            caption = f'RTT {r + 1}: 3중복 ACK 뒤 cwnd {cwnd}{ro(cwnd)} 혼잡 회피를 이어감(ssthresh {threshold})'
         elif previous[0] < previous[1]:
             grown = '2배' if cwnd == 2 * previous[0] else 'ssthresh에서 멈춤'
             reached = ' → 이제 혼잡 회피' if cwnd == threshold else ''
