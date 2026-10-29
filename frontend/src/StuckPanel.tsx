@@ -8,6 +8,7 @@ import { LoaderCircle, RotateCcw, X } from "lucide-react";
 import type { Concept } from "./roadmap";
 import { remediationParts } from "./animation";
 import { AnimationPlayer } from "./AnimationPlayer";
+import { ItemFigure } from "./ItemFigure";
 import {
   canRetry,
   createSession,
@@ -95,6 +96,8 @@ function AnswerForm({
         if (answer.trim()) onSubmit(answer);
       }}
     >
+      {/* 지문 도식은 지문 위에 둬 구조를 먼저 보고 글을 읽게 함; 도식이 없는 문항은 글만 보임 */}
+      {item.figure && <ItemFigure figure={item.figure} label="문항 지문 도식" />}
       <p className="stuck-question" id={`question-${item.id}`}>
         {item.question}
       </p>

@@ -227,6 +227,33 @@ def tool_then_text(name, arguments):
 STACK = {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}, {'op': 'push', 'value': 2}, {'op': 'pop'}]}
 
 
+# 채팅 도구(ANIMATION_TOOL) 설명이 입력 필드를 안내하는 장면 종류
+DESCRIBED_KINDS = {'array', 'linked_list', 'stack', 'queue', 'hash_table', 'bst', 'heap', 'graph_traversal', 'sort',
+                   'tree_traversal', 'cpu_schedule', 'call_stack'}
+
+
+## @brief kinds에 해당하는 요청 모델과 그 모델이 $ref로 참조하는 하위 모델(연산·프로세스 등)의 schema를 모음
+def described_defs(all_defs: dict, kinds: set) -> list[dict]:
+    def refs(node):
+        if isinstance(node, dict):
+            if '$ref' in node:
+                yield node['$ref'].rsplit('/', 1)[-1]
+            for value in node.values():
+                yield from refs(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from refs(value)
+
+    stack = [name for name, d in all_defs.items() if d.get('properties', {}).get('kind', {}).get('const') in kinds]
+    seen = set()
+    while stack:
+        name = stack.pop()
+        if name not in seen:
+            seen.add(name)
+            stack += refs(all_defs[name])
+    return [all_defs[name] for name in seen]
+
+
 class AnimationToolTests(unittest.TestCase):
     # 검증 목적: show_animation 성공 시 도식과 같은 artifact 이벤트로 프레임이 나가고,
     # 모델에는 프레임 전체 대신 단계 설명만 돌려줘 문맥 토큰을 아끼는지 확인
@@ -287,16 +314,21 @@ class AnimationToolTests(unittest.TestCase):
 
     # 검증 목적: 운영 모델 채팅 템플릿은 parameters의 최상위 properties만 렌더링하므로,
     # 도구 스키마가 평평한 object이고 kind·op 목록이 실제 요청 스키마와 같은지 확인
+    # - 필드 비교는 도구 설명이 입력 필드를 안내하는 기존 12종(DESCRIBED_KINDS)과 그 하위 모델로 한정
+    #   과목별 예시 장면(content/<과목>/scenes.json)용 새 장면 종류는 kind enum에만 노출되고 필드 안내는 없음(2026-10-30 결정)
     def test_animation_tool_schema_is_flat_and_matches_models(self):
         parameters = ANIMATION_TOOL['function']['parameters']
         self.assertEqual(parameters['type'], 'object')
         self.assertNotIn('oneOf', parameters)
         properties = parameters['properties']
         self.assertEqual(set(properties['kind']['enum']), set(SIMULATORS))
-        defs = AnimationRequestModel.model_json_schema()['$defs'].values()
+        all_defs = AnimationRequestModel.model_json_schema()['$defs']
+        defs = all_defs.values()
         ops = {value for d in defs if 'op' in d.get('properties', {})
                for value in d['properties']['op'].get('enum', [d['properties']['op'].get('const')])}
         self.assertEqual(set(properties['ops']['items']['properties']['op']['enum']), ops)
-        fields = {name for d in defs for name in d.get('properties', {})} - {'kind', 'op'}
+        described = described_defs(all_defs, DESCRIBED_KINDS)
+        self.assertEqual({d['properties']['kind']['const'] for d in described if 'kind' in d['properties']}, DESCRIBED_KINDS)
+        fields = {name for d in described for name in d.get('properties', {})} - {'kind', 'op'}
         item_fields = set(properties['ops']['items']['properties']) | set(properties['processes']['items']['properties'])
         self.assertLessEqual(fields, set(properties) | item_fields)
