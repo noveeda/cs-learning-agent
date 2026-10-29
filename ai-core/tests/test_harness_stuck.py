@@ -305,9 +305,9 @@ class RecordingHarness(HarnessStuckGateway):
         self.calls.append('summarize')
         return super().summarize(*args)
 
-    def choose_animation(self, *args):
+    def choose_animation(self, *args, **kwargs):
         self.calls.append('animate')
-        return super().choose_animation(*args)
+        return super().choose_animation(*args, **kwargs)
 
 
 class FlowParityTests(unittest.TestCase):
