@@ -1,8 +1,14 @@
 ## @file
 # @brief 하네스 모델별 측정(eval.harness_measure)의 지표 계산 metrics(rows)가 spec 8-2 정의대로 수치를 내는지 검증
 # - 모델 호출 없이 측정 결과 행(rows.jsonl과 같은 모양)을 직접 만들어 넣음. 지표 정의가 바뀌면 모델별 비교가 무너지므로 순수 함수로 고정함
+import tempfile
+import threading
+import time
 import unittest
+from pathlib import Path
+from unittest import mock
 
+from eval import harness_measure
 from eval.harness_measure import metrics
 
 
@@ -54,6 +60,31 @@ class MetricsTests(unittest.TestCase):
         self.assertAlmostEqual(grading['false_pass_rate'], 0.25)
         self.assertEqual((grading['human_pass'], grading['false_fail']), (2, 1))
         self.assertAlmostEqual(grading['false_fail_rate'], 0.5)
+
+
+class ProdSlotTests(unittest.TestCase):
+    # 검증 목적: 운영 26B로 겹쳐 보내는 요청 수가 --prod-slots 상한을 넘지 않는지 확인
+    # - 칸 2개에 스레드 5개가 동시에 들어와도 한 번에 2개까지만 칸 안에 있어야 함. 넘치면 측정이 학습자 요청을 밀어냄
+    # - 잠금 파일(flock)이라 측정 프로세스가 여럿이어도 같은 상한을 나눠 씀
+    def test_prod_slot_limits_concurrency(self):
+        inside, peak, guard = [0], [0], threading.Lock()
+
+        def hold():
+            with harness_measure._prod_slot(2):
+                with guard:
+                    inside[0] += 1
+                    peak[0] = max(peak[0], inside[0])
+                time.sleep(0.1)
+                with guard:
+                    inside[0] -= 1
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(harness_measure, 'PROD_SLOTS_DIR', Path(tmp)):
+            threads = [threading.Thread(target=hold) for _ in range(5)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(peak[0], 2)
 
 
 if __name__ == '__main__':

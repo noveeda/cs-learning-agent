@@ -10,17 +10,22 @@
 #   python -m eval.harness_measure --base-url http://127.0.0.1:20320/v1 --model gemma-4-E4B-Q4_K_M \
 #     --gpu 1 --workers 4 --out outputs/harness-measure/e4b-q4
 import argparse
+import fcntl
 import json
 import os
 import random
 import statistics
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
+
+import httpx
 
 AI_CORE = Path(__file__).resolve().parents[1]
 if str(AI_CORE) not in sys.path:
@@ -28,8 +33,9 @@ if str(AI_CORE) not in sys.path:
 
 SETS_DIR = Path(os.environ.get('HARNESS_SETS_DIR') or AI_CORE / 'outputs' / 'harness-sets')
 TASKS = ('scope', 'judge', 'grading', 'answers', 'timing')
-# 운영 26B(8000번)에 겹쳐 보내는 요청 수 상한: 운영 서버를 함께 쓰므로 측정이 학습자 요청을 밀어내지 않게 함
-AUDIT_CONCURRENCY = 2
+# 운영 26B(8000번)에 겹쳐 보내는 요청 수 상한(--prod-slots): 운영 서버를 함께 쓰므로 측정이 학습자 요청을 밀어내지 않게 함
+# - 여러 측정 프로세스(모델별 실행)가 함께 돌아도 합계가 넘지 않도록 프로세스 사이에 공유하는 잠금 파일 묶음으로 셈
+PROD_SLOTS_DIR = Path(tempfile.gettempdir()) / 'cs-harness-prod-slots'
 
 
 ## @brief 비율; 분모가 0이면 None(지어낸 0%를 피함)
@@ -130,19 +136,52 @@ class _Capture:
         self.records.append(record)
 
 
+## @brief 잠금 파일 n개 중 비어 있는 하나를 잡을 때까지 기다림; 잡은 동안 운영 서버 요청 한 칸을 차지함
+@contextmanager
+def _prod_slot(n: int):
+    PROD_SLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    while True:
+        for index in range(n):
+            with open(PROD_SLOTS_DIR / f'slot-{index}', 'w') as file:
+                try:
+                    fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                try:
+                    yield
+                    return
+                finally:
+                    fcntl.flock(file, fcntl.LOCK_UN)
+        time.sleep(0.05)
+
+
+## @brief 요청 하나를 보내는 동안 운영 서버 칸 하나를 잡는 HTTP 전송 계층; 운영 주소로 가는 모든 호출(생성·판정·검사)에 씀
+# - 비스트리밍 응답은 생성이 끝난 뒤 헤더가 오므로, 헤더를 받을 때까지 잡으면 서버가 일하는 시간을 덮음
+class _SlotTransport(httpx.HTTPTransport):
+    def __init__(self, slots: int):
+        super().__init__()
+        self.slots = slots
+
+    def handle_request(self, request):
+        with _prod_slot(self.slots):
+            return super().handle_request(request)
+
+
 ## @brief 측정 대상 모델 하나의 연결: 생성 게이트웨이, (선택) 다른 모델의 판정, 26B 노출 판정기
 # - 게이트웨이마다 새 잠금을 줌: 운영 BUSY 잠금은 서버 프로세스 안 공유 자원이라 측정 도구에는 없고,
 #   측정 스레드끼리 같은 잠금을 쓰면 동시 요청이 모두 LLMUnavailable이 되기 때문
-# - 26B(운영 8000번)로 가는 호출은 AUDIT_CONCURRENCY개 세마포어로 묶음
+# - 운영 주소(audit_url)로 가는 클라이언트는 _SlotTransport로 프로세스 합계 prod_slots개까지만 동시에 보냄
 class Models:
-    def __init__(self, base_url, concept_map, judge_url=None, audit_url=None):
+    def __init__(self, base_url, concept_map, judge_url=None, audit_url=None, prod_slots=2):
         from openai import OpenAI
 
-        self.concept_map = concept_map
-        self.factory = lambda url: (lambda: OpenAI(base_url=url, api_key=os.getenv('VLLM_API_KEY', 'not-needed'),
-                                                   max_retries=0))
+        def factory(url):
+            http = (lambda: httpx.Client(transport=_SlotTransport(prod_slots), timeout=None)) if url == audit_url else None
+            return lambda: OpenAI(base_url=url, api_key=os.getenv('VLLM_API_KEY', 'not-needed'), max_retries=0,
+                                  **({'http_client': http()} if http else {}))
+
+        self.concept_map, self.factory = concept_map, factory
         self.base_url, self.judge_url, self.audit_url = base_url, judge_url, audit_url
-        self.audit_gate = threading.Semaphore(AUDIT_CONCURRENCY)
 
     ## @brief 질문·항목 하나에 쓸 하네스 게이트웨이; judge_url이 있으면 판정 역할만 그 모델로 보냄(26B 판정기 교차 측정)
     def gateway(self):
@@ -150,13 +189,7 @@ class Models:
 
         gateway = HarnessGateway(self.concept_map, threading.Lock(), self.factory(self.base_url))
         if self.judge_url:
-            judge = HarnessGateway(self.concept_map, threading.Lock(), self.factory(self.judge_url))
-
-            def judged(sentence, source_text):
-                with self.audit_gate:
-                    return judge.judge(sentence, source_text)
-
-            gateway.judge = judged
+            gateway.judge = HarnessGateway(self.concept_map, threading.Lock(), self.factory(self.judge_url)).judge
         return gateway
 
     ## @brief 26B 판정기로 문장 하나를 하네스와 같은 규칙(supported + 근거 구절 대조)으로 다시 판정; 호출 실패면 None
@@ -164,9 +197,8 @@ class Models:
         from serving.harness import _judged
         from serving.harness_llm import HarnessGateway
 
-        with self.audit_gate:
-            return _judged(HarnessGateway(self.concept_map, threading.Lock(), self.factory(self.audit_url)),
-                           text, keys, passages, [])
+        return _judged(HarnessGateway(self.concept_map, threading.Lock(), self.factory(self.audit_url)),
+                       text, keys, passages, [])
 
 
 def _scope_row(models, row):
@@ -373,6 +405,7 @@ def main(argv=None):
     parser.add_argument('--timing-n', type=int, default=60)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--limit', type=int, help='측정마다 앞에서 N개만(연결 확인용)')
+    parser.add_argument('--prod-slots', type=int, default=2, help='운영 주소(--audit-url)로 동시에 보내는 요청 수 합계 상한(모든 측정 프로세스 합)')
     args = parser.parse_args(argv)
     tasks = [t for t in args.tasks.split(',') if t]
     unknown = sorted(set(tasks) - set(TASKS))
@@ -395,7 +428,7 @@ def main(argv=None):
     rows_path = out / 'rows.jsonl'
     done = {(r['task'], r['id']) for r in _load(rows_path)} if rows_path.exists() else set()
     concept_map = load_concept_map()
-    models = Models(args.base_url, concept_map, args.judge_url, args.audit_url)
+    models = Models(args.base_url, concept_map, args.judge_url, args.audit_url, args.prod_slots)
     retriever = build_retriever()
     monitor = GpuMonitor(args.gpu, out / 'gpu.csv') if args.gpu is not None else None
     if monitor:
@@ -422,7 +455,7 @@ def main(argv=None):
             monitor.join()
     result = metrics(_load(rows_path))
     meta = {'model': args.model, 'base_url': args.base_url, 'judge': args.judge_model, 'judge_url': args.judge_url,
-            'audit_url': args.audit_url, 'tasks': tasks, 'workers': args.workers, 'timing_n': args.timing_n,
+            'audit_url': args.audit_url, 'prod_slots': args.prod_slots, 'tasks': tasks, 'workers': args.workers, 'timing_n': args.timing_n,
             'seed': args.seed, 'sets_dir': str(SETS_DIR), 'min_score': retriever.min_score,
             'started': started, 'finished': time.strftime('%Y-%m-%dT%H:%M:%S'),
             'gpu': args.gpu, 'gpu_peak_mib': monitor.peak if monitor else None}
