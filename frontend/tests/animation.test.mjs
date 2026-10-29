@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CELL_HEIGHT, CELL_WIDTH, clampStep, fitViewBox, remediationParts, squeezesLabel } from '../src/animation.ts';
+import { CELL_HEIGHT, CELL_WIDTH, VIEW_PADDING, clampStep, compactRows, fitViewBox, remediationParts, squeezesLabel } from '../src/animation.ts';
 
 const box = (id, x, y) => ({ id, label: id, x, y, shape: 'cell', tone: 'normal' });
 
@@ -14,9 +14,33 @@ test('fits one view box to the largest coordinates across frames', () => {
     { boxes: [box('a', 0, 0), box('b', 3, 0)], arrows: [], caption: '처음' },
     { boxes: [box('a', 1, 2)], arrows: [], caption: '이동' },
   ];
-  assert.deepEqual(fitViewBox(frames), { width: 4 * CELL_WIDTH, height: 3 * CELL_HEIGHT });
+  // 위아래에 여백(VIEW_PADDING)을 조금 두어 맨 위·아래 상자가 테두리에 붙지 않게 함
+  assert.deepEqual(fitViewBox(frames), { y: -VIEW_PADDING, width: 4 * CELL_WIDTH, height: 3 * CELL_HEIGHT + 2 * VIEW_PADDING });
   // 원소가 없는 장면(빈 연결 리스트 등)도 칸 하나 크기로 그려 0 크기 SVG를 막음
-  assert.deepEqual(fitViewBox([{ boxes: [], arrows: [], caption: '비어 있음' }]), { width: CELL_WIDTH, height: CELL_HEIGHT });
+  assert.deepEqual(fitViewBox([{ boxes: [], arrows: [], caption: '비어 있음' }]),
+    { y: -VIEW_PADDING, width: CELL_WIDTH, height: CELL_HEIGHT + 2 * VIEW_PADDING });
+});
+
+// 검증 목적: 12×8 격자에서 어느 프레임도 쓰지 않는 행 때문에 생기는 큰 빈 공간을 없애는지 확인
+// - 호출 스택은 스택을 아래(y 5~7)에, 반환값을 위(y 0~1)에 두어 최소~최대 y로 자르면 줄지 않음 → 빈 행 묶음을 한 행으로 접음
+// - 행 순서와 같은 행의 상자 배치는 그대로 두고, 전체 프레임 기준이라 단계마다 위치가 출렁이지 않음
+test('collapses rows no frame uses into one spacer row', () => {
+  const frames = [
+    { boxes: [box('top', 0, 7), box('f3', 1, 7)], arrows: [], caption: '호출' },
+    { boxes: [box('f3', 1, 7), box('f2', 1, 6), box('f1', 1, 5)], arrows: [], caption: '쌓임' },
+    { boxes: [box('ret', 6, 0), box('label', 6, 1), box('f2', 1, 6)], arrows: [], caption: '반환' },
+  ];
+  const shown = compactRows(frames);
+  const rows = shown.map((frame) => frame.boxes.map((b) => [b.id, b.y]));
+  // 쓰는 행 0·1·5·6·7 → 빈 행 2~4는 한 행으로 접혀 0·1·(빈 행)·3·4·5
+  assert.deepEqual(rows, [[['top', 5], ['f3', 5]], [['f3', 5], ['f2', 4], ['f1', 3]], [['ret', 0], ['label', 1], ['f2', 4]]]);
+  assert.equal(fitViewBox(shown).height, 6 * CELL_HEIGHT + 2 * VIEW_PADDING);
+  // 원래 프레임은 바꾸지 않음(트래킹·캡션은 원본 좌표와 무관하지만 엔진 데이터는 그대로 둠)
+  assert.equal(frames[0].boxes[0].y, 7);
+  // 위쪽만 빈 장면은 빈 행을 모두 없애 첫 행부터 그림; 한 행짜리 빈 틈(트리 층 사이 간격 등)은 그대로 둠
+  const lower = compactRows([{ boxes: [box('a', 0, 4), box('b', 0, 6)], arrows: [], caption: '' }]);
+  assert.deepEqual(lower[0].boxes.map((b) => b.y), [0, 2]);
+  assert.deepEqual(compactRows([{ boxes: [], arrows: [], caption: '' }])[0].boxes, []);
 });
 
 // 검증 목적: 이전·다음·키보드 이동이 첫 단계 앞이나 마지막 단계 뒤로 넘어가지 않는지 확인
