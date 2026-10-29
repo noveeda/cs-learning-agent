@@ -1,11 +1,14 @@
-# 12B 하네스 역할 미세조정 학습 데이터와 측정 기록
+# 12B 하네스 역할 미세조정 학습·변환·측정 기록
 
-- 1~4절은 학습 데이터 생성(계획 Task 3), 5~8절은 측정 도구 확장과 미세조정 전 기준값(계획 Task 4)이다.
+- 1~4절은 학습 데이터 생성(계획 Task 3), 5~8절은 측정 도구 확장과 미세조정 전 기준값(계획 Task 4), 9절은 학습과 GGUF 변환(계획 Task 5)이다.
 
 - 설계: `docs/superpowers/specs/2026-10-29-finetune-12b-design.md`(4·5장, 7-1)
-- 계획: `docs/superpowers/plans/2026-10-29-finetune-12b.md` Task 3
+- 계획: `docs/superpowers/plans/2026-10-29-finetune-12b.md` Task 3(데이터), Task 4(측정), Task 5(학습·변환)
 - 생성기: `ai-core/finetune/build_data.py`
-- 결과 위치(Git 밖): `/home/infoserver/cs-learning-agent/ai-core/outputs/finetune/`
+- 학습·병합: `ai-core/finetune/train.py`, 설정: `ai-core/finetune/train_config.py`
+- 결과 위치(Git 밖)
+  - 학습 데이터: `/home/infoserver/cs-learning-agent/ai-core/outputs/finetune/`
+  - GGUF: `~/.cache/cs-llm/finetune/<run>/model-Q4_0.gguf`(본 학습 `qat-r16-main`)
 
 ## 1. 무엇을 만드는가
 
@@ -302,3 +305,130 @@ python -m eval.harness_measure --base-url http://127.0.0.1:20324/v1 --model gemm
   - 보정 시험(6절)은 교란 문장이라 두 모델이 99/100행에서 같았다. 실제 12B 문장에서는 판정이 이만큼 갈린다.
   - 어느 쪽이 맞는지 사람이 본 표본은 아직 없다.
 - 측정 중 쓰기(ground) 호출 시간 초과가 4번 났다. 3번은 재시도로 이어졌고, 1번은 두 번째 시도도 실패했다. 답 결과의 생성 실패는 1건이다.
+
+## 9. 학습과 GGUF 변환 (계획 Task 5)
+
+### 9-1. 설정
+
+| 항목 | 값 |
+|---|---|
+| 바탕 모델 | `google/gemma-4-12B-it-qat-q4_0-unquantized` (리비전 `b6ed862`) → GGUF Q4_0 |
+| 방식 | QLoRA: 바탕 가중치 4bit nf4(이중 양자화, 계산 BF16), LoRA r 16·alpha 32·dropout 0.05 |
+| 어댑터를 단 층 | 언어 모델의 선형층 전부(q·k·v·o·gate·up·down). 그림·소리 인코더와 출력층은 뺌 |
+| 학습률 | 1e-4, 선형 감소, 처음 약 3% 워밍업 |
+| 에폭 | 2(검증 손실이 2회 연속 오르면 멈춤) |
+| 최대 길이 | 4,096토큰(넘는 행은 빼고 셈. 실제로는 0행) |
+| 유효 배치 | 16 = GPU 2장 × GPU당 2행 × 기울기 누적 4 |
+| seed | 0 |
+| 검증·저장 | 100단계마다. 검증 손실이 가장 낮은 어댑터를 남김 |
+
+- 바탕 모델은 사용자 결정(2026-10-29)으로 QAT다. 판정 검출률은 Q4_K_M이 4.2%p 높았지만, 8GB 카드에서 Q4_K_M이 2.7배 느렸다.
+- 학습에는 행의 `messages`만 쓴다(`role`·`meta`는 버림). 손실은 정답 JSON과 차례 끝 표시(`<turn|>`)에만 매긴다.
+- 사고 모드는 끈다. gemma 4 대화 템플릿은 사고를 끄면 모델 차례 앞에 빈 thought 칸(`<|turn>model\n<|channel>thought\n<channel|>`)을 둔다.
+  - 운영(vLLM)과 llama-server는 요청마다 `enable_thinking=false`로 템플릿을 불러 이 모양의 프롬프트를 만든다.
+  - 대화 전체를 한 번에 렌더하면 이 칸이 빠진다. 그래서 프롬프트는 생성 프롬프트(`add_generation_prompt`)로 렌더하고, 그 뒤에 정답과 `<turn|>`를 붙인다.
+  - 프롬프트와 정답을 따로 토큰화한 결과가 이어 붙인 글의 토큰화와 같은지 행마다 확인한다. 다른 행은 뺀다(실제로는 0행).
+- 검증 손실은 과적합 감시용이다. 검증 행은 역할별로 행 단위로 뗐기 때문에, 같은 질문에서 나온 다른 행이 학습에도 있다(483개). 성능 판단은 Task 6 측정으로 한다.
+
+### 9-2. 속도를 위해 바꾼 것 (학습 설정은 같음)
+
+- **GPU 2장 DDP**: 5090 두 장에 모델을 한 벌씩 올린다. 유효 배치는 GPU 수와 상관없이 16으로 고정한다.
+- **길이가 비슷한 행끼리 묶기**(`train_sampling_strategy='group_by_length'`): 배치를 키워도 패딩으로 버리는 계산이 적다. 여러 행을 한 줄로 잇는 packing은 gemma 4 어텐션에서 정확성을 확인하지 않아 쓰지 않았다.
+- **정답 자리만 logits 계산**(`CompletionLossTrainer`)
+  - 모델 기본 손실은 모든 자리에서 어휘 26만 개 logits를 fp32로 만든다. GPU당 2행에서도 7.3GB를 한 번에 잡아 메모리가 모자랐다.
+  - 손실은 정답 자리에만 매기므로 그 자리만 `logits_to_keep`으로 계산한다.
+  - 실제 3행(931·1,017·1,132토큰)에서 기본 손실과 값이 같았다(0.475392550). 최대 메모리는 16,989MiB에서 11,338MiB로 줄었다.
+- 200행·20단계 속도(유효 배치 16)
+
+| 설정 | 초당 토큰 | GPU당 최대 메모리(reserved) |
+|---|---:|---:|
+| GPU 1장, GPU당 1행, 누적 16 | 1,045 | 16,246MiB |
+| GPU 2장, GPU당 2행, 누적 4 | 1,972 | 25,608MiB |
+| GPU 2장, GPU당 4행, 누적 2 | 메모리 부족(32GB) | - |
+
+### 9-3. 실행
+
+5090 서버(`~/cs-ft/`)에서 학습·병합하고, 이 서버에서 GGUF로 변환한다.
+
+```sh
+# 5090: 코드와 데이터 복사(이 서버에서)
+rsync -a ai-core/finetune/{__init__,train,train_config}.py <5090>:cs-ft/code/finetune/
+rsync -a ai-core/outputs/finetune/{train,valid}.jsonl <5090>:cs-ft/data/
+
+# 5090: 학습(GPU 2장) → 병합(CPU)
+cd ~/cs-ft/code && export HF_HUB_OFFLINE=1
+ARGS="--data $HOME/cs-ft/data --out $HOME/cs-ft/runs/<run> --batch 2 --eval-steps 100"
+CUDA_VISIBLE_DEVICES=0,1 ~/.venvs/cs-train/bin/torchrun --nproc-per-node 2 -m finetune.train $ARGS --skip-merge
+CUDA_VISIBLE_DEVICES= ~/.venvs/cs-train/bin/python -m finetune.train $ARGS --skip-train
+
+# 이 서버: 병합 가중치 받기 → BF16 GGUF → Q4_0 → 중간 파일 지우기
+R=~/.cache/cs-llm/finetune/<run>; mkdir -p $R
+rsync -a <5090>:cs-ft/runs/<run>/{merged,result.json,losses.json} $R/
+~/.venvs/cs-train/bin/python ~/llama.cpp/convert_hf_to_gguf.py $R/merged --outtype bf16 --outfile $R/model-BF16.gguf
+~/llama.cpp/build/bin/llama-quantize $R/model-BF16.gguf $R/model-Q4_0.gguf Q4_0
+(cd $R && sha256sum model-Q4_0.gguf > model-Q4_0.gguf.sha256) && rm -rf $R/merged $R/model-BF16.gguf
+
+# 이 서버: 시험 서버(GPU 1번, 20330번대)
+CUDA_VISIBLE_DEVICES=1 ~/llama.cpp/build/bin/llama-server -m $R/model-Q4_0.gguf --alias <run>-Q4_0 \
+  --host 127.0.0.1 --port 20330 --jinja -ngl 99 -fa on -np 1 -c 8192
+```
+
+- 병합은 CPU에서 BF16 바탕 모델에 어댑터를 합친다. 바탕 체크포인트와 같은 클래스·가중치 이름(677개, 모양 같음)으로 저장한다.
+  - 토크나이저·대화 템플릿 파일은 바탕 스냅숏에서 그대로 복사한다. 다시 저장하면 글자가 달라질 수 있고, 프로세서 저장은 5090에 없는 torchvision을 요구한다.
+- **변환을 이 서버에서 하는 이유**
+  - 5090에는 llama.cpp 빌드가 없다(llama-quantize가 CUDA 툴킷에 링크됨). 그래서 양자화는 이 서버에서 해야 한다.
+  - 변환(convert_hf_to_gguf.py)도 이 서버에서 한다. Task 11이 다른 모델 변환에 쓴 경로(`~/.venvs/cs-train` + `~/llama.cpp` 같은 커밋 `cf24317`)를 그대로 쓰고, 공용 서버인 5090에 아무것도 설치하지 않기 위해서다.
+  - 옮기는 크기는 병합 safetensors(23GB)나 BF16 GGUF(23.8GB)나 비슷하다. 받은 뒤 변환·양자화하고 중간 파일을 지우면 이 서버에는 GGUF만 남는다(최대 약 54GB를 잠깐 씀).
+- 바탕 모델을 받을 때 `hf download`의 xet 경로가 두 번 멈췄다(쓰기가 멈추고 메모리만 16GB 차지). `HF_HUB_DISABLE_XET=1`로 일반 HTTP로 받았다(약 65MB/s). 받은 파일의 sha256은 `26f2cee4…39a0a0`으로 저장소 값과 같다.
+
+### 9-4. 시험 학습 (train 200행, 1에폭)
+
+- 학습: GPU 2장, 13단계, 177초(1,585토큰/초), GPU당 최대 26,022MiB(reserved). 검증 50행 손실 0.169(6단계) → 0.150(12단계) → 0.150(13단계)
+- 병합 27초 → 받기 231초 → BF16 GGUF 변환 123초(667텐서) → Q4_0 양자화 39초(6.98GB, 4.68 BPW)
+- 시험 서버(GPU 1번, 20330)에 검증 judge 10행을 보냈다.
+  - 운영 경로(`HarnessGateway.judge`, JSON schema 문법 + 운영 parse): 10/10 성공
+  - schema 없이 같은 지시문·user만 보냄: 10/10이 공백 없는 한 줄 JSON이고 `finish_reason=stop`(정답 뒤에서 스스로 멈춤)
+  - 판정 일치 6/10(200행만 배운 모델이라 성능 판단에는 쓰지 않음)
+
+### 9-5. 본 학습
+
+- 실행 이름 `qat-r16-main`. GPU 2장 × 2행 × 누적 4 = 유효 배치 16, 2에폭 1,510단계(2026-10-29 22:24 ~ 10-30 03:22 KST)
+- **걸린 시간**: 학습 17,721초(4시간 55분, 100단계마다 한 검증 16회 각 약 109초 포함). 학습 시작부터 병합 끝까지 4시간 58분
+  - 본 토큰 34,359,400개, 1,939토큰/초(검증 시간 포함)
+- **GPU 최대 메모리**(32GB 중)
+  - torch 기준(rank 0): allocated 19,896MiB, reserved 27,392MiB
+  - nvidia-smi 30초 간격 기록 최대: GPU0 29,077MiB, GPU1 31,225MiB(CUDA 문맥·NCCL 버퍼 포함)
+- **중단 규칙**: 검증 손실이 200단계에서 한 번만 올랐고(0.1058 → 0.1092) 2회 연속 오른 적이 없어 2에폭을 다 돌았다. 가장 낮은 값은 마지막 1,510단계(0.0575)라 그 어댑터를 썼다.
+- **손실 곡선**(학습 손실은 10단계마다 기록한 값의 100단계 구간 평균, 1에폭 ≈ 755단계)
+
+| 단계 | 학습 손실 | 검증 손실 |
+|---:|---:|---:|
+| 100 | 0.2649 | 0.1058 |
+| 200 | 0.1062 | 0.1092 |
+| 300 | 0.0966 | 0.0899 |
+| 400 | 0.0845 | 0.0814 |
+| 500 | 0.0885 | 0.0762 |
+| 600 | 0.0818 | 0.0736 |
+| 700 | 0.0829 | 0.0718 |
+| 800 | 0.0690 | 0.0677 |
+| 900 | 0.0570 | 0.0664 |
+| 1000 | 0.0555 | 0.0627 |
+| 1100 | 0.0588 | 0.0620 |
+| 1200 | 0.0557 | 0.0620 |
+| 1300 | 0.0526 | 0.0589 |
+| 1400 | 0.0486 | 0.0584 |
+| 1500 | 0.0515 | 0.0576 |
+| 1510 | — | 0.0575 |
+
+- 첫 10단계 학습 손실은 1.487이었다. 길이별 묶음이 가장 긴 묶음을 맨 앞에 두므로 첫 구간은 토큰이 많다(10단계에 42만 토큰).
+- 900단계(2에폭 초반)부터 학습 손실이 검증 손실보다 낮아졌지만 검증 손실도 끝까지 내려갔다. 검증 손실은 같은 질문의 다른 행이 train에 있어 낙관적이다(9-1).
+- **변환**: 병합 26초 → 받기 231초 → BF16 GGUF 변환 111초(667텐서) → Q4_0 양자화 31초
+  - `~/.cache/cs-llm/finetune/qat-r16-main/model-Q4_0.gguf`: 6,975,878,848바이트(4.68 BPW)
+  - sha256 `6e02ff93277a2018a2cde169ad7766ccbd03de24abb49f369c6ccade1e1b5d8c`(같은 폴더 `model-Q4_0.gguf.sha256`)
+- **형식 점검**(시험 서버 GPU 1번 20330, 끝나고 내림): 검증 judge 10행
+  - 운영 경로 `HarnessGateway.judge` 10/10 성공, schema 없이 보내도 10/10이 공백 없는 한 줄 JSON이고 `finish_reason=stop`
+  - 판정 일치 9/10. valid 행이라 같은 질문이 train에 있을 수 있어 성능 판단에는 쓰지 않는다(성능은 Task 6).
+- **남긴 것과 지운 것**
+  - 이 서버: GGUF, sha256, `result.json`, `losses.json`만 남겼다. 병합 safetensors와 BF16 GGUF는 지웠다.
+  - 5090: 병합 safetensors(23GB)를 지웠다. 중간 체크포인트는 학습 스크립트가 끝에 지운다. 어댑터(251MB)와 기록만 `~/cs-ft/runs/qat-r16-main/`에 남았다.
+  - 5090의 바탕 모델(HF 캐시, 약 24GB)은 다시 학습할 때 필요해 남겼다.
