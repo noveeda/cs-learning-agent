@@ -1,5 +1,6 @@
 ## @file
-# @brief 막힘 흐름의 진단 가지치기·상한·보충 순서·혼합형 확인·보충 애니메이션·복귀와, 잘못된 입력·LLM 실패 시 상태 보존을 검증
+# @brief 막힘 흐름의 진단 가지치기·상한·보충 순서·이해 확인(적용 문제 판정·서술 피드백)·보충 애니메이션·복귀와, 잘못된 입력·LLM 실패 시 상태 보존을 검증
+# - 1단계 개념(선수 개념 없음) 안내·설명 방식, 세션별 문항 순서(seed)·장면 다양화, 옛 저장 상태 복원도 검증
 import json
 import unittest
 from unittest.mock import patch
@@ -11,7 +12,8 @@ from serving.animation.model import AnimationRequestModel
 from serving.api import app
 from serving.concept_map import ConceptMap, load_concept_map
 from serving.item_bank import Item, load_item_bank
-from serving.stuck import LLMUnavailable, MAX_DIAGNOSIS_ITEMS, StepInput, UnavailableGateway, step
+from serving.stuck import (LLMUnavailable, MAX_DIAGNOSIS_ITEMS, StepInput, StuckState, UnavailableGateway,
+                           explanation_enough, step)
 
 
 ## @brief 규칙 확인용 작은 지도; top의 선수는 alpha·beta, alpha 아래로 gamma → delta → eps가 이어짐(eps는 깊이 4)
@@ -45,10 +47,13 @@ STACK_SCENE = {'kind': 'stack', 'ops': [{'op': 'push', 'value': 1}, {'op': 'push
 ## @brief LLM 역할 가짜 구현; 호출을 기록해 요청당 호출 수를 확인하고, 서술 통과 여부와 고를 장면을 조절
 # - scene: choose_animation이 돌려줄 장면 요청(dict), None(장면 없음), 또는 예외 객체(던짐)
 # - explained_scenes: explain이 받은 장면 요약을 호출 순서대로 기록(글 예시와 장면 일치 확인용)
+# - attempts: explain이 받은 설명 차례(attempt), previous_scenes: choose_animation이 받은 직전 장면을 호출 순서대로 기록
+# - grade_error: 서술 채점에서 던질 예외(채점 실패 흉내); 없으면 rubric_pass로 모든 항목을 같은 값으로 채점
 class FakeGateway:
-    def __init__(self, identified='top', rubric_pass=True, rubric_extra=0, scene=STACK_SCENE):
+    def __init__(self, identified='top', rubric_pass=True, rubric_extra=0, scene=STACK_SCENE, grade_error=None):
         self.calls, self.identified, self.rubric_pass, self.rubric_extra = [], identified, rubric_pass, rubric_extra
-        self.scene, self.explained_scenes = scene, []
+        self.grade_error = grade_error
+        self.scene, self.explained_scenes, self.attempts, self.previous_scenes = scene, [], [], []
 
     def identify(self, excerpt, concept_map):
         self.calls.append('identify')
@@ -57,18 +62,22 @@ class FakeGateway:
     def explain(self, concept, attempt, entry, scene=None):
         self.calls.append('explain')
         self.explained_scenes.append(scene)
+        self.attempts.append(attempt)
         return f'{concept.id} 설명 {attempt}'
 
     def grade_explanation(self, item, answer):
         self.calls.append('grade')
+        if self.grade_error:
+            raise self.grade_error
         return [self.rubric_pass] * (len(item.rubric) + self.rubric_extra)
 
     def summarize(self, state, concept_map):
         self.calls.append('summarize')
         return '요약'
 
-    def choose_animation(self, concept, entry, kinds):
+    def choose_animation(self, concept, entry, kinds, previous=None):
         self.calls.append('animate')
+        self.previous_scenes.append(previous)
         if isinstance(self.scene, Exception):
             raise self.scene
         return None if self.scene is None else AnimationRequestModel.model_validate(self.scene).root
@@ -80,8 +89,8 @@ ROADMAP = {'kind': 'roadmap', 'concept': 'top', 'return_to': '/learn?concept=top
 class Session:
     """한 세션을 끝까지 진행하며 요청마다 LLM 호출 수를 확인하는 도우미."""
 
-    def __init__(self, test, gateway=None, concept_map=None, items=None, entry=ROADMAP):
-        self.test, self.gateway = test, gateway or FakeGateway()
+    def __init__(self, test, gateway=None, concept_map=None, items=None, entry=ROADMAP, seed=None):
+        self.test, self.gateway, self.seed = test, gateway or FakeGateway(), seed
         self.map = concept_map or small_map()
         self.items = items if items is not None else small_items([c.id for c in self.map.concepts])
         self.state = self.send({'type': 'start', 'entry': entry}, start=True)
@@ -90,7 +99,8 @@ class Session:
     def send(self, data, start=False):
         before = len(self.gateway.calls)
         limit = 2 if not start and self.state.stage == 'remediate' else 1
-        new = step(None if start else self.state, StepInput.model_validate(data), self.gateway, self.map, self.items, 1000.0)
+        new = step(None if start else self.state, StepInput.model_validate(data), self.gateway, self.map, self.items, 1000.0,
+                   seed=self.seed)
         self.test.assertLessEqual(len(self.gateway.calls) - before, limit, '요청당 LLM 호출 상한')
         self.state = new
         return new
@@ -200,17 +210,77 @@ class RemediationTests(unittest.TestCase):
         for kind in ('stuck_started', 'probe_answered', 'remediated', 'check_answered', 'explanation_graded', 'returned'):
             self.assertIn(kind, kinds)
 
-    # 검증 목적: 적용 문항은 맞혀도 서술 루브릭을 통과하지 못하면 이해로 인정하지 않는지(혼합형) 확인
-    def test_check_and_rubric_must_both_pass(self):
-        session = Session(self, gateway=FakeGateway(rubric_pass=False))
+    ## @brief 진단을 건너뛰고 막힌 개념(top)의 적용 문제·서술에 답한 뒤 결과 화면에서 멈춤
+    def answer_target(self, gateway, check_answer):
+        session = Session(self, gateway=gateway)
         session.send({'type': 'opt_out'})
         session.send({'type': 'continue'})
-        session.send({'type': 'answer', 'item': session.state.pending, 'answer': 'ok'})
+        session.send({'type': 'answer', 'item': session.state.pending, 'answer': check_answer})
         session.send({'type': 'answer', 'item': session.state.pending, 'answer': '설명'})
+        return session
+
+    # 검증 목적: 적용 문제를 맞히면 서술 루브릭을 하나도 못 채워도 통과하고, 빠진 루브릭 항목을 피드백으로 보여 주는지 확인
+    # - 서술 채점 모델이 사람이 통과시킨 답의 약 4할(26B 40.5%·12B QAT 38.0%, 영어 Mohler 기준)을 불통과로 매겨(docs/harness-measurement.md) 서술을 통과 조건에서 뺀 결정(2026-10-30)
+    def test_check_pass_passes_with_rubric_feedback(self):
+        session = self.answer_target(FakeGateway(rubric_pass=False), 'ok')
+        self.assertEqual(session.state.fixes[0].outcome, 'passed')
+        self.assertEqual(session.state.stage, 'return')
+        view = session.state.view
+        self.assertEqual((view['kind'], view['passed']), ('result', True))
+        self.assertEqual((view['rubric_met'], view['explanation_enough']), ([False, False], False))
+        self.assertEqual(view['rubric_missed'], ['핵심1', '핵심2'])
+        graded = next(e for e in session.state.log if e.kind == 'explanation_graded')
+        self.assertEqual((graded.detail['rubric_met'], graded.detail['explanation_enough']), ([False, False], False))
+
+    # 검증 목적: 서술이 충분하면 통과 화면에 빠진 항목 없이 충분 표시만 남는지 확인
+    def test_enough_explanation_has_no_missed_items(self):
+        view = self.answer_target(FakeGateway(rubric_pass=True), 'ok').state.view
+        self.assertEqual((view['passed'], view['explanation_enough']), (True, True))
+        self.assertNotIn('rubric_missed', view)
+
+    # 검증 목적: 적용 문제를 틀리면 서술 루브릭을 모두 채워도 재보충하는지 확인
+    def test_check_fail_retries_even_with_full_rubric(self):
+        session = self.answer_target(FakeGateway(rubric_pass=True), 'no')
         self.assertEqual(session.state.fixes[0].outcome, 'pending')
         view = session.state.view
         self.assertEqual((view['kind'], view['passed'], view['retry']), ('result', False, True))
         self.assertEqual(session.state.stage, 'remediate')
+
+    # 검증 목적: 서술 채점이 실패(모델 연결 실패·항목 수 불일치)해도 503으로 멈추지 않고 적용 문제 결과로 진행하는지 확인
+    # - 서술은 통과 조건이 아니라 피드백만 빠지고, 실패 이유는 측정용 로그에 남음
+    def test_grading_failure_proceeds_without_feedback(self):
+        for gateway in (FakeGateway(grade_error=LLMUnavailable('모델 응답을 받지 못했습니다.')), FakeGateway(rubric_extra=1)):
+            with self.subTest(gateway=gateway.grade_error or 'mismatch'):
+                session = self.answer_target(gateway, 'ok')
+                self.assertEqual(session.state.fixes[0].outcome, 'passed')
+                view = session.state.view
+                self.assertEqual((view['kind'], view['passed']), ('result', True))
+                for key in ('rubric_met', 'explanation_enough', 'rubric_missed'):
+                    self.assertNotIn(key, view)
+                failed = [e for e in session.state.log if e.kind == 'explanation_grading_failed']
+                self.assertEqual(len(failed), 1)
+                self.assertNotIn('explanation_graded', [e.kind for e in session.state.log])
+
+    # 검증 목적: '설명도 충분' 기준이 루브릭 절반 이상인지 경계값(2·3·4개)으로 확인
+    def test_explanation_enough_is_half_or_more(self):
+        cases = {(True, False): True, (False, False): False,
+                 (True, False, False): False, (True, True, False): True,
+                 (True, False, False, False): False, (True, True, False, False): True}
+        for met, expected in cases.items():
+            with self.subTest(met=met):
+                self.assertEqual(explanation_enough(list(met)), expected)
+
+    # 검증 목적: 서술 단계에서 저장된 옛 세션을 복원해도 새 규칙(적용 문제 판정)으로 이어서 진행되는지 확인
+    def test_saved_explain_stage_restores_with_new_rule(self):
+        session = Session(self, gateway=FakeGateway(rubric_pass=False))
+        session.send({'type': 'opt_out'})
+        session.send({'type': 'continue'})
+        session.send({'type': 'answer', 'item': session.state.pending, 'answer': 'ok'})
+        self.assertEqual(session.state.stage, 'explain')
+        restored = StuckState.model_validate_json(session.state.model_dump_json())
+        nxt = step(restored, StepInput(type='answer', item=restored.pending, answer='설명'),
+                   FakeGateway(rubric_pass=False), session.map, session.items, 1.0)
+        self.assertEqual((nxt.fixes[0].outcome, nxt.view['passed']), ('passed', True))
 
     # 검증 목적: 재보충 2회까지 실패하면 미해결로 기록하고, 계속하기로 다음 단계에 넘어가며, 재보충마다 다른 확인 문항을 쓰는지 확인
     def test_unresolved_after_retry_limit(self):
@@ -228,7 +298,8 @@ class RemediationTests(unittest.TestCase):
                 session.send({'type': 'answer', 'item': session.state.pending, 'answer': '설명'})
         self.assertEqual(session.state.fixes[0].attempts, 3)
         self.assertEqual(session.state.fixes[0].outcome, 'unresolved')
-        self.assertEqual(asked, ['top-c1', 'top-c2', 'top-c1'])
+        self.assertEqual(sorted(asked[:2]), ['top-c1', 'top-c2'])
+        self.assertEqual(asked[2], asked[0])
         session.send({'type': 'continue'})
         self.assertEqual(session.state.stage, 'return')
 
@@ -300,10 +371,10 @@ class AnimationTests(unittest.TestCase):
         self.assertNotIn('animation_failed', [e.kind for e in session.state.log])
         self.assertEqual(session.gateway.explained_scenes, [None])
 
-    # 검증 목적: 장면 목록에 없는 개념(logarithm)은 장면 선택 LLM을 부르지 않아 보충 지연이 늘지 않는지 확인
+    # 검증 목적: 장면 목록에도 미리 짠 장면에도 없는 개념(adt)은 장면 선택 LLM을 부르지 않아 보충 지연이 늘지 않는지 확인
     def test_concept_without_scene_skips_choose(self):
         gateway = FakeGateway()
-        session = remediation_session(self, 'logarithm', gateway)
+        session = remediation_session(self, 'adt', gateway)
         self.assertEqual(gateway.calls.count('animate'), 0)
         self.assertEqual(gateway.explained_scenes, [None])
         self.assertNotIn('animation', session.state.view)
@@ -318,10 +389,142 @@ class AnimationTests(unittest.TestCase):
         # 순회 개념은 bst 장면(삽입·삭제)이 아니라 전용 순회 장면을 씀(MVP 3)
         self.assertEqual(CONCEPT_SCENES['tree-traversal'], ('tree_traversal',))
 
+## @brief 실패한 확인으로 같은 개념을 한 번 더 보충받음; 확인·서술에 틀린 답을 내고 [계속]으로 재보충 화면까지 진행
+def fail_and_retry(session):
+    while session.state.stage != 'remediate' or session.state.view.get('kind') == 'remediation':
+        if session.state.stage == 'check':
+            session.send({'type': 'answer', 'item': session.state.pending, 'answer': 'no'})
+        elif session.state.stage == 'explain':
+            session.send({'type': 'answer', 'item': session.state.pending, 'answer': '설명'})
+        else:
+            break
+    session.send({'type': 'continue'})
+
+
+class RootConceptTests(unittest.TestCase):
+    # 검증 목적: 선수 개념이 없는 1단계 개념에서 막히면 진단 문항 없이 안내 화면(root 표시)을 보여 주는지 확인
+    # - 이전에는 문항 0개로 "빈틈을 찾지 못했어요"만 떠서 진단이 실패한 것처럼 보였음
+    def test_root_concept_skips_diagnosis_with_notice(self):
+        session = Session(self, concept_map=small_map(edges={'solo': []}), entry={**ROADMAP, 'concept': 'solo'})
+        view = session.state.view
+        self.assertEqual((session.state.stage, view['kind'], view['root']), ('remediate', 'diagnosis_result', True))
+        self.assertEqual((view['gaps'], view['evidence'], session.state.probes), ([], [], []))
+        self.assertEqual([f.concept for f in session.state.fixes], ['solo'])
+
+    # 검증 목적: 1단계 개념의 첫 설명은 설명 방식 2(작은 예시 단계별)부터, 재설명은 그다음 방식으로 받는지 확인
+    # - 학습자는 이미 이 개념의 정의를 읽고 막혔으므로 정의부터(방식 1) 다시 말하지 않기 위함
+    # - 재보충 횟수(MAX_RETRIES)는 그대로라 시도는 3번, 마지막 차례(4)는 Gateway가 마지막 방식으로 처리
+    def test_root_concept_starts_from_second_approach(self):
+        gateway = FakeGateway(scene=None)
+        session = Session(self, gateway=gateway, concept_map=small_map(edges={'solo': []}), entry={**ROADMAP, 'concept': 'solo'})
+        session.remediate(check_ok=False)
+        self.assertEqual(gateway.attempts, [2, 3, 4])
+        self.assertEqual(session.state.fixes[0].attempts, 3)
+        self.assertEqual(session.state.fixes[0].outcome, 'unresolved')
+
+    # 검증 목적: 선수 개념이 있는 일반 개념은 지금처럼 방식 1부터 설명하고 안내 표시가 꺼져 있는지 확인
+    def test_regular_concept_keeps_first_approach(self):
+        gateway = FakeGateway(scene=None)
+        session = Session(self, gateway=gateway)
+        session.send({'type': 'opt_out'})
+        self.assertFalse(session.state.view['root'])
+        session.send({'type': 'continue'})
+        self.assertEqual(gateway.attempts, [1])
+
+    # 검증 목적: 실제 지도의 재귀(선수 개념 없음)도 진단 문항 없이 안내 화면으로 시작하는지 확인
+    def test_recursion_in_repository_is_root(self):
+        session = Session(self, concept_map=load_concept_map(), items=load_item_bank(),
+                          entry={'kind': 'roadmap', 'concept': 'recursion', 'return_to': '/learn?concept=recursion'})
+        self.assertEqual((session.state.view['kind'], session.state.view['root']), ('diagnosis_result', True))
+        self.assertNotIn('probe_answered', [e.kind for e in session.state.log])
+
+
+class VarietyTests(unittest.TestCase):
+    # 검증 목적: 세션 seed에 따라 첫 진단 문항이 달라질 수 있는지 확인(같은 개념을 여러 번 물어도 늘 같은 문제가 나오던 문제)
+    def test_seed_changes_first_diagnosis_item(self):
+        first = set()
+        for seed in range(20):
+            session = Session(self, concept_map=load_concept_map(), items=load_item_bank(), seed=seed,
+                              entry={'kind': 'roadmap', 'concept': 'stack', 'return_to': '/learn?concept=stack'})
+            first.add(session.state.pending)
+        self.assertEqual(first, {'adt-d1', 'adt-d2'})
+
+    # 검증 목적: 같은 세션은 저장(JSON) 후 복원해도 같은 문항을 내는지 확인(새로고침·재시도 때 문제가 바뀌지 않게)
+    def test_same_session_is_reproducible_after_restore(self):
+        session = Session(self, seed=7)
+        session.send({'type': 'opt_out'})
+        saved = session.state.model_dump_json()
+        picks = set()
+        for _ in range(3):
+            restored = StuckState.model_validate_json(saved)
+            picks.add(step(restored, StepInput(type='continue'), FakeGateway(), session.map, session.items, 1.0).pending)
+        self.assertEqual(len(picks), 1)
+        self.assertIsNotNone(session.state.seed)
+
+    # 검증 목적: 새 세션은 seed를 받지 않으면 스스로 정해 상태에 저장하는지 확인(API는 seed 없이 부름)
+    def test_new_session_draws_seed(self):
+        state = step(None, StepInput(type='start', entry=ROADMAP), FakeGateway(), small_map(),
+                     small_items(['top', 'alpha', 'beta', 'gamma', 'delta', 'eps']), 1.0)
+        self.assertIsInstance(state.seed, int)
+
+    # 검증 목적: 한 세션 안에서 같은 문항을 다시 내지 않는지 확인; 재보충마다 다른 확인 문항과 다른 서술 문항을 냄
+    def test_no_repeated_items_within_session(self):
+        items = small_items(['top', 'alpha', 'beta', 'gamma', 'delta', 'eps'])
+        items.append(Item.model_validate({'id': 'top-e2', 'concept': 'top', 'purpose': 'explanation', 'objective': 0,
+                                          'question': 'top e2', 'rationale': '근거', 'format': 'explanation',
+                                          'rubric': ['핵심1', '핵심2']}))
+        for seed in range(6):
+            with self.subTest(seed=seed):
+                session = Session(self, items=items, seed=seed)
+                session.send({'type': 'opt_out'})
+                asked = []
+                for _ in range(2):
+                    session.send({'type': 'continue'})
+                    asked.append(session.state.pending)
+                    session.send({'type': 'answer', 'item': session.state.pending, 'answer': 'no'})
+                    asked.append(session.state.pending)
+                    session.send({'type': 'answer', 'item': session.state.pending, 'answer': '설명'})
+                self.assertEqual(len(asked), len(set(asked)), asked)
+
+    # 검증 목적: seed·scenes 필드가 생기기 전에 저장한 진행 중 세션도 복원되고, 은행 순서(첫 문항)를 그대로 쓰는지 확인
+    def test_old_state_without_new_fields_restores(self):
+        session = Session(self, seed=3)
+        session.send({'type': 'opt_out'})
+        old = session.state.model_dump()
+        del old['seed'], old['scenes']
+        restored = StuckState.model_validate(old)
+        self.assertEqual((restored.seed, restored.scenes), (None, {}))
+        nxt = step(restored, StepInput(type='continue'), FakeGateway(), session.map, session.items, 1.0)
+        self.assertEqual(nxt.pending, 'top-c1')
+
+    # 검증 목적: 같은 개념을 다시 설명할 때 장면 선택에 직전 장면(종류·값)을 넘기는지 확인; 첫 설명에는 넘기지 않음
+    def test_retry_passes_previous_scene(self):
+        gateway = FakeGateway()
+        session = remediation_session(self, 'stack', gateway)
+        fail_and_retry(session)
+        self.assertEqual(session.state.view['kind'], 'remediation')
+        self.assertEqual(gateway.previous_scenes, [None, STACK_SCENE])
+        # 가짜 모델은 같은 장면을 다시 고르므로, 그대로 보여 주되 반복을 로그에 남김
+        self.assertIn('animation', session.state.view)
+        repeated = [e for e in session.state.log if e.kind == 'animation_repeated']
+        self.assertEqual([e.concept for e in repeated], ['stack'])
+
+    # 검증 목적: 직전과 다른 장면이 오면 반복 로그를 남기지 않고, 다음 재설명에는 새 장면을 직전 장면으로 넘기는지 확인
+    def test_new_scene_replaces_previous(self):
+        gateway = FakeGateway()
+        session = remediation_session(self, 'stack', gateway)
+        other = {'kind': 'stack', 'ops': [{'op': 'push', 'value': 7}, {'op': 'pop'}]}
+        gateway.scene = other
+        fail_and_retry(session)
+        self.assertNotIn('animation_repeated', [e.kind for e in session.state.log])
+        self.assertEqual(session.state.scenes['stack'], other)
+
+
 class SafetyTests(unittest.TestCase):
     # 검증 목적: 진단부터 복귀까지 매 단계 저장 상태(view·log 포함)에 정답 키·근거·루브릭 문자열이 없는지 확인
     # - 학습자는 늘 틀린 답만 내므로 정답 키 "ok"가 보이면 문항 정보가 샌 것
     # - JSON 공백 형식에 기대지 않도록 직렬화한 값 자체를 찾음(이전 검사는 공백 차이로 항상 통과했음)
+    # - 빠진 루브릭 항목은 적용 문제를 맞혀 넘어갈 때만 피드백으로 보이므로, 늘 틀리는 이 세션에는 나오지 않아야 함
     def test_state_never_contains_answer_keys(self):
         session = Session(self)
         secrets = {json.dumps(i.answer) for i in session.items if i.answer}
@@ -356,17 +559,6 @@ class SafetyTests(unittest.TestCase):
             step(session.state, StepInput(type='continue'), UnavailableGateway(), session.map, session.items, 1.0)
         self.assertEqual(session.state.model_dump(), before)
 
-    # 검증 목적: 서술 채점 결과 수가 루브릭과 다르면(LLM 출력 오류) 재시도 가능한 LLMUnavailable로 끝나고 상태가 보존되는지 확인
-    def test_rubric_count_mismatch_is_llm_failure(self):
-        session = Session(self, gateway=FakeGateway(rubric_extra=1))
-        session.send({'type': 'opt_out'})
-        session.send({'type': 'continue'})
-        session.send({'type': 'answer', 'item': session.state.pending, 'answer': 'ok'})
-        before = session.state.model_dump()
-        with self.assertRaises(LLMUnavailable):
-            session.send({'type': 'answer', 'item': session.state.pending, 'answer': '설명'})
-        self.assertEqual(session.state.model_dump(), before)
-
     # 검증 목적: 검수 전(draft) 지도로는 진단을 시작하지 않는지 확인
     def test_rejects_draft_concept_map(self):
         with self.assertRaises(ValueError):
@@ -399,13 +591,33 @@ class RepositoryDataTests(unittest.TestCase):
             'kind': 'roadmap', 'concept': 'stack', 'return_to': '/learn?concept=stack'}}})
         self.assertEqual(start.status_code, 200)
         state = start.json()
-        self.assertEqual(state['view']['item']['id'], 'adt-d1')
+        self.assertEqual(state['view']['concept']['id'], 'adt')
+        self.assertIn(state['view']['item']['id'], {'adt-d1', 'adt-d2'})
         self.assertNotIn('answer', state['view']['item'])
         stale = client.post('/stuck/step', json={'state': state, 'input': {'type': 'answer', 'item': 'array-d1', 'answer': 'A'}})
         self.assertEqual(stale.status_code, 409)
         opted = client.post('/stuck/step', json={'state': state, 'input': {'type': 'opt_out'}}).json()
         with patch.dict('os.environ', {'VLLM_BASE_URL': 'http://127.0.0.1:21019/v1'}):
             self.assertEqual(client.post('/stuck/step', json={'state': opted, 'input': {'type': 'continue'}}).status_code, 503)
+
+
+class ItemFigureViewTests(unittest.TestCase):
+    # 검증 목적: 진단 문항 화면에 문항 은행의 도식이 저장 형식(from·to) 그대로 실리고, 도식 없는 문항에는 figure 키가 없음
+    # - 정답 키는 여전히 화면에 나가지 않는지도 함께 확인(도식 추가가 문항 노출 범위를 넓히지 않게 함)
+    def test_diagnosis_view_carries_figure_only_when_present(self):
+        figure = {'nodes': [{'id': 'a', 'label': 'alpha', 'shape': 'box', 'x': 0, 'y': 0},
+                            {'id': 'b', 'label': 'd1', 'shape': 'circle', 'x': 2, 'y': 0}],
+                  'edges': [{'from': 'a', 'to': 'b'}]}
+        items = [Item.model_validate({**i.model_dump(exclude_none=True), 'figure': figure}) if i.id == 'alpha-d1' else i
+                 for i in small_items([c.id for c in small_map().concepts])]
+        session = Session(self, items=items)
+        views = {}
+        while session.state.stage == 'diagnose':
+            views[session.state.pending] = session.state.view['item']
+            session.send({'type': 'answer', 'item': session.state.pending, 'answer': '틀린 답'})
+        self.assertEqual(views['alpha-d1']['figure'], figure)
+        self.assertNotIn('figure', views['beta-d1'])
+        self.assertTrue(all('answer' not in view for view in views.values()))
 
 
 if __name__ == '__main__':

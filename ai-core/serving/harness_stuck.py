@@ -71,7 +71,7 @@ class HarnessStuckGateway(HarnessGateway):
 
     ## @brief S4 보충 설명을 근거 검사 하네스로 만들어 render_answer 마크다운으로 돌려줌
     # - 근거: 1차는 개념 문단 상위 3개, 2차는 장면이 있으면 scene['steps']를 a1..aN으로(없으면 앞에서 안 쓴 문단),
-    #   3차는 앞 시도에서 안 쓴 문단. 기존 EXPLAIN_APPROACHES의 예시·비유 지시는 쓰지 않음(사용자 결정, 설계 5-3)
+    #   3차는 앞 시도에서 안 쓴 문단(안 쓴 문단이 없으면 상위 문단부터 다시). 기존 EXPLAIN_APPROACHES의 예시·비유 지시는 쓰지 않음(사용자 결정, 설계 5-3)
     # - 근거가 없으면 근거 없음 문구, 생성이 끝내 실패하거나 확인 필요 문장이 절반을 넘으면 원문(또는 장면 단계) 대체 답
     # - 시작할 때 모델 잠금이 잡혀 있으면(채팅 처리 중 등) 기존처럼 LLMUnavailable(→ 503, 상태 보존)
     #   - 이 확인이 없으면 바쁜 순간에 누른 [계속]이 재시도 안내 대신 대체 답으로 넘어가 보충 기회 한 번을 씀
@@ -87,8 +87,13 @@ class HarnessStuckGateway(HarnessGateway):
             return self._grounded(concept, steps, lambda sentences: _render_scene(sentences, steps),
                                   lambda: _scene_fallback(steps))
         try:
-            found = self.retriever.passages([concept.id], f'{concept.title} {concept.description}',
-                                            exclude=_USED_PASSAGES[key])
+            query = f'{concept.title} {concept.description}'
+            found = self.retriever.passages([concept.id], query, exclude=_USED_PASSAGES[key])
+            if not found and _USED_PASSAGES[key]:
+                # 남은 문단이 없으면 기억을 비우고 상위 문단부터 다시 씀
+                # - 1단계 개념은 설명 차례 2부터 시작해 1차의 기억 초기화를 거치지 않으므로, 같은 막힘을 여러 세션 반복하면 문단이 바닥날 수 있음
+                _USED_PASSAGES[key] = set()
+                found = self.retriever.passages([concept.id], query, exclude=_USED_PASSAGES[key])
         except OpenAIError as exc:
             # 임베딩 서버 오류도 모델 오류처럼 503(상태 보존)으로 끝내 [계속]을 다시 누를 수 있게 함
             logging.warning('Stuck harness search failed for %s: %s', concept.id, exc)

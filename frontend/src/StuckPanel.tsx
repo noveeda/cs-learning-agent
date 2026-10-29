@@ -8,6 +8,7 @@ import { LoaderCircle, RotateCcw, X } from "lucide-react";
 import type { Concept } from "./roadmap";
 import { remediationParts } from "./animation";
 import { AnimationPlayer } from "./AnimationPlayer";
+import { ItemFigure } from "./ItemFigure";
 import {
   canRetry,
   createSession,
@@ -95,6 +96,8 @@ function AnswerForm({
         if (answer.trim()) onSubmit(answer);
       }}
     >
+      {/* 지문 도식은 지문 위에 둬 구조를 먼저 보고 글을 읽게 함; 도식이 없는 문항은 글만 보임 */}
+      {item.figure && <ItemFigure figure={item.figure} label="문항 지문 도식" />}
       <p className="stuck-question" id={`question-${item.id}`}>
         {item.question}
       </p>
@@ -459,20 +462,33 @@ export function StuckPanel({
                 반영했어요.
               </p>
             )}
-            <h3>보충할 빈틈</h3>
-            {view.gaps.length ? (
-              <ol className="stuck-gaps">
-                {view.gaps.map((gap) => (
-                  <li key={gap.id}>{gap.title}</li>
-                ))}
-              </ol>
+            {view.root ? (
+              // 1단계 개념: 진단할 선수 개념이 없어 문항 없이 왔으므로, 진단 실패처럼 보이는 "빈틈 없음" 대신 이유를 알려 줌
+              <p className="stuck-help">
+                {view.target.title}은(는) 먼저 알아야 할 선수 개념이 없는 기초
+                개념이에요. 다른 방식으로 다시 설명할게요.
+              </p>
             ) : (
-              <p className="stuck-help">선수 개념에서 빈틈을 찾지 못했어요.</p>
+              <>
+                <h3>보충할 빈틈</h3>
+                {view.gaps.length ? (
+                  <ol className="stuck-gaps">
+                    {view.gaps.map((gap) => (
+                      <li key={gap.id}>{gap.title}</li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="stuck-help">
+                    선수 개념에서 빈틈을 찾지 못했어요.
+                  </p>
+                )}
+                <p className="stuck-help">
+                  빈틈은 선수 개념부터 차례로 보충하고, 마지막에{" "}
+                  {view.target.title}
+                  을(를) 다시 확인해요.
+                </p>
+              </>
             )}
-            <p className="stuck-help">
-              빈틈은 선수 개념부터 차례로 보충하고, 마지막에 {view.target.title}
-              을(를) 다시 확인해요.
-            </p>
             {view.evidence.length > 0 && (
               <>
                 <h3>이렇게 판단했어요</h3>
@@ -579,16 +595,32 @@ export function StuckPanel({
                 ? "이해 확인을 통과했어요."
                 : "아직 확인을 통과하지 못했어요."}
             </h3>
+            {/* 서술 채점 결과는 통과 판정이 아닌 피드백; 채점이 실패하면 필드가 없어 이 부분을 그리지 않음 */}
             {view.rubric_met && (
               <p className="stuck-help">
                 서술 기준 {view.rubric_met.filter(Boolean).length}/
                 {view.rubric_met.length}개를 충족했어요.
+                {view.passed && view.explanation_enough && " 설명도 충분해요."}
               </p>
             )}
+            {view.passed &&
+              view.rubric_missed &&
+              view.rubric_missed.length > 0 && (
+                <>
+                  <p className="stuck-help">
+                    설명에 이 내용을 더하면 더 좋아요.
+                  </p>
+                  <ul>
+                    {view.rubric_missed.map((point) => (
+                      <li key={point}>{point}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
             {!view.passed && (
               <p className="stuck-help">
-                적용 문항과 서술을 모두 통과해야 이해한 것으로 봐요. 다른
-                방식으로 다시 설명해 드릴게요.
+                적용 문제를 맞히면 이해한 것으로 봐요. 다른 방식으로 다시
+                설명해 드릴게요.
               </p>
             )}
             <div className="stuck-actions">

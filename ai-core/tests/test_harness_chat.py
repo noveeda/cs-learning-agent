@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from rag.search import Figure, Passage
 from serving.animation import CONCEPT_SCENES
+from serving.animation.curated import CURATED_SCENES
 from serving.animation.model import AnimationRequestModel
 from serving.api import BUSY, app
 from serving.concept_map import load_concept_map
@@ -26,7 +27,7 @@ from serving.stuck_llm import PROMPTS
 
 CONCEPT_MAP = load_concept_map()
 SCENE_CONCEPT = 'stack'
-PLAIN_CONCEPT = next(c.id for c in CONCEPT_MAP.concepts if c.id not in CONCEPT_SCENES)
+PLAIN_CONCEPT = next(c.id for c in CONCEPT_MAP.concepts if c.id not in CONCEPT_SCENES and c.id not in CURATED_SCENES)
 PASSAGE = Passage('ods:s.tex#3.1:0', 'ods', 's.tex#3.1', 'Stacks', 'A stack removes the most recently added element.', 0.7)
 GROUNDING = {'type': 'artifact', 'kind': 'grounding', 'artifact_id': 'b' * 32,
              'grounding': {'concepts': ['stack'], 'passage_ids': [PASSAGE.id], 'verified': ['스택은 마지막 값을 먼저 꺼낸다.']}}

@@ -4,6 +4,7 @@
  * - 화면 내용(view)은 AI core 엔진이 만들고 Spring이 저장한 체크포인트를 그대로 받음; 정답 키는 오지 않음
  */
 import type { AnimationData } from "./animation";
+import type { FigureData } from "./ItemFigure";
 
 /** @brief 막힘이 시작된 곳; return_to는 복귀할 해시 경로(예: #/learn?concept=stack) */
 export type Entry =
@@ -18,6 +19,8 @@ export type ItemView = {
   format: "multiple_choice" | "short_exact" | "explanation";
   question: string;
   options?: Record<string, string>;
+  // 지문 도식(문항 은행에 미리 저장된 정지 그림); 도식이 없는 문항·필드 도입 전 저장 세션이면 없음
+  figure?: FigureData;
 };
 
 /** @brief 진단 결과의 판정 근거 한 줄; 학습자가 본 문항과 낸 답(건너뛰기·문항 없음이면 null) */
@@ -44,6 +47,8 @@ export type StuckView =
       gaps: ConceptRef[];
       evidence: Evidence[];
       opted_out: boolean;
+      // 막힌 개념이 선수 개념 없는 1단계 개념인지; 필드 도입 전 저장 세션이면 없음(일반 개념처럼 표시)
+      root?: boolean;
     }
   | {
       kind: "remediation";
@@ -59,11 +64,22 @@ export type StuckView =
   | {
       kind: "result";
       concept: ConceptRef;
+      // 통과 여부는 적용 문제 결과로만 정함; 서술 채점 결과는 아래 피드백용
       passed: boolean;
       retry?: boolean;
+      // 서술 루브릭 항목별 충족 여부; 채점 실패면 없음
       rubric_met?: boolean[];
+      // 루브릭 절반 이상 충족인지; 채점 실패·필드 도입 전 저장 세션이면 없음
+      explanation_enough?: boolean;
+      // 통과했지만 서술이 부족할 때만 오는 빠진 루브릭 항목 문장
+      rubric_missed?: string[];
     }
-  | { kind: "unresolved"; concept: ConceptRef; rubric_met?: boolean[] }
+  | {
+      kind: "unresolved";
+      concept: ConceptRef;
+      rubric_met?: boolean[];
+      explanation_enough?: boolean;
+    }
   | { kind: "next" }
   | {
       kind: "summary";

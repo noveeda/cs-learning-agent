@@ -38,7 +38,7 @@ class FakeGateway:
     def summarize(self, state, concept_map):
         return '요약'
 
-    def choose_animation(self, concept, entry, kinds):
+    def choose_animation(self, concept, entry, kinds, previous=None):
         return None
 
     def identify(self, excerpt, concept_map):

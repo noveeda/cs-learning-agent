@@ -70,7 +70,8 @@ def gantt_frame(req, total, cells, queue, waits, caption, active=()) -> Frame:
 
 
 ## @brief 구간 하나의 설명. 왜 이 프로세스를 골랐는지(알고리즘별 기준)와 끝났는지를 적음
-def describe(req, proc, start, end, done, wait) -> str:
+# - passed: 이 프로세스보다 늦게 왔는데 먼저 실행된 프로세스 이름(우선순위에서 밀린 이유를 보여 주기 위함)
+def describe(req, proc, start, end, done, wait, passed=()) -> str:
     span = f'{start}~{end}'
     if proc is None:
         return f'{span}: 준비 큐가 비어 CPU가 쉽니다(유휴)'
@@ -79,6 +80,8 @@ def describe(req, proc, start, end, done, wait) -> str:
               'sjf': f'준비된 것 중 실행 시간이 가장 짧은 {proc.name}({proc.burst}) 실행',
               'priority': f'준비된 것 중 우선순위 숫자가 가장 작은 {proc.name}({proc.priority}) 실행',
               'rr': f'큐 맨 앞 {name} {end - start}만큼 실행'}[req.algorithm]
+    if passed:
+        return f'{span}: 나중에 온 {"·".join(passed)}에 밀렸던 {proc.name}({proc.priority}) 결국 실행, 끝남(대기 {wait})'
     if done:
         return f'{span}: {reason}, 끝남(대기 {wait})'
     return f'{span}: {reason}, 남은 일은 큐 뒤로'
@@ -96,15 +99,31 @@ def simulate_cpu_schedule(req: CpuScheduleRequest) -> Animation:
                      for p in sorted(req.processes, key=lambda p: (p.arrival, p.name)))
     intro = fit(f'{title} 시작. 프로세스({fields}): {shown}', f'{title} 시작: 프로세스 {len(req.processes)}개')
     frames = [gantt_frame(req, total, [], [], {}, intro)]
-    cells, waits = [], {}
+    cells, waits, ran = [], {}, []
+    starved = False
     for proc, start, end, queue, done in segments:
         cells += [proc.name if proc else '-'] * (end - start)
         if done:
             waits[proc.name] = end - proc.arrival - proc.burst
-        caption = describe(req, proc, start, end, done, waits.get(proc.name) if proc else None)
+        # 비선점 우선순위에서 먼저 와 기다리던 프로세스를 늦게 온 높은 우선순위가 앞지른 경우(기아의 시작)
+        passed = [q.name for q in ran if proc and req.algorithm == 'priority' and q.arrival > proc.arrival]
+        starved = starved or bool(passed)
+        if proc and proc not in ran:
+            ran.append(proc)
+        caption = describe(req, proc, start, end, done, waits.get(proc.name) if proc else None, passed)
         frames.append(gantt_frame(req, total, cells, queue, waits, caption, range(start, end)))
     ordered = [waits[name] for name in sorted(waits)]
     average = sum(ordered) / len(ordered)
     summary = f'끝(시각 {total}): 평균 대기 시간 = ({"+".join(map(str, ordered))})/{len(ordered)} = {average:.2f}'
+    # 끝 단계에 장면이 보여 준 규칙을 한 줄 덧붙임. 길면 계산식을 빼고 평균만 남김(캡션 80자 상한)
+    # - 기아: 이 장면의 대기는 유한하지만, 높은 우선순위가 계속 오면 끝없이 밀릴 수 있음을 구분해 적음
+    # - RR 할당량이 모든 실행 시간 이상이면 아무도 선점되지 않아 FCFS와 같은 순서가 됨
+    note = ''
+    if starved:
+        note = '높은 우선순위가 계속 오면 끝없이 밀릴 수 있음(기아)'
+    elif req.algorithm == 'rr' and req.quantum >= max(p.burst for p in req.processes):
+        note = f'q={req.quantum}{josa(req.quantum, "이", "가")} 모든 실행 시간 이상이라 선점 없이 FCFS와 같음'
+    if note:
+        summary = fit(f'{summary}. {note}', f'끝(시각 {total}): 평균 대기 {average:.2f}. {note}')
     frames.append(gantt_frame(req, total, cells, [], waits, summary))
     return build_animation('cpu_schedule', title, frames)

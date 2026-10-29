@@ -278,6 +278,18 @@ class AnimateTests(unittest.TestCase):
         for phrase in ('실행할 수 있는', '음수', 'formats', '반드시', '8개 이하', 'nodes에 있는 이름만'):
             self.assertIn(phrase, prompt)
 
+    # 검증 목적: 같은 개념을 다시 설명할 때 직전 장면을 previous로 넘기고, 다른 장면을 고르라고 지시하는지 확인
+    # - temperature 0이라 같은 입력이면 같은 장면이 나오므로, 입력에 직전 장면을 넣어야 재설명 장면이 달라짐
+    def test_choose_animation_receives_previous_scene(self):
+        previous = {'kind': 'heap', 'order': 'min', 'ops': [{'op': 'insert', 'value': 3}]}
+        client = FakeClient(animate=lambda user, kw: json.dumps({'scene': None}))
+        gateway(client).choose_animation(self.concept, self.entry, ('heap',), previous=previous)
+        user = json.loads(client.requests[0][1]['messages'][1]['content'])
+        self.assertEqual(user['previous'], previous)
+        self.assertIn('previous', PROMPTS['animate'])
+        self.assertIn('다른 장면', PROMPTS['animate'])
+        self.assertEqual(ROLE_SETTINGS['animate'].temperature, 0.0)
+
     # 검증 목적: 모델에 보여 주는 장면 형식 예시가 모든 장면 종류에 있고, 그 자체로 검증·실행 가능한지 확인
     # - 예시가 틀리면 모델이 틀린 형식을 따라 해 스키마·시뮬레이션 실패가 늘기 때문
     def test_scene_formats_are_valid_and_runnable(self):

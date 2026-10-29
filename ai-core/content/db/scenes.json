@@ -1,0 +1,37 @@
+{
+  "relational-model": [
+    {"kind": "db_table", "tables": [{"name": "Stu", "columns": ["id", "name", "dept"], "rows": [[1, "Kim", "CS"], [2, "Lee", "EE"], [3, "Kim", "EE"], [4, "Ahn", "CS"]]}], "ops": [{"op": "check_key", "table": "Stu", "columns": ["name"]}, {"op": "check_key", "table": "Stu", "columns": ["id"]}, {"op": "check_key", "table": "Stu", "columns": ["id", "name"]}]},
+    {"kind": "db_table", "tables": [{"name": "Stu", "columns": ["id", "name", "dept"], "key": ["id"], "rows": [[1, "Kim", "CS"], [2, "Lee", "EE"], [3, "Ahn", "CS"]]}], "ops": [{"op": "insert", "table": "Stu", "row": [4, "Cho", "EE"]}, {"op": "insert", "table": "Stu", "row": [2, "Han", "CS"]}, {"op": "insert", "table": "Stu", "row": [5, "Kim", "EE"]}]},
+    {"kind": "db_table", "tables": [{"name": "Stu", "columns": ["id", "dept"], "key": ["id"], "foreign": {"column": "dept", "table": "Dept"}, "rows": [[1, "CS"], [2, "EE"]]}, {"name": "Dept", "columns": ["code", "bldg"], "key": ["code"], "rows": [["CS", "A"], ["EE", "B"]]}], "ops": [{"op": "insert", "table": "Stu", "row": [3, "CS"]}, {"op": "insert", "table": "Stu", "row": [4, "ME"]}, {"op": "insert", "table": "Dept", "row": ["ME", "C"]}, {"op": "insert", "table": "Stu", "row": [4, "ME"]}]}
+  ],
+  "sql-query": [
+    {"kind": "db_table", "tables": [{"name": "Emp", "columns": ["name", "dept", "pay"], "rows": [["Kim", "CS", 300], ["Lee", "EE", 250], ["Ahn", "CS", 450], ["Cho", "EE", 350], ["Han", "ME", 150]]}], "ops": [{"op": "where", "table": "Emp", "column": "pay", "cmp": ">=", "value": 300}]},
+    {"kind": "db_table", "tables": [{"name": "Ord", "columns": ["cust", "item"], "rows": [["Kim", "pen"], ["Lee", "cup"], ["Kim", "cup"], ["Yoo", "pen"], ["Lee", "ink"]]}], "ops": [{"op": "group", "table": "Ord", "by": "cust", "agg": "count"}]},
+    {"kind": "db_table", "tables": [{"name": "Emp", "columns": ["name", "dept", "pay"], "rows": [["Kim", "CS", 300], ["Lee", "EE", 200], ["Ahn", "CS", 450], ["Cho", "EE", 100], ["Han", "ME", 500]]}], "ops": [{"op": "where", "table": "Emp", "column": "pay", "cmp": ">=", "value": 200}, {"op": "group", "table": "Emp", "by": "dept", "agg": "sum", "column": "pay"}, {"op": "having", "cmp": ">=", "value": 500}]}
+  ],
+  "normalization": [
+    {"kind": "db_closure", "attributes": ["A", "B", "C", "D", "E"], "fds": [{"lhs": ["A"], "rhs": ["B"]}, {"lhs": ["B"], "rhs": ["C"]}, {"lhs": ["C", "D"], "rhs": ["E"]}], "starts": [["A"]]},
+    {"kind": "db_closure", "attributes": ["A", "B", "C", "D"], "fds": [{"lhs": ["A", "B"], "rhs": ["C"]}, {"lhs": ["C"], "rhs": ["D"]}, {"lhs": ["D"], "rhs": ["A"]}], "starts": [["A", "B"], ["B", "C", "D"]]},
+    {"kind": "db_table", "tables": [{"name": "R", "columns": ["id", "dept", "head"], "rows": [[1, "CS", "Kim"], [2, "CS", "Kim"], [3, "EE", "Lee"], [4, "CS", "Kim"]]}], "ops": [{"op": "check_key", "table": "R", "columns": ["dept"]}, {"op": "project", "table": "R", "columns": ["id", "dept"], "name": "R1"}, {"op": "project", "table": "R", "columns": ["dept", "head"], "name": "R2"}, {"op": "check_key", "table": "R2", "columns": ["dept"]}]}
+  ],
+  "btree-index": [
+    {"kind": "db_btree", "max_keys": 2, "keys": [10, 20, 30, 40, 50, 60, 70], "ops": [{"op": "search", "key": 50}, {"op": "search", "key": 25}]},
+    {"kind": "db_btree", "max_keys": 2, "keys": [10, 20, 30, 40], "ops": [{"op": "insert", "key": 50}, {"op": "insert", "key": 60}, {"op": "insert", "key": 70}]},
+    {"kind": "db_btree", "max_keys": 3, "keys": [10, 20, 30, 40, 50, 60, 70, 80], "ops": [{"op": "range", "low": 25, "high": 55}]}
+  ],
+  "hash-index": [
+    {"kind": "hash_table", "buckets": 5, "ops": [{"op": "insert", "key": 12}, {"op": "insert", "key": 7}, {"op": "insert", "key": 17}, {"op": "insert", "key": 3}, {"op": "search", "key": 17}]},
+    {"kind": "db_hash_index", "buckets": 5, "keys": [12, 7, 17, 3, 25, 31], "ops": [{"op": "lookup", "key": 25}, {"op": "lookup", "key": 17}, {"op": "lookup", "key": 22}]},
+    {"kind": "db_hash_index", "buckets": 5, "keys": [21, 22, 23, 24, 40, 13], "ops": [{"op": "range", "low": 21, "high": 24}]}
+  ],
+  "join-algorithms": [
+    {"kind": "db_join", "algorithm": "nested_loop", "left": [{"key": 1, "val": "a"}, {"key": 2, "val": "b"}, {"key": 3, "val": "c"}], "right": [{"key": 2, "val": "x"}, {"key": 3, "val": "y"}, {"key": 3, "val": "z"}, {"key": 4, "val": "w"}]},
+    {"kind": "db_join", "algorithm": "sort_merge", "left": [{"key": 4, "val": "a"}, {"key": 1, "val": "b"}, {"key": 3, "val": "c"}], "right": [{"key": 3, "val": "x"}, {"key": 5, "val": "y"}, {"key": 1, "val": "z"}, {"key": 2, "val": "w"}]},
+    {"kind": "db_join", "algorithm": "sort_merge", "left": [{"key": 1, "val": "a"}, {"key": 2, "val": "b"}, {"key": 2, "val": "c"}, {"key": 4, "val": "d"}], "right": [{"key": 2, "val": "x"}, {"key": 2, "val": "y"}, {"key": 3, "val": "z"}, {"key": 4, "val": "w"}]}
+  ],
+  "transaction-acid": [
+    {"kind": "db_transaction", "items": {"A": 100, "B": 50}, "ops": [{"op": "begin", "tx": "T1"}, {"op": "write", "tx": "T1", "item": "A", "value": 70}, {"op": "write", "tx": "T1", "item": "B", "value": 80}, {"op": "rollback", "tx": "T1"}]},
+    {"kind": "db_transaction", "items": {"A": 100, "B": 50}, "ops": [{"op": "begin", "tx": "T1"}, {"op": "write", "tx": "T1", "item": "A", "value": 70}, {"op": "commit", "tx": "T1"}, {"op": "begin", "tx": "T2"}, {"op": "write", "tx": "T2", "item": "B", "value": 0}, {"op": "crash"}]},
+    {"kind": "db_transaction", "items": {"A": 100}, "ops": [{"op": "begin", "tx": "T1"}, {"op": "write", "tx": "T1", "item": "A", "value": 50}, {"op": "begin", "tx": "T2"}, {"op": "read", "tx": "T2", "item": "A"}, {"op": "commit", "tx": "T2"}, {"op": "commit", "tx": "T1"}, {"op": "begin", "tx": "T3"}, {"op": "read", "tx": "T3", "item": "A"}]}
+  ]
+}

@@ -201,5 +201,35 @@ class SceneChoiceTests(unittest.TestCase):
             check_limits(fcfs, {'algorithm': ('rr',)})
 
 
+
+
+class CaptionRuleTests(unittest.TestCase):
+    # 검증 목적: 비선점 우선순위에서 먼저 와 있던 프로세스가 나중에 온 높은 우선순위에 밀리면,
+    # 그 프로세스가 실행되는 단계에서 밀어낸 프로세스를 말하고 끝에서 기아(계속 오면 끝없이 밀림)를 설명
+    # - 이 장면의 대기는 유한(결국 실행됨)하므로 "결국 실행"과 "계속 오면"을 구분해 적음
+    def test_priority_starvation_caption(self):
+        animation = run('priority', procs(('P1', 0, 2, 1), ('P2', 0, 1, 5), ('P3', 1, 3, 2), ('P4', 4, 3, 1)))
+        frame = next(f for f in animation.frames if f.caption.startswith('8~9:'))
+        self.assertIn('나중에 온 P3·P4에 밀렸던 P2(5)', frame.caption)
+        self.assertIn('결국', frame.caption)
+        self.assertIn('기아', animation.frames[-1].caption)
+        self.assertIn('2.50', animation.frames[-1].caption)
+        self.assertTrue(all(len(f.caption) <= 80 for f in animation.frames))
+        # 모두 0에 도착하면 늦게 와서 앞지른 프로세스가 없으므로 기아 설명을 붙이지 않음
+        basic = run('priority', procs(('P1', 0, 3, 3), ('P2', 0, 2, 1), ('P3', 0, 1, 2)))
+        self.assertFalse(any('기아' in f.caption or '밀렸던' in f.caption for f in basic.frames))
+
+    # 검증 목적: RR 할당량이 모든 실행 시간 이상이면 선점이 없어 FCFS와 같다는 이유를 끝 단계에 적음
+    def test_rr_large_quantum_caption(self):
+        large = run('rr', procs(('P1', 0, 4), ('P2', 0, 3), ('P3', 0, 2)), quantum=4)
+        self.assertIn('FCFS와 같', large.frames[-1].caption)
+        self.assertIn('3.67', large.frames[-1].caption)
+        small = run('rr', procs(('P1', 0, 5), ('P2', 0, 3), ('P3', 0, 2)), quantum=2)
+        self.assertNotIn('FCFS', small.frames[-1].caption)
+        widest = run('rr', procs(('P1', 0, 2), ('P2', 0, 2), ('P3', 0, 2), ('P4', 0, 2), ('P5', 0, 2)), quantum=4)
+        self.assertLessEqual(len(widest.frames[-1].caption), 80)
+        self.assertIn('FCFS와 같', widest.frames[-1].caption)
+
+
 if __name__ == '__main__':
     unittest.main()

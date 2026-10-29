@@ -1,6 +1,7 @@
 /**
  * @file
  * @brief 모의 막힘 세션 API로 [막혔어요]·붙여넣기 진입, 진단→결과→보충→확인→서술→요약→복귀, 새로고침 재개, 503 재시도·409 복구를 브라우저에서 검증
+ * - 이해 확인 결과 화면: 적용 문제로 통과를 정하고 서술은 충분 여부·빠진 항목 피드백으로만 보여 주는지 검증
  */
 import { readFileSync } from "node:fs";
 import { test, expect, type Page, type Route } from "@playwright/test";
@@ -116,6 +117,7 @@ const views = {
     concept: linkedList,
     passed: true,
     rubric_met: [true, true],
+    explanation_enough: true,
   },
   summary: {
     kind: "summary",
@@ -316,14 +318,23 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-/** @brief 로드맵에서 스택을 골라 학습 화면으로 들어감(개념별 대화 저장 후 이동) */
+/**
+ * @brief 이미 시작한 스택 학습 화면으로 들어감
+ * - 스택은 과목 안 7단계라 로드맵에서 숨겨지므로, 로드맵에서 학습을 시작했을 때와 같은 저장값(개념별 대화 ID)을 넣고 학습 주소를 엶
+ * - 숨긴 개념도 저장된 대화가 있으면 학습·막힘 흐름이 그대로 동작해야 함
+ */
 async function openStackLesson(page: Page) {
   await page.goto("/#/roadmap");
-  await page
-    .getByRole("button", { name: "스택 · 미학습", exact: true })
-    .click();
-  await page.getByRole("button", { name: "학습 시작", exact: true }).click();
+  await page.evaluate(() => {
+    localStorage.setItem("cs-dsa-roadmap-v1", JSON.stringify({
+      version: 1, selectedId: "stack", statuses: { stack: "in-progress" },
+      conversationIds: { stack: "abcdefabcdefabcdefabcdefabcdef12" },
+    }));
+    location.hash = "/learn?concept=stack";
+  });
+  await page.reload();
   await expect(page).toHaveURL(/#\/learn\?concept=stack$/);
+  await expect(page.getByLabel("질문", { exact: true })).toBeVisible();
 }
 
 const panel = (page: Page) =>
@@ -382,6 +393,7 @@ test("E1 [막혔어요]: 진단→결과→보충→확인→서술→요약→�
   await sheet.getByRole("button", { name: "설명 제출" }).click();
   await expect(sheet).toContainText("이해 확인을 통과했어요.");
   await expect(sheet).toContainText("서술 기준 2/2개");
+  await expect(sheet).toContainText("설명도 충분해요.");
   await sheet.getByRole("button", { name: "다음", exact: true }).click();
   await expect(sheet.locator(".stuck-results")).toContainText("이해 확인 통과");
   await expect(
@@ -461,6 +473,146 @@ test("이미 알아요·바로 설명은 문항 없이 해당 입력만 보냄",
     { type: "opt_out" },
   ]);
 });
+
+test("지문 도식이 있는 진단 문항은 지문 위에 정지 도식을, 없는 문항은 글만 보여 줌", async ({
+  page,
+}) => {
+  // 문항 은행 저장 형식 그대로 온 도식: head → [7] → [3]; 패널 안쪽(약 356px)보다 넓게 펼쳐 축소 여부를 확인
+  const figure = {
+    nodes: [
+      { id: "h", label: "head", shape: "text", x: 0, y: 0 },
+      { id: "a", label: "7", shape: "cell", x: 1, y: 0 },
+      { id: "b", label: "3", shape: "cell", x: 4.5, y: 0 },
+    ],
+    edges: [{ from: "h", to: "a" }, { from: "a", to: "b", label: "next" }],
+  };
+  await mockStuck(page, { stage: "diagnose", view: { ...views.q2, item: { ...views.q2.item, figure } } }, [
+    { stage: "diagnose", view: views.q1 },
+  ]);
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  const drawing = panel(page).getByRole("img", { name: "문항 지문 도식" });
+  await expect(drawing).toBeVisible();
+  await expect(drawing.locator(".figure-node")).toHaveCount(3);
+  // 도식이 지문 글보다 위에 있고, 420px 패널 안에서 가로로 넘치지 않아야 함
+  const figureBox = (await drawing.boundingBox())!;
+  const questionBox = (await panel(page).locator(".stuck-question").boundingBox())!;
+  expect(figureBox.y + figureBox.height).toBeLessThanOrEqual(questionBox.y);
+  expect(await panel(page).locator(".item-figure").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  // 390px 모바일 시트에서도 도식 때문에 페이지가 가로로 넘치지 않음
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(drawing).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await panel(page).getByRole("textbox").fill("주소");
+  await panel(page).getByRole("button", { name: "답 제출" }).click();
+  await expect(panel(page).locator(".stuck-question")).toHaveText(views.q1.item.question);
+  await expect(panel(page).locator(".item-figure")).toHaveCount(0);
+});
+
+test("1단계 개념(선수 개념 없음)은 빈틈 없음 대신 기초 개념 안내를 보여 줌", async ({
+  page,
+}) => {
+  await mockStuck(
+    page,
+    {
+      stage: "remediate",
+      view: {
+        ...views.diagnosis,
+        target: { id: "recursion", title: "재귀" },
+        gaps: [],
+        evidence: [],
+        root: true,
+      },
+    },
+    [],
+  );
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  const sheet = panel(page);
+  await expect(sheet).toContainText(
+    "재귀은(는) 먼저 알아야 할 선수 개념이 없는 기초 개념이에요. 다른 방식으로 다시 설명할게요.",
+  );
+  // 진단할 선수 개념이 없으므로 빈틈 목록·빈틈 없음 문구·선수 개념 보충 순서 안내는 보이지 않음
+  await expect(sheet).not.toContainText("빈틈을 찾지 못했어요");
+  await expect(sheet).not.toContainText("보충할 빈틈");
+  await expect(sheet).not.toContainText("빈틈은 선수 개념부터");
+  await expect(sheet.getByRole("button", { name: "보충 시작" })).toBeVisible();
+});
+
+// 이해 확인 결과 화면 경우별 기대 문구; 엔진(stuck.py _explain)이 만드는 view 모양과 옛 저장 세션 모양
+const resultCases = [
+  {
+    name: "적용 문제를 맞히면 서술이 부족해도 통과하고 빠진 설명 항목을 보여 줌",
+    view: {
+      ...views.result,
+      rubric_met: [true, false, false],
+      explanation_enough: false,
+      rubric_missed: [
+        "맨 앞 노드의 참조만 바꾼다는 점",
+        "원소를 옮기지 않는다는 점",
+      ],
+    },
+    shown: [
+      "이해 확인을 통과했어요.",
+      "설명에 이 내용을 더하면 더 좋아요.",
+      "맨 앞 노드의 참조만 바꾼다는 점",
+      "원소를 옮기지 않는다는 점",
+    ],
+    hidden: ["설명도 충분해요."],
+    button: "다음",
+  },
+  {
+    name: "적용 문제를 틀리면 서술을 모두 채워도 다시 설명을 안내함",
+    view: { ...views.result, passed: false, retry: true },
+    shown: [
+      "아직 확인을 통과하지 못했어요.",
+      "적용 문제를 맞히면 이해한 것으로 봐요.",
+    ],
+    hidden: [
+      "모두 통과해야",
+      "설명에 이 내용을 더하면",
+      "설명도 충분해요.",
+    ],
+    button: "다시 설명 듣기",
+  },
+  {
+    name: "서술 채점이 실패하면 서술 피드백 없이 통과 결과만 보여 줌",
+    view: { kind: "result", concept: linkedList, passed: true },
+    shown: ["이해 확인을 통과했어요."],
+    hidden: ["서술 기준", "설명도 충분해요.", "설명에 이 내용을"],
+    button: "다음",
+  },
+  {
+    name: "충분 여부가 없는 옛 저장 결과는 서술 기준 개수만 보여 줌",
+    view: {
+      kind: "result",
+      concept: linkedList,
+      passed: true,
+      rubric_met: [true, false],
+    },
+    shown: ["이해 확인을 통과했어요.", "서술 기준 1/2개를 충족했어요."],
+    hidden: ["설명도 충분해요.", "설명에 이 내용을"],
+    button: "다음",
+  },
+];
+
+for (const resultCase of resultCases) {
+  test(`이해 확인 결과: ${resultCase.name}`, async ({ page }) => {
+    await mockStuck(page, { stage: "return", view: resultCase.view }, []);
+    await openStackLesson(page);
+    await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+    const sheet = panel(page);
+    for (const text of resultCase.shown) {
+      await expect(sheet).toContainText(text);
+    }
+    for (const text of resultCase.hidden) {
+      await expect(sheet).not.toContainText(text);
+    }
+    await expect(
+      sheet.getByRole("button", { name: resultCase.button, exact: true }),
+    ).toBeVisible();
+  });
+}
 
 test("E2 붙여넣기: 지원 범위 밖 안내 후 원래 학습으로 돌아감", async ({
   page,
@@ -606,11 +758,11 @@ test("로드맵 상세: MVP 개념은 [막혔어요], 나머지는 지원 안내
   await page.goto("/#/roadmap");
   const detail = page.getByRole("region", { name: "선택한 개념" });
   await page
-    .getByRole("button", { name: "너비 우선 탐색 · 미학습", exact: true })
+    .getByRole("button", { name: "그래프 · 미학습", exact: true })
     .click();
   await expect(detail.getByRole("button", { name: "막혔어요" })).toHaveCount(0);
   await expect(detail).toContainText("아직 [막혔어요]를 지원하지 않는 개념");
-  await page.getByRole("button", { name: "큐 · 미학습", exact: true }).click();
+  await page.getByRole("button", { name: "연결 리스트 · 미학습", exact: true }).click();
   await detail.getByRole("button", { name: "막혔어요", exact: true }).click();
   await expect(panel(page)).toContainText("추상 자료형에 대한 설명");
   expect(
@@ -620,8 +772,8 @@ test("로드맵 상세: MVP 개념은 [막혔어요], 나머지는 지원 안내
     ),
   ).toEqual({
     version: 1,
-    sessions: { "roadmap:queue": sessionId },
-    active: "roadmap:queue",
+    sessions: { "roadmap:linked-list": sessionId },
+    active: "roadmap:linked-list",
   });
 });
 
