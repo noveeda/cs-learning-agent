@@ -41,6 +41,15 @@ class ScopeSetTests(unittest.TestCase):
         self.assertEqual(rows, scope_set(CONCEPT_MAP, FakeWriter(), per_concept=2, compares=10, outside=6,
                                          code_requests=2, follow_ups=5))
 
+    # 검증 목적: 제외 개념 추가 세트는 고른 개념의 직접 질문만 담고, ID가 기존 범위 세트(scope-0000…)와 겹치지 않아야
+    # 측정 도구가 두 세트를 한 rows.jsonl에 기록할 때 (task, id)로 건너뛰는 일이 없음
+    def test_scope_set_only_concepts(self):
+        rows = scope_set(CONCEPT_MAP, FakeWriter(), per_concept=3, compares=0, outside=0, code_requests=0, follow_ups=0,
+                         only={'bfs', 'stack'}, id_prefix='holdout-scope')
+        self.assertEqual(len(rows), 6)
+        self.assertEqual({r['expected'][0] for r in rows}, {'bfs', 'stack'})
+        self.assertTrue(all(r['kind'] == 'direct' and r['id'].startswith('holdout-scope-') for r in rows))
+
     # 검증 목적: 비교 질문은 선수 관계로 이어진 개념 쌍에서만 만들어 "스택과 큐 차이"처럼 실제로 함께 배우는 쌍이 되게 함
     def test_scope_compare_pairs_are_prerequisites(self):
         edges = {(c.id, p.id) for c in CONCEPT_MAP.concepts for p in c.prerequisites}

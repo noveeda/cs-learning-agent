@@ -58,17 +58,21 @@ def _take(questions, n):
 # - compare: 선수 관계(개념 → 선수 개념) 쌍 중 compares개를 seed로 뽑음. 함께 배우는 쌍이라 "차이" 질문이 자연스러움
 # - outside: 정답 [](차단). 그중 code_requests개는 코드 요청(variant='code'): 61개념 설명이 아니므로 차단 대상(spec 5-1)
 # - follow_up: 직전 개념을 seed로 붙이고 정답은 그 직전 개념(후속 질문은 직전 개념을 이어 씀)
+# - only: 직접 질문을 만들 개념 ID 집합(없으면 전체). 제외 개념 추가 세트(미세조정 계획 Task 4)용
+# - id_prefix: 행 ID 앞부분. 추가 세트는 기존 세트와 ID가 겹치지 않게 다른 접두어를 씀
 def scope_set(concept_map, write_questions, per_concept=5, compares=60, outside=60, code_requests=20, follow_ups=60,
-              seed=0) -> list[dict]:
+              seed=0, only=None, id_prefix='scope') -> list[dict]:
     rng = random.Random(seed)
     rows = []
 
     def add(kind, question, expected, previous=(), **extra):
-        rows.append({'id': f'scope-{len(rows):04d}', 'question': question, 'previous': list(previous),
+        rows.append({'id': f'{id_prefix}-{len(rows):04d}', 'question': question, 'previous': list(previous),
                      'expected': list(expected), 'kind': kind, **extra})
 
     by_id = {c.id: c for c in concept_map.concepts}
     for concept in concept_map.concepts:
+        if only is not None and concept.id not in only:
+            continue
         for question in _take(write_questions('direct', [concept], per_concept), per_concept):
             add('direct', question, [concept.id])
     edges = sorted((c.id, p.id) for c in concept_map.concepts for p in c.prerequisites)
@@ -372,6 +376,10 @@ def main(argv=None):
     commands = parser.add_subparsers(dest='command', required=True)
     scope_cmd = commands.add_parser('scope')
     scope_cmd.add_argument('--seed', type=int, default=0)
+    scope_cmd.add_argument('--only-concepts', type=Path,
+                           help='제외 개념 목록(holdout.json). 주면 그 개념의 직접 질문만 만들고 기존 scope.jsonl 질문과 겹치지 않게 함')
+    scope_cmd.add_argument('--per-concept', type=int, default=5)
+    scope_cmd.add_argument('--out', type=Path, help='세트 파일(없으면 OUT_DIR/scope.jsonl)')
     harvest_cmd = commands.add_parser('harvest', help='26B 하네스로 범위 세트 직접 질문을 처리해 verified 문장 기록을 모음(색인 필요)')
     harvest_cmd.add_argument('--limit', type=int, default=120)
     harvest_cmd.add_argument('--seed', type=int, default=0)
@@ -400,11 +408,26 @@ def main(argv=None):
 
         client, model = _client()
         banned = {' '.join(item.question.split()) for item in load_item_bank(concept_map=concept_map)}
-        rows = scope_set(concept_map, _model_writer(client, model, concept_map, banned), seed=args.seed)
-        _write_jsonl(OUT_DIR / 'scope.jsonl', rows)
-        _write_meta(OUT_DIR / 'scope.jsonl', model=model, seed=args.seed)
+        out = args.out or OUT_DIR / 'scope.jsonl'
+        if args.only_concepts:
+            # 제외 개념 추가 세트: 직접 질문만, 기존 범위 세트 질문은 다시 쓰지 않음(같은 질문이 두 세트에 들어가지 않게)
+            from finetune.split import load_holdout
+
+            only = load_holdout(args.only_concepts)
+            banned |= {' '.join(r['question'].split()) for r in mohler.load_jsonl(OUT_DIR / 'scope.jsonl')}
+            rows = scope_set(concept_map, _model_writer(client, model, concept_map, banned), per_concept=args.per_concept,
+                             compares=0, outside=0, code_requests=0, follow_ups=0, seed=args.seed, only=only,
+                             id_prefix='holdout-scope')
+            _write_jsonl(out, rows)
+            _write_meta(out, model=model, seed=args.seed, only_concepts=sorted(only), per_concept=args.per_concept)
+            print(f'{out}: {len(rows)}행 (개념 {len(only)}개 × {args.per_concept})')
+            return 0
+        rows = scope_set(concept_map, _model_writer(client, model, concept_map, banned), per_concept=args.per_concept,
+                         seed=args.seed)
+        _write_jsonl(out, rows)
+        _write_meta(out, model=model, seed=args.seed)
         scope_sheet(rows, concept_map, HANDOFF / 'scope-sample.md', seed=args.seed)
-        print(f'{OUT_DIR / "scope.jsonl"}: {len(rows)}행, 표본 시트 {HANDOFF / "scope-sample.md"}')
+        print(f'{out}: {len(rows)}행, 표본 시트 {HANDOFF / "scope-sample.md"}')
         return 0
     from rag.embed import Embedder
     from rag.fetch import DATA_DIR

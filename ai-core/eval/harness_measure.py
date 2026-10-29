@@ -4,6 +4,8 @@
 # - 시간 측정(timing)은 단일 요청을 순서대로 보냄. 동시 요청은 서로 기다리는 시간이 섞여 첫 문장·전체 시간이 부풀기 때문
 # - 노출 지표: 표시 없이 나간 문장을 26B 판정기(--audit-url, 운영 8000번 읽기 호출)로 다시 판정해 근거와 어긋난 비율을 냄
 #   - 사용자 표본 기준 값은 사용자 확인이 끝난 뒤 따로 냄(이 도구는 26B 기준만)
+# - 미세조정 비교(계획 Task 4): --holdout으로 학습·제외 개념 표를 나누고, --astra로 노출 문장을 외부 검사 모델로도 판정함
+#   - 미세조정 전후 비율 차이는 bootstrap_diff로 95% 구간을 냄
 # - 결과는 Git 밖 ai-core/outputs/harness-measure/<모델>/에 둠. 중단 뒤 다시 실행하면 rows.jsonl에 있는 항목은 건너뜀
 #
 # 실행 예(ai-core 폴더, 명령 전체는 docs/harness-measurement.md 4절)
@@ -113,11 +115,61 @@ def metrics(rows: list[dict]) -> dict:
                              'exposure': {'unmarked': len(unmarked), 'audited': len(audited), 'mismatch': mismatch,
                                           'audit_errors': len(unmarked) - len(audited),
                                           'rate': _rate(mismatch, len(audited))}}
+        # 외부 검사(--astra)를 돌린 행이 있으면 같은 문장으로 노출 지표를 하나 더 냄(검사 실패·미검사는 errors)
+        if any('astra' in s for s in unmarked):
+            from eval.astra_audit import exposure
+
+            result['answers']['exposure_astra'] = exposure([s.get('astra') for s in unmarked])
+
+    if judge:
+        result['judge']['by_origin'] = judge_by_origin(judge)
 
     timing = by_task['timing']
     if timing:
         result['timing'] = {'n': len(timing), 'first': _spread([r['first_s'] for r in timing if r.get('first_s') is not None]),
                             'total': _spread([r['total_s'] for r in timing if r.get('total_s') is not None])}
+    return result
+
+
+## @brief 행 하나가 다루는 개념 ID들: concept(검색 세트) → expected(범위 세트 정답) → concepts(흐름이 고른 개념) 순으로 씀
+# - 정답이 있으면 정답을 씀: 모델이 고른 개념으로 나누면 범위를 틀린 행이 엉뚱한 쪽에 들어감
+def _row_concepts(row: dict) -> list[str]:
+    if row.get('concept'):
+        return [row['concept']]
+    return list(row.get('expected') or row.get('concepts') or [])
+
+
+## @brief 행을 학습 개념·제외 개념 두 묶음으로 나눠 각각 metrics를 냄
+# - 개념 하나라도 제외 개념이면 제외 쪽(비교 질문의 한쪽이 처음 보는 개념이면 그 점수는 학습 효과로 볼 수 없음)
+# - 개념이 없는 행(지도 밖 질문, 판정·채점 세트)은 학습 쪽에 둠. 제외 개념 표는 범위·생성 지표만 의미가 있음
+def metrics_by_group(rows: list[dict], holdout: set[str]) -> dict:
+    groups = {'trained': [], 'holdout': []}
+    for row in rows:
+        groups['holdout' if set(_row_concepts(row)) & holdout else 'trained'].append(row)
+    return {name: metrics(group) for name, group in groups.items()}
+
+
+## @brief 0/1 결과 목록 두 개(미세조정 전·후)의 비율 차이(후 − 전)에 대한 95% 부트스트랩 구간
+# - 두 목록을 각각 복원 추출로 n번 다시 뽑아 차이의 2.5%·97.5% 값을 냄. 고정 seed라 다시 돌려도 같은 구간
+# - 구간이 0을 포함하면 "좋아졌다/나빠졌다"를 표본 운과 구별할 수 없다는 뜻
+def bootstrap_diff(before: list[int], after: list[int], n: int = 2000, seed: int = 0) -> tuple[float, float]:
+    rng = random.Random(seed)
+    diffs = [sum(rng.choices(after, k=len(after))) / len(after) - sum(rng.choices(before, k=len(before))) / len(before)
+             for _ in range(n)]
+    return round(_percentile(diffs, 0.025), 4), round(_percentile(diffs, 0.975), 4)
+
+
+# 교란 방식의 출처: 규칙(코드로 바꿈)과 모델(26B가 만듦). 학습 데이터 교란도 26B가 만들므로 모델 쪽만 오르면 모양을 외운 것
+ORIGINS = {'rule': ('number', 'negation'), 'model': ('addition', 'swap_concept')}
+
+
+## @brief 판정 행의 틀린 문장 검출률을 교란 출처(rule·model)별로 냄
+def judge_by_origin(rows: list[dict]) -> dict:
+    wrong = [r for r in rows if r.get('task', 'judge') == 'judge' and r['label'] == 'unsupported']
+    result = {}
+    for origin, kinds in ORIGINS.items():
+        group = [r for r in wrong if r['perturbation'] in kinds]
+        result[origin] = {'n': len(group), 'detection': _rate(sum(not r['passed'] for r in group), len(group))}
     return result
 
 
@@ -232,7 +284,10 @@ def _answer_row(models, retriever, row, record, task, audit=True):
         sentences.append({'text': entry['text'], 'sources': entry['sources'], 'status': entry['status'],
                           'han': has_han(entry['text']),
                           'audit': models.audit(entry['text'], entry['sources'], passages) if unmarked and audit else None})
+    # expected·concept는 학습/제외 개념 나누기(metrics_by_group)용, passages(키 → 문단 ID)는 나중 외부 검사(--astra)용
     return {'task': task, 'id': row['id'], 'kind': row.get('kind', 'retrieval'), 'outcome': record['outcome'],
+            'expected': row.get('expected'), 'concept': row.get('concept'),
+            'passages': {p['key']: p['id'] for p in record.get('passages', [])},
             'concepts': record.get('concepts'), 'timings': record.get('timings'), 'sentences': sentences,
             **({'error': record['error']} if 'error' in record else {})}
 
@@ -325,8 +380,57 @@ def _load(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
 
 
+## @brief 외부 검사(--astra): rows.jsonl의 노출 대상 문장(답변 완료 답의 verified 문장)을 검사 모델로 판정해 문장마다 astra를 채움
+# - 이미 판정한 문장(astra가 True/False)은 건너뛰고, 실패(None)나 미검사 문장만 다시 보냄. 중단 뒤 다시 실행할 수 있음
+# - 문단 원문은 행의 passages(키 → 문단 ID)로 색인에서 다시 읽음. 이 필드가 없는 예전 행은 검사하지 않음(미검사로 셈)
+# - 모든 행을 메모리에서 고친 뒤 임시 파일에 쓰고 바꿔 끼워, 도중에 멈춰도 rows.jsonl이 반쯤 쓰인 채 남지 않음
+def astra_pass(rows_path: Path, retriever, runner) -> int:
+    from eval.astra_audit import audit
+
+    rows = _load(rows_path)
+    targets = []
+    for row in rows:
+        if row['task'] != 'answer' or row['outcome'] != 'answered' or 'passages' not in row:
+            continue
+        texts = {p.id: p.text for p in retriever.by_ids(list(row['passages'].values()))}
+        for sentence in row['sentences']:
+            if sentence['status'] == 'verified' and sentence.get('astra') is None:
+                passage = '\n\n'.join(texts[row['passages'][key]] for key in sentence['sources']
+                                       if row['passages'].get(key) in texts)
+                # 문단을 색인에서 찾지 못하면 보내지 않음: 빈 문단으로 판정하면 불일치로 나와 노출 지표가 부풂(미검사로 셈)
+                if passage:
+                    targets.append((sentence, passage))
+    for (sentence, _), verdict in zip(targets, audit([{'sentence': s['text'], 'passage': p} for s, p in targets],
+                                                     runner=runner)):
+        sentence['astra'] = verdict
+    temp = rows_path.with_suffix('.tmp')
+    temp.write_text(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in rows), encoding='utf-8')
+    temp.replace(rows_path)
+    return len(targets)
+
+
+## @brief 학습·제외 개념 표(--holdout): 묶음마다 범위 정확도·노출 지표(26B·외부 검사)·확인 필요 비율
+def _group_table(groups: dict) -> list[str]:
+    lines = ['', '## 학습 개념 / 제외 개념', '', '| 지표 | 학습 개념 | 제외 개념 |', '|---|---|---|']
+
+    def value(group, *path):
+        for key in path:
+            group = group.get(key) if isinstance(group, dict) else None
+        return group
+
+    for name, path in (('범위 정확도', ('scope', 'accuracy')), ('범위 행 수', ('scope', 'n')),
+                       ('노출 지표(26B)', ('answers', 'exposure', 'rate')),
+                       ('노출 판정 문장 수(26B)', ('answers', 'exposure', 'audited')),
+                       ('노출 지표(외부 검사)', ('answers', 'exposure_astra', 'rate')),
+                       ('노출 판정 문장 수(외부 검사)', ('answers', 'exposure_astra', 'audited')),
+                       ('확인 필요 비율', ('answers', 'needs_check_rate'))):
+        lines.append(f"| {name} | {value(groups['trained'], *path)} | {value(groups['holdout'], *path)} |")
+    return lines
+
+
 ## @brief report.md: 지표 표와 측정 조건; 문서(docs/harness-measurement.md)에 옮길 원본
-def report(result: dict, meta: dict) -> str:
+# - groups(metrics_by_group 결과)가 있으면 학습·제외 개념 표를 덧붙임
+def report(result: dict, meta: dict, groups: dict | None = None) -> str:
     lines = [f"# 하네스 측정: {meta['model']}", '', '```json', json.dumps(meta, ensure_ascii=False, indent=2), '```', '',
              '| 지표 | 값 |', '|---|---|']
 
@@ -340,12 +444,17 @@ def report(result: dict, meta: dict) -> str:
     if 'judge' in result:
         add('판정 검출률', result['judge']['detection'])
         add('판정 오경보율', result['judge']['false_alarm'])
+        for origin, value in result['judge']['by_origin'].items():
+            add(f'판정 검출률 · {origin}', value['detection'])
     if 'grading' in result:
         add('채점 거짓 통과율', result['grading']['false_pass_rate'])
         add('채점 거짓 불통과율', result['grading']['false_fail_rate'])
     if 'answers' in result:
         answers = result['answers']
         add('노출 지표(26B 판정 기준)', f"{answers['exposure']['rate']} ({answers['exposure']['mismatch']}/{answers['exposure']['audited']})")
+        if 'exposure_astra' in answers:
+            astra = answers['exposure_astra']
+            add('노출 지표(외부 검사)', f"{astra['rate']} ({astra['mismatch']}/{astra['audited']}, 검사 실패 {astra['errors']})")
         add('확인 필요 비율', answers['needs_check_rate'])
         add('근거 없음 비율', answers['no_source_rate'])
         add('원문 대체 비율', answers['fallback_rate'])
@@ -354,6 +463,8 @@ def report(result: dict, meta: dict) -> str:
         for name in ('first', 'total'):
             spread = result['timing'][name]
             add(f'시간 {name} 중앙값 / 90%(초)', f"{spread['median']} / {spread['p90']}" if spread else None)
+    if groups:
+        lines += _group_table(groups)
     lines += ['', '```json', json.dumps(result, ensure_ascii=False, indent=2), '```', '']
     return '\n'.join(lines)
 
@@ -373,6 +484,11 @@ def main(argv=None):
     parser.add_argument('--timing-n', type=int, default=60)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--limit', type=int, help='측정마다 앞에서 N개만(연결 확인용)')
+    parser.add_argument('--extra-scope', type=Path, action='append', default=[],
+                        help='범위·생성 측정에 덧붙일 세트(예: 제외 개념 추가 세트 holdout-scope.jsonl). 여러 번 줄 수 있음')
+    parser.add_argument('--holdout', type=Path, help='제외 개념 목록(holdout.json). 주면 report.md에 학습·제외 개념 표를 따로 냄')
+    parser.add_argument('--astra', action='store_true', help='노출 대상 문장을 외부 검사 모델로도 판정(rows에 astra 필드)')
+    parser.add_argument('--astra-model', default=None, help='외부 검사 모델 이름(없으면 eval.astra_audit.DEFAULT_MODEL)')
     args = parser.parse_args(argv)
     tasks = [t for t in args.tasks.split(',') if t]
     unknown = sorted(set(tasks) - set(TASKS))
@@ -401,17 +517,18 @@ def main(argv=None):
     if monitor:
         monitor.start()
     started = time.strftime('%Y-%m-%dT%H:%M:%S')
+    scope_rows = [row for path in [SETS_DIR / 'scope.jsonl', *args.extra_scope] for row in _load(path)]
     try:
         for task in tasks:
             if task == 'scope':
-                _run(_load(SETS_DIR / 'scope.jsonl'), 'scope', lambda r: _scope_row(models, r), rows_path, done, args.workers, args.limit)
+                _run(scope_rows, 'scope', lambda r: _scope_row(models, r), rows_path, done, args.workers, args.limit)
             elif task == 'judge':
                 _run(_load(SETS_DIR / 'judge.jsonl'), 'judge', lambda r: _judge_row(models, r), rows_path, done, args.workers, args.limit)
             elif task == 'grading':
                 _run(_load(SETS_DIR / 'grading.jsonl'), 'grading', lambda r: _grading_row(models, r), rows_path, done,
                      args.workers, args.limit)
             elif task == 'answers':
-                _run(_load(SETS_DIR / 'scope.jsonl'), 'answer', lambda r: _generation_row(models, retriever, r),
+                _run(scope_rows, 'answer', lambda r: _generation_row(models, retriever, r),
                      rows_path, done, args.workers, args.limit)
             else:
                 sample = timing_sample(_load(SETS_DIR / 'retrieval.jsonl'), args.timing_n, args.seed)
@@ -420,10 +537,27 @@ def main(argv=None):
         if monitor:
             monitor.stopped.set()
             monitor.join()
-    result = metrics(_load(rows_path))
+    if args.astra:
+        from functools import partial
+
+        from eval.astra_audit import DEFAULT_MODEL, codex_runner
+
+        args.astra_model = args.astra_model or DEFAULT_MODEL
+        checked = astra_pass(rows_path, retriever, partial(codex_runner, model=args.astra_model))
+        print(f'외부 검사: {checked}문장', flush=True)
+    rows = _load(rows_path)
+    result = metrics(rows)
+    groups = None
+    if args.holdout:
+        from finetune.split import load_holdout
+
+        groups = metrics_by_group(rows, load_holdout(args.holdout))
+        (out / 'metrics-by-group.json').write_text(json.dumps(groups, ensure_ascii=False, indent=2), encoding='utf-8')
     meta = {'model': args.model, 'base_url': args.base_url, 'judge': args.judge_model, 'judge_url': args.judge_url,
             'audit_url': args.audit_url, 'tasks': tasks, 'workers': args.workers, 'timing_n': args.timing_n,
             'seed': args.seed, 'sets_dir': str(SETS_DIR), 'min_score': retriever.min_score,
+            'extra_scope': [str(p) for p in args.extra_scope], 'holdout': str(args.holdout) if args.holdout else None,
+            'astra_model': args.astra_model if args.astra else None,
             'started': started, 'finished': time.strftime('%Y-%m-%dT%H:%M:%S'),
             'gpu': args.gpu, 'gpu_peak_mib': monitor.peak if monitor else None}
     previous = json.loads((out / 'meta.json').read_text()) if (out / 'meta.json').exists() else {}
@@ -431,7 +565,7 @@ def main(argv=None):
     meta['runs'] = previous.get('runs', []) + [{'tasks': tasks, 'started': started, 'finished': meta['finished']}]
     (out / 'meta.json').write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding='utf-8')
     (out / 'metrics.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-    (out / 'report.md').write_text(report(result, meta), encoding='utf-8')
+    (out / 'report.md').write_text(report(result, meta, groups), encoding='utf-8')
     print(json.dumps(result, ensure_ascii=False))
     return 0
 
