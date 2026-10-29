@@ -120,3 +120,23 @@ for (const kind of ["remediation", "summary"] as const) {
     await expectMarkdown(content);
   });
 }
+
+// 하네스 답은 각주 이름이 늘 p1부터라 같은 대화의 두 답이 같은 각주 이름을 씀
+// 검증 목적: 두 번째 답의 각주 번호와 되돌아가기 링크가 첫 답이 아니라 자기 답 안으로 이동하는지 확인
+test("두 답의 각주 링크는 각자 자기 답의 각주로 이동", async ({ page }) => {
+  const footnoted = (text: string) => `${text}[^p1]\n\n[^p1]: > ${text} 원문`;
+  await page.route("**/api/conversations/*", (route) => route.fulfill({ json: { messages: [
+    { role: "user", content: "스택", status: "complete" },
+    { role: "assistant", content: footnoted("첫 답"), status: "complete" },
+    { role: "user", content: "큐", status: "complete" },
+    { role: "assistant", content: footnoted("둘째 답"), status: "complete" },
+  ] } }));
+  await page.goto("/");
+  const second = page.locator(".message.assistant").nth(1);
+  await second.locator("a[data-footnote-ref]").click();
+  await expect(second.locator("li:target")).toContainText("둘째 답 원문");
+  await expect(page.locator(".message.assistant").first().locator(":target")).toHaveCount(0);
+  await expect(second.getByRole("heading", { name: "각주" })).toHaveCount(1);
+  await second.getByRole("link", { name: "본문으로 돌아가기" }).click();
+  await expect(second.locator("a[data-footnote-ref]:target")).toHaveCount(1);
+});
