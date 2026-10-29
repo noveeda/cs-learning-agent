@@ -128,3 +128,66 @@ RAG_EMBED_URL=http://127.0.0.1:20310/v1 RAG_EMBED_MODEL=bge-m3 \
 - **사용자 표본 확인:** `~/cs-handoff/retrieval-sample.md`(개념당 1개, 59개)
   - 질문이 정답 문단만으로 답할 수 있는지, 개념에 맞는 학생 질문인지 확인한다.
   - 부적절한 행이 많으면 질문 생성 지시를 고쳐 세트를 다시 만든다.
+
+## 3. 범위·판정·채점 측정 세트 (Task 10)
+
+생성기: `ai-core/eval/harness_sets_judge.py`.
+세트는 Git 밖 `HARNESS_SETS_DIR`(기본 `ai-core/outputs/harness-sets/`)에 있다. 세트마다 같은 이름의 `.meta.json`에 만든 조건을 남긴다.
+
+### 3-1. 명령
+
+```bash
+cd ai-core
+export HARNESS_SETS_DIR=/home/infoserver/cs-learning-agent/ai-core/outputs/harness-sets
+# (1) 범위 세트: 26B(8000번)가 종류별 학생 질문을 씀 → scope.jsonl, 표본 시트 ~/cs-handoff/scope-sample.md
+.venv/bin/python -m eval.harness_sets_judge scope
+# (2) 맞는 문장 모으기: 26B 하네스로 범위 세트의 직접 질문 120개를 처리 → harvest-logs/*.jsonl
+#     색인과 임베딩은 2장에서 고른 값(bge-m3, RAG_MIN_SCORE=0.51)
+RAG_EMBED_MODEL=bge-m3 RAG_MIN_SCORE=0.51 .venv/bin/python -m eval.harness_sets_judge harvest \
+  --index $HARNESS_SETS_DIR/index-bge-m3.sqlite --limit 120
+# (3) 판정 세트: verified 문장 절반은 그대로, 절반은 망가뜨림 → judge.jsonl, 표본 시트 ~/cs-handoff/judge-sample.md
+.venv/bin/python -m eval.harness_sets_judge perturb --index $HARNESS_SETS_DIR/index-bge-m3.sqlite --map-commit 69edcaf
+# (4) 채점 세트: Mohler 사람 채점 원본(영어)과 검수한 루브릭 → grading.jsonl
+.venv/bin/python -m eval.harness_sets_judge grading \
+  --data /home/infoserver/cs-eval-data/raw/mohler/open_ended.jsonl \
+  --rubrics /home/infoserver/cs-eval-data/processed/mohler/rubrics.jsonl
+```
+
+- 절 대응표가 검수로 바뀌면 색인을 다시 만든 뒤 (2)·(3)을 다시 실행한다. 이전 `harvest-logs/`는 지우고 실행한다.
+- 지금 세트(3-2)는 **초안 색인**으로 만들었다. 확정 대응표(PR #113, `bbbce57`)의 색인이 `RAG_DATA_DIR/index.sqlite`에 생기면 `--index`를 빼고 다시 만든다.
+
+  ```bash
+  rm -rf $HARNESS_SETS_DIR/harvest-logs
+  RAG_EMBED_MODEL=bge-m3 RAG_MIN_SCORE=0.51 .venv/bin/python -m eval.harness_sets_judge harvest --limit 120
+  .venv/bin/python -m eval.harness_sets_judge perturb --map-commit bbbce57
+  ```
+- (1)·(4)는 대응표와 무관하다.
+
+### 3-2. 결과 (2026-10-29, 초안 대응표 PR #113 `69edcaf` 기준 색인)
+
+| 세트 | 행 | 구성 | 정답의 근거 |
+|---|---:|---|---|
+| `scope.jsonl` | 485 | 직접 305(개념당 5), 비교 60, 지도 밖 60(그중 코드 요청 20), 후속 60 | 질문을 만든 규칙(개념·선수 관계 쌍·지도 밖·직전 개념) |
+| `judge.jsonl` | 590 | 맞음 295, 틀림 295(덧붙이기 109, 개념 바꾸기 84, 반대로 말하기 80, 숫자 바꾸기 22) | 망가뜨린 방식 |
+| `grading.jsonl` | 2,273 | 루브릭이 있는 81문항 전체, 사람 통과(평균 4.0 이상) 1,639 | 사람 채점 점수 |
+
+- 범위 세트
+  - 비교 질문은 선수 관계(개념 → 선수 개념) 82쌍 중 60쌍에서 만들었다.
+  - 문항 은행과 같은 문장, 한자가 섞인 질문은 버리고 다시 만들었다.
+- 판정 세트
+  - 맞는 문장은 26B 하네스가 verified로 낸 문장(근거 문단 1개) 590개다. harvest 120질문의 결과는 답변 110, 근거 없음 7, 원문 대체 3이다.
+  - 숫자 바꾸기·반대로 말하기는 코드 규칙으로, 덧붙이기·개념 바꾸기는 26B로 했다.
+  - 숫자가 있는 문장은 숫자 바꾸기를 먼저 시도한다. 영문자에 붙은 숫자(`L1`, `IPv4`)는 이름이라 바꾸지 않는다.
+- 채점 세트: `split`(dev·report)은 `eval/mohler.py`의 문항 묶음 분할과 같다.
+- **사용자 표본 확인 요청**
+  - `~/cs-handoff/scope-sample.md`: 개념당 직접 질문 1개 + 비교·지도 밖·후속 각 5개
+  - `~/cs-handoff/judge-sample.md`: 맞음 25 + 틀림 25
+
+### 3-3. 한계와 발견
+
+- **채점 측정은 영어 답 기준이다.** Mohler는 번역하지 않았다. 번역도 모델 생성이라 검수 대상이 늘어나기 때문이다(2026-10-29 코디네이터 결정). 한국어 답에서의 거짓 불통과는 석사생 채점 세트가 생기면 다시 잰다.
+- **판정 세트는 초안 대응표 기준이다.** 맞는 문장이 초안 색인의 문단에서 나왔다. 대응표가 바뀌면 3-1의 (2)·(3)으로 다시 만든다.
+- **26B와 strict JSON schema의 `:` 출력**
+  - 문자열 하나(`{"sentence": ...}`)를 schema로 묶으면 26B가 `{"sentence":": "}`를 내는 경우가 많았다. 같은 요청을 schema 없이 보내면 정상 문장이 나왔다.
+  - 그래서 교란 요청은 schema 없이 받고 결과를 코드로 검사한다.
+  - 하네스의 생성·수정 역할에서 나온 `:` 문장(PR #115 실측, harvest 중 수정 역할의 `:` 응답)도 같은 원인으로 보인다.
