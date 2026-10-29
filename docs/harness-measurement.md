@@ -154,6 +154,13 @@ RAG_EMBED_MODEL=bge-m3 RAG_MIN_SCORE=0.51 .venv/bin/python -m eval.harness_sets_
 ```
 
 - 절 대응표가 검수로 바뀌면 색인을 다시 만든 뒤 (2)·(3)을 다시 실행한다. 이전 `harvest-logs/`는 지우고 실행한다.
+- 지금 세트(3-2)는 **초안 색인**으로 만들었다. 확정 대응표(PR #113, `bbbce57`)의 색인이 `RAG_DATA_DIR/index.sqlite`에 생기면 `--index`를 빼고 다시 만든다.
+
+  ```bash
+  rm -rf $HARNESS_SETS_DIR/harvest-logs
+  RAG_EMBED_MODEL=bge-m3 RAG_MIN_SCORE=0.51 .venv/bin/python -m eval.harness_sets_judge harvest --limit 120
+  .venv/bin/python -m eval.harness_sets_judge perturb --map-commit bbbce57
+  ```
 - (1)·(4)는 대응표와 무관하다.
 
 ### 3-2. 결과 (2026-10-29, 초안 대응표 PR #113 `69edcaf` 기준 색인)
