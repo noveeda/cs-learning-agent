@@ -1,0 +1,140 @@
+# 12B 하네스 역할 미세조정 학습 데이터
+
+- 설계: `docs/superpowers/specs/2026-10-29-finetune-12b-design.md`(4·5장, 7-1)
+- 계획: `docs/superpowers/plans/2026-10-29-finetune-12b.md` Task 3
+- 생성기: `ai-core/finetune/build_data.py`
+- 결과 위치(Git 밖): `/home/infoserver/cs-learning-agent/ai-core/outputs/finetune/`
+
+## 1. 무엇을 만드는가
+
+| 역할 | 정답 출처 | 1차 목표 | 제외 개념 몫 목표(× 8/61) |
+|---|---|---:|---:|
+| judge | 구성상 정답. 26B 하네스가 verified로 낸 문장은 supported, 그 문장을 망가뜨린 것은 unsupported, 덧붙인 것은 partial. 근거 구절은 원래 문장의 26B 근거 구절 | 6,000(맞음·틀림 반반, 틀림 중 덧붙이기 40%) | 약 790 |
+| ground | 26B 하네스 답 중 모든 문장이 수정 없이 verified이고, 26B 별도 검사도 모두 통과한 답의 ground 호출 | 3,000 | 약 390 |
+| repair | 수정 뒤 재판정이 supported로 끝난 repair 호출 | 1,000 | 약 130 |
+| scope | 구성상 정답. 그 개념용으로 만든 질문, 지도 밖·코드 요청은 none, 후속 질문은 직전 개념 | 3,000 | 약 390 |
+
+- 모든 행은 운영 하네스와 같은 지시문(`PROMPTS[role]`), 같은 user JSON, 공백 없는 한 줄 assistant JSON이다(`finetune/examples.py`).
+- 각 역할의 5%를 seed 고정으로 검증용(`valid.jsonl`)으로 뗀다.
+- 1차 학습 파일(`train.jsonl`, `valid.jsonl`)에는 제외 개념 8개가 나오지 않는다.
+  - 질문, 정답 개념, 직전 개념, 판정·수정 문장, ground·repair 출력은 제외 개념 ID와 이름 조각으로 검사한다.
+  - 근거 문단은 절 대응표로 검사한다. 제외 개념에 대응된 절의 문단은 쓰지 않는다. 학습 가능한 절의 영어 문단에 우연히 나오는 낱말(예: subtree 안의 btree, 이진 탐색 트리 절의 linked list)은 남는다. 판정 정답의 근거 구절도 이 문단에서 따온 것이라 같다.
+  - 제외 개념에 닿는 행은 `holdout_{judge,ground,repair,scope}.jsonl`로 따로 모은다.
+  - 이 파일들은 배포용 2차 학습(61개념, 설계 7-1)에 쓴다.
+
+## 2. 실행
+
+`ai-core` 폴더에서 아래 환경 변수를 둔다.
+
+```sh
+export RAG_DATA_DIR=/home/infoserver/cs-learning-agent/ai-core/data/rag
+export HARNESS_SETS_DIR=/home/infoserver/cs-learning-agent/ai-core/outputs/harness-sets
+OUT=/home/infoserver/cs-learning-agent/ai-core/outputs/finetune
+PY=.venv/bin/python
+```
+
+| 단계 | 명령 | 결과 |
+|---|---|---|
+| 1. 질문 | `$PY -m finetune.build_data --stage questions --out $OUT` | `questions.jsonl` |
+| 2. 하네스 녹화 | `$PY -m finetune.build_data --stage harvest --out $OUT --limit 1000 --workers 8` | `records.jsonl`, `ground.jsonl`, `repair.jsonl`, `holdout_{ground,repair}.jsonl` |
+| 3. 판정 | `$PY -m finetune.build_data --stage judge --out $OUT --workers 8` | `judge.jsonl`, `holdout_judge.jsonl`, `perturb-cache.jsonl` |
+| 4. 범위 | `$PY -m finetune.build_data --stage scope --out $OUT` | `scope.jsonl`, `holdout_scope.jsonl` |
+| 5. 분할 | `$PY -m finetune.build_data --stage split --out $OUT` | `train.jsonl`, `valid.jsonl` |
+| 6. 다시 거르기 | `$PY -m finetune.build_data --stage refilter --out $OUT --measured <scope.jsonl> <retrieval.jsonl> <holdout-scope.jsonl>` | `holdout_*.jsonl`을 제외 개념 측정 세트로 한 번 더 거름 |
+
+- 질문 단계는 61개념마다 직접 질문 110개, 선수 관계 쌍마다 비교 질문 6개, 지도 밖 250개, 코드 요청 120개, 후속 질문 430개를 목표로 한다. 다시 실행하면 모자란 만큼만 더 만든다.
+- 하네스 단계는 시작 전 26B 서버를 확인하고, 최근 40건 중 오류가 10건 이상이면 남은 질문을 건너뛰고 실패로 끝난다. 오류 난 질문은 기록하지 않아 다시 실행하면 이어 녹화한다.
+- 하네스 단계는 이미 녹화한 질문을 건너뛴다. 목표 분량에 닿을 때까지 `--limit`을 주어 이어서 돌린다. 질문 순서를 seed로 섞어 두어 일부만 돌려도 개념이 고르게 섞인다.
+- 26B 동시 요청은 `--workers`(상한 12, 26B 서버 자체는 max-num-seqs 8)개다. 판정 단계의 26B 교란 결과는 `perturb-cache.jsonl`에 남아 다시 실행하면 재사용한다.
+- 조건(seed, 26B 모델, 절 대응표 커밋, 제외 개념과 이름 조각, 측정 세트, 단계별 행 수와 거른 이유)은 `meta.json`에 쌓인다.
+
+### 26B 두 대로 나눠 녹화하기
+
+`--shard K/N`은 seed로 섞은 질문 순서에서 인덱스 `i % N == K`인 질문만 녹화한다. 기본값 `0/1`은 전체다. 서버는 `VLLM_BASE_URL`로 고른다.
+
+1. 지금 돌고 있는 녹화를 멈춘다. 이미 쓴 행은 그대로 둔다.
+2. 두 번째 폴더를 만들고 `questions.jsonl`과 지금까지의 `records.jsonl`을 복사한다. 이미 녹화한 질문을 두 번째 서버가 다시 녹화하지 않게 하기 위해서다.
+   ```sh
+   OUT_B=/home/infoserver/cs-learning-agent/ai-core/outputs/finetune-b
+   mkdir -p $OUT_B && cp $OUT/questions.jsonl $OUT/records.jsonl $OUT_B/
+   ```
+3. 두 프로세스를 따로 돌린다.
+   ```sh
+   $PY -m finetune.build_data --stage harvest --out $OUT --shard 0/2 --workers 12 --limit 1000
+   VLLM_BASE_URL=http://127.0.0.1:20340/v1 $PY -m finetune.build_data --stage harvest --out $OUT_B --shard 1/2 --workers 12 --limit 1000
+   ```
+4. 둘 다 끝나면 두 번째 폴더의 새 행만 원본에 붙이고(같은 id는 건너뜀), 녹화 없이 ground·repair 행을 다시 만든다.
+   ```sh
+   $PY -c "import json,sys; a,b=sys.argv[1:]; seen={json.loads(l)['id'] for l in open(a)}; new=[l for l in open(b) if json.loads(l)['id'] not in seen]; open(a,'a').writelines(new); print(len(new),'행 추가')" $OUT/records.jsonl $OUT_B/records.jsonl
+   $PY -m finetune.build_data --stage harvest --out $OUT --limit 0
+   ```
+5. `--limit 0`으로 남은 질문이 0개인지 확인한다. 남았으면(오류로 멈춘 경우) 원본 폴더에서 `--shard` 없이 이어 녹화한다.
+
+## 3. 거르는 규칙
+
+| 이유 | 뜻 | 처리 |
+|---|---|---|
+| measured | 측정 세트(범위·검색, 나중에 제외 개념 세트) 질문과 공백·문장부호를 지운 뒤 같은 질문, 또는 측정 판정 세트와 같은 문장 | 버림 |
+| han | 질문·출력·교란 문장에 한자가 섞임 | 버림 |
+| holdout | 제외 개념 ID, 제외 개념에 대응된 절의 문단, 제외 개념 이름 조각(예: 연결 리스트, BFS, 캐시, 정규화)이 나옴 | 제외 개념 몫 파일로 옮김 |
+| not_answered | 하네스 답이 차단·근거 없음·원문 대체·오류로 끝남 | ground에서 버림 |
+| not_all_verified | 답에 확인 필요 문장이나 수정한 문장이 있음 | ground에서 버림 |
+| audit | 26B 별도 검사(측정 도구의 노출 지표 검사와 같은 호출)에서 통과하지 못한 문장이 있음 | ground에서 버림 |
+| rejudge_failed | 수정 뒤 재판정이 supported가 아님 | repair에서 버림 |
+| gateway | 녹화 응답이 운영 게이트웨이 parse를 다시 통과하지 못하거나 하네스가 받아들인 문장과 다름 | 버림 |
+| duplicate | 같은 맞는 문장이 이미 있음 | judge 후보에서 버림 |
+
+- 제외 개념 이름 조각은 개념 제목 조각, 개념 ID, 다른 이름(`EXTRA_TERMS`)에서 만든다. 4자 이하 영문 조각(osi, bfs)은 단어 경계로만 찾는다.
+- 범위 행의 user JSON에는 운영과 같게 61개념 목록 전체가 들어간다. 이 목록은 질문·정답이 아니므로 제외 개념 검사 대상이 아니다.
+
+## 4. 결과 (2026-10-29, seed 0)
+
+- 26B: `gemma-4-26b-a4b-it-awq`, 리비전 `0ef577a`, 절 대응표 커밋 `d7c313f`
+- 측정 세트: `harness-sets/scope.jsonl`, `retrieval.jsonl`(질문), `judge.jsonl`(판정 문장)
+- 녹화: 운영 26B(8000) 단독으로 시작했다. 나머지는 같은 리비전의 두 번째 26B(5090, 20340, PyTorch 샘플러)와 나눠 `--shard`로 녹화했다. 어느 서버가 어느 질문을 녹화했는지는 각 폴더의 `harvest.log`에 있다.
+  - 걸린 시간: 08:28~12:00 UTC(중간에 26B 재시작으로 멈춘 시간 포함). 판정 단계 7분, 범위·분할은 1분 이내
+  - 26B 재시작 동안 쌓인 오류 기록 6,000건은 지우고 다시 녹화했다. 그 뒤 오류는 0건이다.
+
+### 4-1. 역할별 행 수
+
+| 역할 | 1차(train + valid) | train | valid | 1차 목표 | 제외 개념 몫 | 제외 개념 몫 목표 |
+|---|---:|---:|---:|---:|---:|---:|
+| judge | 6,000 | 5,700 | 300 | 6,000 | 786 | 약 790 |
+| ground | 3,088 | 2,934 | 154 | 3,000 | 1,263 | 약 390 |
+| repair | 616 | 585 | 31 | 1,000 | 136 | 약 130 |
+| scope | 2,998 | 2,848 | 150 | 3,000 | 390 | 약 390 |
+| 합계 | 12,702 | 12,067 | 635 | 13,000 | 2,575 | |
+
+- judge 1차 6,000행: 맞음 3,000, 틀림 3,000(덧붙이기 1,200 = 40%, 개념 바꾸기 794, 부정 817, 숫자 189)
+- judge 제외 개념 몫 786행: 맞음 393, 덧붙이기 157, 개념 바꾸기 120, 부정 93, 숫자 23
+- scope 1차: 직접 1,900, 비교 360, 지도 밖·코드 368, 후속 370. 지도 밖 질문 370개 중 2개는 제외 개념 이름이 들어 있어 빠졌다(제외 개념 몫 범위 행에는 지도 밖 종류가 없음).
+- scope 제외 개념 몫: 직접 250, 비교 80, 후속 60
+- repair는 목표의 62%다. 녹화 가능한 직접·비교 질문 7,200개를 모두 돌렸고, 수정 3,156회 중 재판정이 supported로 끝난 것이 752회(24%)뿐이었다.
+- ground 제외 개념 몫이 목표보다 많은 것은 `캐시`, `지역성`, `파이프라인` 같은 이름 조각이 다른 개념 답에도 자주 나와 제외 개념 몫으로 옮겨졌기 때문이다.
+
+### 4-2. 녹화 결과
+
+| 결과 | 질문 수 |
+|---|---:|
+| answered | 6,567 |
+| no_source | 514 |
+| fallback | 86 |
+| blocked | 33 |
+| 합계 | 7,200 |
+
+- 26B 호출: scope 7,200, ground 6,653, judge 41,081, repair 3,156
+- 판정 단계 교란 호출 2,806회. 그중 개념 바꾸기 122회는 26B 출력이 JSON 한 개가 아니어서 실패했고, 다음 교란 방식으로 넘어갔다.
+
+### 4-3. 거른 이유별 개수
+
+| 역할 | measured | han | not_answered | not_all_verified | audit | gateway | rejudge_failed | duplicate |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| ground(녹화 7,200건 기준) | 0 | 0 | 633 | 2,090 | 44 | 82 | | |
+| repair(수정 호출 3,156건 기준) | 0 | 0 | | | | 0 | 2,404 | |
+| judge(맞는 문장 후보 기준) | 699 | 0 | | | | | | 8,648 |
+| scope(질문 기준) | 0 | 0 | | | | | | |
+
+- judge의 measured 699건은 측정 판정 세트와 같은 문장이거나 측정 질문에서 나온 문장이다. duplicate는 같은 문장이 여러 답에 나온 경우다.
+- 거르고 남은 judge 후보는 1차 19,076개, 제외 개념 몫 5,968개다. 이 중 seed 순서로 목표 분량만 썼다.
+- 측정 세트와 같은 질문이 0건인 것은 질문 단계에서 이미 측정 질문과 같은 질문을 만들지 않았기 때문이다.
+- 제외 개념 추가 측정 세트(Task 4의 `holdout-scope.jsonl`)가 생기면 6단계(`--stage refilter`)로 `holdout_*.jsonl`을 한 번 더 거른다. 아직 하지 않았다.
