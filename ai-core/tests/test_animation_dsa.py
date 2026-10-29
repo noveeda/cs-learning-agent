@@ -8,6 +8,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 from serving.animation import SCENE_FORMATS, SIMULATORS, simulate
+from serving.animation.dsa_linear import josa_word
 from serving.animation.model import AnimationRequestModel
 
 SCENES_PATH = Path(__file__).resolve().parents[1] / 'content' / 'dsa' / 'scenes.json'
@@ -50,6 +51,34 @@ class RegistryTests(unittest.TestCase):
         self.assertLessEqual(DSA_KINDS, set(SIMULATORS))
         for kind in DSA_KINDS:
             self.assertEqual(run(SCENE_FORMATS[kind]).kind, kind)
+
+
+class JosaTests(unittest.TestCase):
+    # 검증 목적: 변수·정점 이름과 숫자 뒤 조사가 받침(영문 L·M·N·R, 숫자 읽기, 한글 종성)에 맞게 바뀌는지 확인
+    # - 고정 조사를 쓰면 'L는', '3라'처럼 어색한 캡션이 나오기 때문
+    def test_josa_word_follows_final_consonant(self):
+        cases = [('p', '이', '가', '가'), ('L', '은', '는', '은'), ('M', '을', '를', '을'), ('B', '을', '를', '를'),
+                 ('3', '이라', '라', '이라'), ('2', '이라', '라', '라'), ('10', '이', '가', '이'),
+                 ('M', '으로', '로', '으로'), ('L', '으로', '로', '로'), ('A', '으로', '로', '로'), ('7', '으로', '로', '로'),
+                 ('0', '으로', '로', '으로'), ('2a', '과', '와', '와'), ('값', '은', '는', '은'), ('키', '은', '는', '는')]
+        for word, with_final, without_final, expected in cases:
+            with self.subTest(word=word, pair=with_final):
+                self.assertEqual(josa_word(word, with_final, without_final), expected)
+
+    # 검증 목적: 캡션의 이름 뒤 조사가 실제 이름에 맞게 붙는지 확인
+    def test_captions_use_matching_particles(self):
+        search = run({'kind': 'dsa_search', 'algorithm': 'binary', 'values': [1, 3, 5, 7], 'target': 2})
+        self.assertIn('3 > 2라', search.frames[1].caption)
+        tree = run({'kind': 'dsa_tree', 'edges': [['M', 'L'], ['M', 'B']],
+                    'ops': [{'op': 'children', 'node': 'L'}, {'op': 'parent', 'node': 'M'}, {'op': 'subtree', 'node': 'M'}]})
+        self.assertIn('L은 자식이 없어', tree.frames[1].caption)
+        self.assertIn('M은 루트라', tree.frames[2].caption)
+        self.assertIn('M을 루트로', tree.frames[3].caption)
+        graph = run({'kind': 'graph_parts', 'nodes': ['A', 'M'], 'edges': [], 'directed': False,
+                     'ops': [{'op': 'path', 'source': 'A', 'target': 'M'}]})
+        self.assertIn('M으로 가는', graph.frames[1].caption)
+        ref = run({'kind': 'dsa_reference', 'ops': [{'op': 'new', 'name': 'm', 'value': 1}, {'op': 'set', 'name': 'm', 'value': 2}]})
+        self.assertIn('m이 가리키는', ref.frames[2].caption)
 
 
 class MemoryTests(unittest.TestCase):
@@ -179,6 +208,13 @@ class SelectionSortTests(unittest.TestCase):
         self.assertEqual(labels(animation.frames[-1]), ['1', '2b', '2a', '3'])
         self.assertIn('불안정', animation.frames[-1].caption)
 
+    # 검증 목적: 같은 값 순서가 이번 입력에서 우연히 유지돼도 선택 정렬이 안정 정렬이라고 오해하지 않게 알리는지 확인
+    def test_stable_by_chance_is_marked_as_this_input(self):
+        animation = run({'kind': 'selection_sort', 'values': [2, 1, 2]})
+        self.assertEqual(labels(animation.frames[-1]), ['1', '2a', '2b'])
+        self.assertIn('이번 입력에서는', animation.frames[-1].caption)
+        self.assertIn('불안정', animation.frames[-1].caption)
+
 
 class LogStepsTests(unittest.TestCase):
     # 검증 목적: n을 1이 될 때까지 절반으로 나눈 횟수가 log₂n과 같은지 확인
@@ -214,6 +250,17 @@ class GrowthTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             run({'kind': 'growth', 'functions': ['log n', 'n'], 'sizes': [3, 4]})
 
+    # 검증 목적: 가장 큰 n이 교차점을 넘지 못해 마지막 순서가 점근 순서와 다른 표는 거부하는지 확인
+    # - n = 2에서 "n < n² < 3n"을 보여 주면 3n이 n²보다 빨리 증가한다고 잘못 읽을 수 있기 때문
+    def test_rejects_table_whose_last_size_is_before_crossover(self):
+        with self.assertRaises(ValidationError):
+            run({'kind': 'growth', 'functions': ['3n', 'n²', 'n'], 'sizes': [1, 2]})
+        with self.assertRaises(ValidationError):
+            run({'kind': 'growth', 'functions': ['3n', 'n²'], 'sizes': [1, 3]})
+        animation = run({'kind': 'growth', 'functions': ['3n', 'n²'], 'sizes': [1, 2, 3, 4, 8]})
+        self.assertIn('3n < n²', animation.frames[-1].caption)
+        self.assertEqual(toned(animation.frames[-1], 'active'), {'n²', '1', '4', '9', '16', '64'})
+
 
 class LoopCountTests(unittest.TestCase):
     # 검증 목적: 중첩 반복은 n×n번, 삼각 반복은 n(n+1)/2번 칸을 채우는지 확인
@@ -241,6 +288,14 @@ class RecursionTreeTests(unittest.TestCase):
         self.assertIn('O(log n)', animation.frames[-1].caption)
         self.assertIn('4', animation.frames[-1].caption)
 
+    # 검증 목적: 단계 합을 생략 부호 없이 실제 항으로 적어, n이 작을 때 "1+2+…+2" 같은 식이 나오지 않는지 확인
+    def test_level_sums_are_written_out(self):
+        small = run({'kind': 'recursion_tree', 'branch': 2, 'work': '1', 'n': 2})
+        self.assertIn('1+2 = 3', small.frames[-1].caption)
+        self.assertNotIn('…', small.frames[-1].caption)
+        chain = run({'kind': 'recursion_tree', 'branch': 1, 'work': 'n', 'n': 8})
+        self.assertIn('8+4+2+1 = 15', chain.frames[-1].caption)
+
 
 class RecursionTests(unittest.TestCase):
     # 검증 목적: sum(n) = n + sum(n-1)을 실제로 계산해 마지막 반환값이 n(n+1)/2인지 확인
@@ -255,6 +310,8 @@ class RecursionTests(unittest.TestCase):
         self.assertIn('오버플로', animation.frames[-1].caption)
         self.assertTrue(any(b.tone == 'removed' for b in animation.frames[-1].boxes))
         self.assertTrue(all('반환' not in f.caption for f in animation.frames))
+        self.assertNotIn('count(2)', animation.frames[1].caption)
+        self.assertIn('count(3)', animation.frames[1].caption)
 
 
 class FibDpTests(unittest.TestCase):
@@ -270,6 +327,12 @@ class FibDpTests(unittest.TestCase):
         last = animation.frames[-1]
         self.assertEqual(sum(b.shape == 'node' for b in last.boxes), 9)
         self.assertEqual(labels(last, 'cell'), ['1', '2', '3', '5'])
+        self.assertIn('memo에서', last.caption)
+
+    # 검증 목적: memo 적중이 한 번도 없는 작은 n(2)에서는 "memo에서 가져옴"을 말하지 않는지 확인
+    def test_memo_without_hits_does_not_claim_reuse(self):
+        animation = run({'kind': 'fib_dp', 'mode': 'memo', 'n': 2})
+        self.assertNotIn('memo에서', animation.frames[-1].caption)
 
     # 검증 목적: 표 채우기는 dp[i] = dp[i-1] + dp[i-2]를 왼쪽부터 계산한 피보나치 수열인지 확인
     def test_table_values(self):

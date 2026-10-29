@@ -102,9 +102,28 @@ REQUESTS = (MemoryRequest, ReferenceRequest, DynamicArrayRequest, ListWalkReques
 
 # --- 시뮬레이터 ---
 
-## @brief 숫자 뒤 '(으)로'를 고름. 끝자리 읽기가 ㄹ 받침(1 일·7 칠·8 팔)이거나 받침이 없으면(2·4·5·9) '로'
-def euro(number: int) -> str:
-    return '로' if str(abs(number))[-1] in '1245789' else '으로'
+# 받침이 있는 숫자 끝자리(영·일·삼·육·칠·팔)와 그중 ㄹ 받침(일·칠·팔)
+DIGIT_FINAL, DIGIT_RIEUL = set('013678'), set('178')
+# 받침이 있는 영문자 읽기(엘·엠·엔·알)와 그중 ㄹ 받침(엘·알)
+LETTER_FINAL, LETTER_RIEUL = set('lmnr'), set('lr')
+
+
+## @brief 이름·숫자·라벨(p, B, 3, 2a, 값) 뒤 조사를 마지막 글자의 받침에 맞춰 고름
+# - 숫자는 한국어 읽기, 영문자는 영어 이름 읽기(L 엘, M 엠, N 엔, R 알만 받침), 한글은 종성으로 판단
+# - '으로/로'는 받침이 없거나 ㄹ 받침이면 '로'(예: 7로, L로), 그 밖의 받침이면 '으로'(예: 3으로, M으로)
+def josa_word(word: str, with_final: str, without_final: str) -> str:
+    last = word[-1].lower()
+    if last.isdigit():
+        final, rieul = last in DIGIT_FINAL, last in DIGIT_RIEUL
+    elif '가' <= last <= '힣':
+        jong = (ord(last) - ord('가')) % 28
+        final, rieul = jong != 0, jong == 8
+    else:
+        final, rieul = last in LETTER_FINAL, last in LETTER_RIEUL
+    if with_final == '으로':
+        return without_final if rieul or not final else with_final
+    return with_final if final else without_final
+
 
 ## @brief 메모리 주소 장면 실행. 주소 이름표(y=0)·값 칸(y=1)을 그리고, 접근마다 주소 계산식을 캡션에 넣음
 def simulate_memory(req: MemoryRequest) -> Animation:
@@ -207,7 +226,9 @@ def simulate_reference(req: ReferenceRequest) -> Animation:
                 objects[content] = op.value
                 others = [n for n in names if n != op.name and slots[n] == ('ref', content)]
                 seen = f', {"·".join(others)}에서 읽어도 {op.value}' if others else ''
-                caption, active, new = f'{op.name}가 가리키는 객체를 {op.value}{euro(op.value)} 바꿉니다{seen}', [op.name], [content]
+                caption = (f'{op.name}{josa_word(op.name, "이", "가")} 가리키는 객체를 '
+                           f'{op.value}{josa_word(str(op.value), "으로", "로")} 바꿉니다{seen}')
+                active, new = [op.name], [content]
             else:
                 slots[op.name] = ('value', op.value)
                 caption, new = f'{op.name} = {op.value}: {op.name} 칸만 바뀌고 다른 변수는 그대로입니다', [op.name]
@@ -343,10 +364,10 @@ def binary_search(req: SearchRequest) -> list[Frame]:
                                        live=(lo, hi), pointers=pointers, found=mid))
             return frames
         if values[mid] < target:
-            rest = f'{values[mid]} < {target}이라 오른쪽 절반만 남김'
+            rest = f'{values[mid]} < {target}{josa_word(str(target), "이라", "라")} 오른쪽 절반만 남김'
             next_lo, next_hi = mid + 1, hi
         else:
-            rest = f'{values[mid]} > {target}이라 왼쪽 절반만 남김'
+            rest = f'{values[mid]} > {target}{josa_word(str(target), "이라", "라")} 왼쪽 절반만 남김'
             next_lo, next_hi = lo, mid - 1
         frames.append(search_frame(values, f'mid = ({lo}+{hi})//2 = {mid}: {rest}', live=(lo, hi), pointers=pointers, active=mid))
         lo, hi = next_lo, next_hi
@@ -375,11 +396,6 @@ def tagged_labels(values) -> list[str]:
     return labels
 
 
-## @brief 꼬리표 붙은 라벨(2a 등) 뒤 조사를 고름. 숫자로 끝나면 숫자 읽기, a~h(에이·비…에이치)로 끝나면 받침 없음
-def label_josa(label: str, with_final: str, without_final: str) -> str:
-    return josa(int(label), with_final, without_final) if label[-1].isdigit() else without_final
-
-
 ## @brief 선택 정렬 장면 실행. 회전마다 남은 부분의 최솟값(같으면 앞쪽)을 앞자리와 교환
 # - 원소마다 처음 자리로 id를 붙여 교환이 이동으로 보이게 함. 이번 회전에 자리가 정해진 원소는 new, 교환 상대는 active
 # - 같은 값이 있으면 마지막 단계에 원래 순서가 유지됐는지(안정·불안정)를 계산해 알려 줌
@@ -396,11 +412,11 @@ def simulate_selection_sort(req: SelectionSortRequest) -> Animation:
         m = min(range(i, len(items)), key=lambda k: (items[k][1], k))
         chosen = items[m]
         if m == i:
-            caption = f'{i + 1}회전: 최솟값 {chosen[2]}{label_josa(chosen[2], "이", "가")} 이미 [{i}]에 있음'
+            caption = f'{i + 1}회전: 최솟값 {chosen[2]}{josa_word(chosen[2], "이", "가")} 이미 [{i}]에 있음'
             tones = {chosen[0]: 'new'}
         else:
-            caption = (f'{i + 1}회전: 최솟값 {chosen[2]}{label_josa(chosen[2], "을", "를")} '
-                       f'[{i}]의 {items[i][2]}{label_josa(items[i][2], "과", "와")} 교환')
+            caption = (f'{i + 1}회전: 최솟값 {chosen[2]}{josa_word(chosen[2], "을", "를")} '
+                       f'[{i}]의 {items[i][2]}{josa_word(items[i][2], "과", "와")} 교환')
             tones = {chosen[0]: 'new', items[i][0]: 'active'}
             items[i], items[m] = items[m], items[i]
         frames.append(frame(caption, tones))
@@ -408,7 +424,9 @@ def simulate_selection_sort(req: SelectionSortRequest) -> Animation:
     if duplicates:
         order = [label for _, _, label in items if label in duplicates]
         stable = order == sorted(order, key=lambda label: (int(label[:-1]), label[-1]))
-        verdict = '같은 값의 입력 순서가 유지됨' if stable else '같은 값의 입력 순서가 뒤바뀜(불안정 정렬)'
+        # 순서가 유지돼도 이번 입력의 우연일 뿐이라 "이번 입력에서는"을 붙임: 선택 정렬을 안정 정렬로 오해하지 않게 하기 위함
+        verdict = ('이번 입력에서는 같은 값 순서가 유지됨(선택 정렬은 불안정 정렬)' if stable
+                   else '같은 값의 입력 순서가 뒤바뀜(불안정 정렬)')
         frames.append(frame(f'결과 {", ".join(label for _, _, label in items)} → {verdict}',
                             {i: 'active' for i, _, label in items if label in duplicates}))
     return build_animation('selection_sort', '선택 정렬', frames)

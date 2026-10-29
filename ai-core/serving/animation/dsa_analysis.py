@@ -45,6 +45,8 @@ GROWTH_FUNCTIONS = {
     'n²': lambda n: n * n,
     'n²+n': lambda n: n * n + n,
 }
+# 함수식의 점근 증가 등급(클수록 빨리 증가). 상수배(n·3n)·낮은 차수 항(n²·n²+n)만 다른 식은 같은 등급
+GROWTH_RANK = {'1': 0, 'log n': 1, 'n': 2, '3n': 2, 'n log n': 3, 'n²': 4, 'n²+n': 4}
 
 
 ## @brief 증가 속도 표 장면. 함수식(행)마다 입력 크기(열)별 연산량을 계산해 한 열씩 채움
@@ -54,7 +56,12 @@ class GrowthRequest(Strict):
     functions: list[Literal['1', 'log n', 'n', '3n', 'n log n', 'n²', 'n²+n']] = Field(min_length=2, max_length=5)
     sizes: list[int] = Field(min_length=2, max_length=5)
 
-    ## @brief 함수식 중복, 입력 크기 범위(1~30)·오름차순, log의 정수 조건, 칸 값 상한을 확인
+    ## @brief 함수식 중복, 입력 크기 범위(1~30)·오름차순, log의 정수 조건, 칸 값 상한, 마지막 n의 점근 순서를 확인
+    # - 마지막 단계는 가장 큰 n에서의 크기 순서를 '증가 속도 비교'의 결론으로 보여 줌
+    #   그래서 등급이 다른 모든 쌍이 그 n에서 이미 점근 순서대로(느린 쪽 < 빠른 쪽) 놓여 있어야 함
+    #   예: sizes [1, 2]의 3n(6) > n²(4)을 결론으로 보이면 3n이 더 빨리 증가한다고 잘못 읽게 됨
+    # - 캡션만 '이 n에서의 크기'로 바꾸는 대신 입력을 거부함: 결론 단계의 순서가 곧 점근 순서여야 정확하기 때문
+    # - 이 표의 함수 쌍은 차이가 부호를 한 번만 바꾸므로(예: n² - 3n = n(n-3)) 가장 큰 n에서 순서가 맞으면 그 뒤로도 유지됨
     @model_validator(mode='after')
     def validate_table(self):
         if len(set(self.functions)) != len(self.functions):
@@ -67,6 +74,11 @@ class GrowthRequest(Strict):
             for n in self.sizes:
                 if GROWTH_FUNCTIONS[f](n) > 999:
                     raise ValueError(f'{f}의 n={n} 값이 999를 넘어 칸에 적을 수 없습니다')
+        last = self.sizes[-1]
+        for slow in self.functions:
+            for fast in self.functions:
+                if GROWTH_RANK[slow] < GROWTH_RANK[fast] and GROWTH_FUNCTIONS[slow](last) >= GROWTH_FUNCTIONS[fast](last):
+                    raise ValueError(f'가장 큰 n={last}에서 {slow} ≥ {fast}: 점근 순서가 드러나지 않습니다. 더 큰 n을 넣으세요')
         return self
 
 
@@ -106,7 +118,7 @@ class FibDpRequest(Strict):
     def validate_size(self):
         limit = {'naive': 5, 'memo': 6, 'table': 10}[self.mode]
         if self.n > limit:
-            raise ValueError(f'{self.mode}는 n={limit}까지만 지원합니다. 모든 호출을 한 장면에 그리기 위한 분량 제한입니다')
+            raise ValueError(f'{self.mode} 방식은 n={limit}까지만 지원합니다. 모든 호출을 한 장면에 그리기 위한 분량 제한입니다')
         return self
 
 
@@ -242,10 +254,10 @@ def simulate_recursion_tree(req: RecursionTreeRequest) -> Animation:
         summary = f'단계 {levels}개 × 단계마다 {n} = {total} → O(n log n)'
     elif b == 1 and req.work == '1':
         summary = f'단계 {levels}개 × 단계마다 1 = {total} → O(log n)'
-    elif b == 2:
-        summary = f'1+2+…+{n} = {total} = 2n-1 → O(n)'
     else:
-        summary = f'{n}+{n // 2}+…+1 = {total} < 2n → O(n)'
+        # 단계 합을 생략 부호 없이 모두 적음(단계는 최대 4개): n이 작을 때 "1+2+…+2" 같은 어색한 식을 막기 위함
+        terms = '+'.join(str(b ** depth * work(n >> depth)) for depth in range(levels))
+        summary = f'{terms} = {total} = 2n-1 → O(n)' if b == 2 else f'{terms} = {total} < 2n → O(n)'
     frames.append(frame(summary, levels, total))
     recurrence = f'{"2T" if b == 2 else "T"}(n/2) + {req.work}'
     return build_animation('recursion_tree', f'재귀 트리: T(n) = {recurrence}', frames)
@@ -266,7 +278,7 @@ def simulate_recursion(req: RecursionRequest) -> Animation:
         k = req.n
         while len(calls) < DRAWN_STACK_LIMIT:
             calls.append((f'call{len(calls)}', k))
-            frames.append(stack_frame(calls, 'count', f'count({k}) → count({k - 1}) 호출, 스택 {len(calls)}칸, 멈출 조건 없음'))
+            frames.append(stack_frame(calls, 'count', f'count({k}) 호출 → 스택 {len(calls)}칸, 기저 사례가 없어 계속 호출'))
             k -= 1
         frames.append(stack_frame(calls, 'count', f'count({k}) 호출에서 스택 한도(그림에서는 {DRAWN_STACK_LIMIT}칸) 초과 → 스택 오버플로',
                                   removed=(f'call{len(calls)}', k)))
@@ -368,7 +380,9 @@ def simulate_fib_dp(req: FibDpRequest) -> Animation:
         frames.append(frame(prefix + text, number, c['id'], [k for k, _ in c['stores_before']]))
     if req.mode == 'memo':
         prefix = saved(last_stores)
-        frames.append(frame(f'{prefix}호출 {len(calls)}번(같은 값은 memo에서 바로 가져옴)', len(calls),
+        # memo 적중이 있을 때만 재사용을 말함: n ≤ 2는 같은 인자를 다시 부르지 않아 적중이 없기 때문
+        reuse = '(같은 값은 memo에서 바로 가져옴)' if any(c['hit'] for c in calls) else ''
+        frames.append(frame(f'{prefix}호출 {len(calls)}번{reuse}', len(calls),
                             new_memo=[k for k, _ in last_stores]))
         title = f'메모이제이션 fib({req.n})'
     else:

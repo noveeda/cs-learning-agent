@@ -10,6 +10,7 @@ from typing import Annotated, Literal, Union
 
 from pydantic import Field, model_validator
 
+from .dsa_linear import josa_word
 from .graph import layout
 from .model import GRID_HEIGHT, GRID_WIDTH, Animation, Arrow, Box, Frame, NodeName, Strict, build_animation
 
@@ -141,7 +142,7 @@ def tidy_layout(root: str, children: dict[str, list[str]]) -> dict[str, tuple[in
 
     def place(node, depth):
         if depth >= GRID_HEIGHT:
-            raise ValueError(f'깊이가 {depth}라 세로 {GRID_HEIGHT}칸에 그릴 수 없습니다')
+            raise ValueError(f'깊이가 {depth}{josa_word(str(depth), "이라", "라")} 세로 {GRID_HEIGHT}칸에 그릴 수 없습니다')
         kids = children.get(node, [])
         if kids:
             xs = [place(kid, depth + 1) for kid in kids]
@@ -205,16 +206,17 @@ def simulate_tree(req: TreeRequest) -> Animation:
             frames.append(frame(f'깊이 {op.level}: {", ".join(level)}(루트에서 간선 {op.level}개, 노드 {len(level)}개)', new=level))
         elif op.op == 'children':
             kids = children.get(op.node, [])
-            caption = f'{op.node}의 자식: {", ".join(kids)}' if kids else f'{op.node}는 자식이 없어 리프입니다'
+            caption = (f'{op.node}의 자식: {", ".join(kids)}' if kids
+                       else f'{op.node}{josa_word(op.node, "은", "는")} 자식이 없어 리프입니다')
             frames.append(frame(caption, new=kids, active=[op.node]))
         elif op.op == 'parent':
             if op.node == root:
-                frames.append(frame(f'{op.node}는 루트라 부모가 없습니다', active=[op.node]))
+                frames.append(frame(f'{op.node}{josa_word(op.node, "은", "는")} 루트라 부모가 없습니다', active=[op.node]))
             else:
                 frames.append(frame(f'{op.node}의 부모: {parent[op.node]}', new=[parent[op.node]], active=[op.node]))
         elif op.op == 'subtree':
             found = subtree(op.node)
-            frames.append(frame(f'{op.node}를 루트로 하는 서브트리: 노드 {len(found)}개, 이것도 트리',
+            frames.append(frame(f'{op.node}{josa_word(op.node, "을", "를")} 루트로 하는 서브트리: 노드 {len(found)}개, 이것도 트리',
                                 new=found))
         else:
             path = path_to(op.node)
@@ -346,7 +348,8 @@ def simulate_graph_parts(req: GraphPartsRequest) -> Animation:
                 frames.append(frame(f'{op.source}→{op.target} 경로: {" → ".join(path)}(간선 {len(path) - 1}개)',
                                     new=[op.source, op.target], active=path[1:-1]))
             else:
-                frames.append(frame(f'{op.source}에서 {op.target}로 가는 경로가 없습니다', new=[op.source, op.target]))
+                frames.append(frame(f'{op.source}에서 {op.target}{josa_word(op.target, "으로", "로")} 가는 경로가 없습니다',
+                                    new=[op.source, op.target]))
         else:
             a, b = op.edge
             add(a, b)
