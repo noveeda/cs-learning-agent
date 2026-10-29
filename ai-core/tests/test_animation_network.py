@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from serving.animation import CONCEPT_SCENES, SCENE_FORMATS, simulate
+from serving.animation import SCENE_FORMATS, SIMULATORS, simulate
 from serving.animation.model import AnimationRequestModel
 
 SCENES_PATH = Path(__file__).resolve().parents[1] / 'content' / 'network' / 'scenes.json'
@@ -304,14 +304,11 @@ class SceneContentTests(unittest.TestCase):
                 self.assertEqual(len({tuple(c) for c in runs}), 3)
                 self.assertEqual(len({c[0] for c in runs}), 3)
 
-    # 검증 목적: 장면에 쓴 종류가 개념별 장면 표(막힘 보충 장면 선택)에 등록돼 있고 형식 예시가 실행됨
-    def test_registered_for_concepts(self):
-        for concept, requests in self.scenes.items():
-            for request in requests:
-                self.assertIn(request['kind'], CONCEPT_SCENES[concept], concept)
+    # 검증 목적: 장면에 쓴 종류가 시뮬레이터 표에 등록돼 있고, 장면 선택 형식 예시도 그대로 실행됨
+    def test_kinds_registered(self):
         for kind in {r['kind'] for requests in self.scenes.values() for r in requests}:
+            self.assertIn(kind, SIMULATORS)
             run(SCENE_FORMATS[kind])
-
 
 if __name__ == '__main__':
     unittest.main()

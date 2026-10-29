@@ -2,7 +2,7 @@
 # @brief 네트워크 과목 장면 요청 모델과 시뮬레이터: 계층 캡슐화, 서브넷 계산, 링크 상태 라우팅, 최장 접두사 일치,
 # TCP 연결·신뢰 전송, 흐름 제어 윈도우, 혼잡 윈도우, DNS 조회
 # - 다른 장면과 같이 모델은 장면 종류와 입력만 고르고, 주소·순서 번호·윈도우·TTL 같은 단계별 값은 여기서 계산함
-# - 공유 파일(model.py·__init__.py)에는 아래 NetworkRequest·NETWORK_SIMULATORS·NETWORK_FORMATS·NETWORK_SCENES만 등록
+# - 공유 파일(model.py·__init__.py)에는 아래 NetworkRequest·NETWORK_SIMULATORS·NETWORK_FORMATS만 등록
 #   과목별 워커가 같은 파일에 장면을 등록하므로 충돌 줄을 줄이기 위함
 # - model.py가 AnimationRequest 합집합을 만들 때 이 모듈을 읽으므로, 여기서는 model.py의 앞부분(Strict·Box 등)만 씀
 """Network subject scene simulators."""
@@ -942,6 +942,7 @@ def simulate_dns(req: DnsRequest) -> Animation:
 
 
 # --- 등록: model.py·__init__.py가 읽는 묶음 ---
+# - 개념별 장면 표(CONCEPT_SCENES)에는 넣지 않음: 막힘 보충은 content/network/scenes.json의 미리 짠 장면을 씀
 
 # AnimationRequest 합집합에 넣는 요청 타입들(Union은 펼쳐져 kind 판별에 그대로 들어감)
 NetworkRequest = Union[EncapsulationRequest, SubnetRequest, LinkStateRequest, PrefixMatchRequest, TcpRequest,
@@ -956,16 +957,6 @@ NETWORK_SIMULATORS = {
     'flow_window': simulate_flow_window,
     'congestion': simulate_congestion,
     'dns': simulate_dns,
-}
-
-# 막힘 보충에서 개념별로 고를 수 있는 장면 종류
-NETWORK_SCENES: dict[str, tuple[str, ...]] = {
-    'network-layers': ('encapsulation',),
-    'ip-subnet': ('subnet',),
-    'routing': ('link_state', 'prefix_match'),
-    'tcp-reliability': ('tcp',),
-    'flow-congestion-control': ('flow_window', 'congestion'),
-    'dns': ('dns',),
 }
 
 # 장면 선택 요청에 넣는 형식 예시(짧고 평범한 값)

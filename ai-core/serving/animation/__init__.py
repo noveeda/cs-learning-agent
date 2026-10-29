@@ -13,7 +13,7 @@ from .graph import simulate_graph_traversal, simulate_tree_traversal
 from .hierarchical import simulate_bst, simulate_hash_table, simulate_heap
 from .linear import simulate_array, simulate_linked_list, simulate_queue, simulate_stack
 from .model import Animation, AnimationRequest, AnimationRequestModel
-from .network import NETWORK_FORMATS, NETWORK_SCENES, NETWORK_SIMULATORS
+from .network import NETWORK_FORMATS, NETWORK_SIMULATORS
 from .scheduling import simulate_cpu_schedule
 from .sorting import simulate_sort
 
@@ -51,7 +51,6 @@ CONCEPT_SCENES: dict[str, tuple[str, ...]] = {
     'sorting-basics': ('sort',), 'merge-sort': ('sort',), 'quick-sort': ('sort',),
     'scheduling-metrics': ('cpu_schedule',), 'fcfs': ('cpu_schedule',), 'sjf': ('cpu_schedule',),
     'round-robin': ('cpu_schedule',), 'priority-scheduling': ('cpu_schedule',),
-    **NETWORK_SCENES,
 }
 
 # 개념별로 장면 필드의 허용 값을 좁히는 표(개념 지도 ID → {필드: 허용 값})
