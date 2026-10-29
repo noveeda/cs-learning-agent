@@ -6,7 +6,7 @@
 - 학습·병합: `ai-core/finetune/train.py`, 설정: `ai-core/finetune/train_config.py`
 - 결과 위치(Git 밖)
   - 학습 데이터: `/home/infoserver/cs-learning-agent/ai-core/outputs/finetune/`
-  - GGUF: `~/.cache/cs-llm/finetune/<run>/model-Q4_0.gguf`
+  - GGUF: `~/.cache/cs-llm/finetune/<run>/model-Q4_0.gguf`(본 학습 `qat-r16-main`)
 
 ## 1. 무엇을 만드는가
 
@@ -202,7 +202,7 @@ R=~/.cache/cs-llm/finetune/<run>; mkdir -p $R
 rsync -a <5090>:cs-ft/runs/<run>/{merged,result.json,losses.json} $R/
 ~/.venvs/cs-train/bin/python ~/llama.cpp/convert_hf_to_gguf.py $R/merged --outtype bf16 --outfile $R/model-BF16.gguf
 ~/llama.cpp/build/bin/llama-quantize $R/model-BF16.gguf $R/model-Q4_0.gguf Q4_0
-sha256sum $R/model-Q4_0.gguf > $R/model-Q4_0.gguf.sha256 && rm -rf $R/merged $R/model-BF16.gguf
+(cd $R && sha256sum model-Q4_0.gguf > model-Q4_0.gguf.sha256) && rm -rf $R/merged $R/model-BF16.gguf
 
 # 이 서버: 시험 서버(GPU 1번, 20330번대)
 CUDA_VISIBLE_DEVICES=1 ~/llama.cpp/build/bin/llama-server -m $R/model-Q4_0.gguf --alias <run>-Q4_0 \
@@ -228,4 +228,43 @@ CUDA_VISIBLE_DEVICES=1 ~/llama.cpp/build/bin/llama-server -m $R/model-Q4_0.gguf 
 
 ### 5-5. 본 학습
 
-(진행 중. 끝나면 손실 곡선, 걸린 시간, GPU 최대 메모리, GGUF sha256을 적는다.)
+- 실행 이름 `qat-r16-main`. GPU 2장 × 2행 × 누적 4 = 유효 배치 16, 2에폭 1,510단계(2026-10-29 22:24 ~ 10-30 03:22 KST)
+- **걸린 시간**: 학습 17,721초(4시간 55분, 100단계마다 한 검증 16회 각 약 109초 포함). 학습 시작부터 병합 끝까지 4시간 58분
+  - 본 토큰 34,359,400개, 1,939토큰/초(검증 시간 포함)
+- **GPU 최대 메모리**(32GB 중)
+  - torch 기준(rank 0): allocated 19,896MiB, reserved 27,392MiB
+  - nvidia-smi 30초 간격 기록 최대: GPU0 29,077MiB, GPU1 31,225MiB(CUDA 문맥·NCCL 버퍼 포함)
+- **중단 규칙**: 검증 손실이 200단계에서 한 번만 올랐고(0.1058 → 0.1092) 2회 연속 오른 적이 없어 2에폭을 다 돌았다. 가장 낮은 값은 마지막 1,510단계(0.0575)라 그 어댑터를 썼다.
+- **손실 곡선**(학습 손실은 10단계마다 기록한 값의 100단계 구간 평균, 1에폭 ≈ 755단계)
+
+| 단계 | 학습 손실 | 검증 손실 |
+|---:|---:|---:|
+| 100 | 0.2649 | 0.1058 |
+| 200 | 0.1062 | 0.1092 |
+| 300 | 0.0966 | 0.0899 |
+| 400 | 0.0845 | 0.0814 |
+| 500 | 0.0885 | 0.0762 |
+| 600 | 0.0818 | 0.0736 |
+| 700 | 0.0829 | 0.0718 |
+| 800 | 0.0690 | 0.0677 |
+| 900 | 0.0570 | 0.0664 |
+| 1000 | 0.0555 | 0.0627 |
+| 1100 | 0.0588 | 0.0620 |
+| 1200 | 0.0557 | 0.0620 |
+| 1300 | 0.0526 | 0.0589 |
+| 1400 | 0.0486 | 0.0584 |
+| 1500 | 0.0515 | 0.0576 |
+| 1510 | — | 0.0575 |
+
+- 첫 10단계 학습 손실은 1.487이었다. 길이별 묶음이 가장 긴 묶음을 맨 앞에 두므로 첫 구간은 토큰이 많다(10단계에 42만 토큰).
+- 900단계(2에폭 초반)부터 학습 손실이 검증 손실보다 낮아졌지만 검증 손실도 끝까지 내려갔다. 검증 손실은 같은 질문의 다른 행이 train에 있어 낙관적이다(5-1).
+- **변환**: 병합 26초 → 받기 231초 → BF16 GGUF 변환 111초(667텐서) → Q4_0 양자화 31초
+  - `~/.cache/cs-llm/finetune/qat-r16-main/model-Q4_0.gguf`: 6,975,878,848바이트(4.68 BPW)
+  - sha256 `6e02ff93277a2018a2cde169ad7766ccbd03de24abb49f369c6ccade1e1b5d8c`(같은 폴더 `model-Q4_0.gguf.sha256`)
+- **형식 점검**(시험 서버 GPU 1번 20330, 끝나고 내림): 검증 judge 10행
+  - 운영 경로 `HarnessGateway.judge` 10/10 성공, schema 없이 보내도 10/10이 공백 없는 한 줄 JSON이고 `finish_reason=stop`
+  - 판정 일치 9/10. valid 행이라 같은 질문이 train에 있을 수 있어 성능 판단에는 쓰지 않는다(성능은 Task 6).
+- **남긴 것과 지운 것**
+  - 이 서버: GGUF, sha256, `result.json`, `losses.json`만 남겼다. 병합 safetensors와 BF16 GGUF는 지웠다.
+  - 5090: 병합 safetensors(23GB)를 지웠다. 중간 체크포인트는 학습 스크립트가 끝에 지운다. 어댑터(251MB)와 기록만 `~/cs-ft/runs/qat-r16-main/`에 남았다.
+  - 5090의 바탕 모델(HF 캐시, 약 24GB)은 다시 학습할 때 필요해 남겼다.
