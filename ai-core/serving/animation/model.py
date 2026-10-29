@@ -312,14 +312,15 @@ class CallStackRequest(Strict):
         return self
 
 
-# 과목별 모듈의 요청 묶음: 그 모듈이 위의 Strict·Box를 쓰므로 정의가 끝난 여기서 읽음(순환 import 방지)
+# 과목별 장면 요청 모듈: 위의 Strict·Value 등을 쓰므로 정의가 끝난 이 자리에서 가져옴(순환 import 방지)
+from .db import DB_REQUESTS  # noqa: E402
 from .network import NetworkRequest  # noqa: E402
 
 # 모델이 고르는 장면 요청 전체. kind 값으로 요청 타입을 구분함
 AnimationRequest = Annotated[
     Union[ArrayRequest, LinkedListRequest, StackRequest, QueueRequest, HashTableRequest, BSTRequest, HeapRequest,
           GraphTraversalRequest, SortRequest, TreeTraversalRequest, CpuScheduleRequest, CallStackRequest,
-          NetworkRequest],
+          *DB_REQUESTS, NetworkRequest],
     Field(discriminator='kind')]
 
 
