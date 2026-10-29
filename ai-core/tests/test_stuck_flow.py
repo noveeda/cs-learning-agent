@@ -306,10 +306,10 @@ class AnimationTests(unittest.TestCase):
         self.assertNotIn('animation_failed', [e.kind for e in session.state.log])
         self.assertEqual(session.gateway.explained_scenes, [None])
 
-    # 검증 목적: 장면 목록에 없는 개념(logarithm)은 장면 선택 LLM을 부르지 않아 보충 지연이 늘지 않는지 확인
+    # 검증 목적: 장면 목록에도 미리 짠 장면에도 없는 개념(adt)은 장면 선택 LLM을 부르지 않아 보충 지연이 늘지 않는지 확인
     def test_concept_without_scene_skips_choose(self):
         gateway = FakeGateway()
-        session = remediation_session(self, 'logarithm', gateway)
+        session = remediation_session(self, 'adt', gateway)
         self.assertEqual(gateway.calls.count('animate'), 0)
         self.assertEqual(gateway.explained_scenes, [None])
         self.assertNotIn('animation', session.state.view)

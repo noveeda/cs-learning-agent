@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import zlib
 from pathlib import Path
 from typing import Iterator
 
@@ -14,6 +15,7 @@ from rag.embed import Embedder
 from rag.fetch import DATA_DIR
 from rag.search import Retriever
 from serving.animation import CONCEPT_SCENES, create_animation
+from serving.animation.curated import CURATED_SCENES
 from serving.harness import Grounding, answer
 from serving.stuck import Entry, LLMUnavailable
 
@@ -61,17 +63,24 @@ def _published_figure(event: dict, output_dir: Path) -> dict | None:
 
 
 ## @brief 장면이 있는 첫 개념으로 장면 선택(모델 1회) + 시뮬레이션을 해 애니메이션 artifact를 만듦; 못 만들면 None
+# - 미리 짠 장면(CURATED_SCENES)이 있는 개념은 모델 장면 선택을 건너뛰고 그중 하나를 질문 문자열로 결정적으로 고름
+#   모델 호출 1회를 아끼고(작은 모델의 장면 선택 실패·형식 오류 제거), 같은 질문은 늘 같은 장면이라 다시 봐도 화면이 바뀌지 않음
+#   crc32를 쓰는 이유: 내장 hash()는 서버를 다시 띄울 때마다 값이 바뀜
 # - 장면 단계는 시뮬레이터가 계산하므로 근거 검사 없이 보여 줘도 됨(spec 7절: 애니메이션은 코드가 내용을 정함)
 # - 학생 질문을 막힌 위치(excerpt)로 넘겨 장면 값이 질문의 예시를 따르게 함
 # - 장면 선택·실행 실패는 부가 자료 실패라 답을 멈추지 않음(막힘 흐름 _animation과 같은 처리)
 def _animation_event(question: str, concepts: list[str], gw, concept_map) -> dict | None:
-    concept_id = next((c for c in concepts if c in CONCEPT_SCENES), None)
+    concept_id = next((c for c in concepts if c in CURATED_SCENES or c in CONCEPT_SCENES), None)
     if concept_id is None:
         return None
-    concept = next(c for c in concept_map.concepts if c.id == concept_id)
     try:
-        entry = Entry(kind='excerpt', excerpt=question[:2000], return_to='chat')
-        request = gw.choose_animation(concept, entry, CONCEPT_SCENES[concept_id])
+        curated = CURATED_SCENES.get(concept_id)
+        if curated:
+            request = curated[zlib.crc32(question.encode('utf-8')) % len(curated)]
+        else:
+            concept = next(c for c in concept_map.concepts if c.id == concept_id)
+            entry = Entry(kind='excerpt', excerpt=question[:2000], return_to='chat')
+            request = gw.choose_animation(concept, entry, CONCEPT_SCENES[concept_id])
         if request is None:
             return None
         return {'type': 'artifact', **create_animation(json.dumps(request.model_dump()))}

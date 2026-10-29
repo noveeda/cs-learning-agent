@@ -10,6 +10,7 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from serving.animation import CONCEPT_SCENES, simulate
+from serving.animation.curated import CURATED_SCENES
 from serving.animation.model import AnimationRequest
 from serving.concept_map import Concept, ConceptMap
 from serving.grading import grade
@@ -89,7 +90,7 @@ class StuckState(StrictModel):
     # 문항 순서를 섞는 세션 seed; 세션마다 다른 문항을 내되 같은 세션 안에서는 복원해도 같은 문항을 냄
     # - None: 이 필드가 생기기 전에 저장한 세션. 은행 순서(첫 문항부터)를 그대로 써 진행 중 화면과 어긋나지 않게 함
     seed: int | None = None
-    # 개념별로 직전에 보여 준 장면 요청; 재설명 때 장면 선택에 넘겨 같은 장면이 되풀이되지 않게 함
+    # 개념별로 직전에 보여 준 장면 요청; 재설명 때 장면 선택에 넘기거나 미리 짠 장면에서 피해 같은 장면이 되풀이되지 않게 함
     scenes: dict[str, dict] = Field(default_factory=dict)
     log: list[Event] = Field(default_factory=list)
 
@@ -317,22 +318,41 @@ def _diagnose(s, ctx):
     _next_probe(s, ctx)
 
 
-## @brief 보충 개념의 단계별 애니메이션을 만듦(장면 선택 LLM 1회 + 코드 시뮬레이션)
+## @brief 미리 짠 장면 중 이번 설명에 보여 줄 장면을 고름(모델 호출 없음)
+# - attempt: 같은 세션에서 이 개념을 설명하는 차례(1부터). 세션 seed로 섞은 장면 순서의 attempt번째를 쓰고, 장면 수를 넘으면 순환
+#   문항 순서와 같은 _ordered를 써서 세션마다 첫 장면이 달라지고, 같은 세션은 복원해도 같은 장면이 나옴
+# - 고른 장면이 직전 장면(s.scenes)과 같으면 다음 차례 장면으로 넘김
+#   seed가 없는 옛 세션이 모델이 고른 장면을 기억하고 있거나, 깨진 장면을 버려 순환이 짧아진 경우에도 같은 장면을 피하기 위함
+def _curated_scene(s, concept_id, scenes, attempt):
+    ordered = _ordered(s, list(scenes), concept_id, 'scene')
+    index = (attempt - 1) % len(ordered)
+    if len(ordered) > 1 and ordered[index].model_dump() == s.scenes.get(concept_id):
+        index = (index + 1) % len(ordered)
+    return ordered[index]
+
+
+## @brief 보충 개념의 단계별 애니메이션을 만듦(미리 짠 장면 또는 장면 선택 LLM 1회 + 코드 시뮬레이션)
 # - 반환: (설명에 넘길 장면 요약, 프레임 dict). 붙일 수 없으면 (None, None)
 #   요약 = 장면 요청(종류·order·buckets·시작 값·연산) + 코드가 계산한 단계 캡션(steps)
 #   캡션까지 넘기는 이유: 모델이 단계별 상태를 직접 계산하면 틀릴 수 있음(실측에서 최대 힙에 없는 교환을 씀). 상태는 코드가 계산한 것만 씀
-# - 장면 목록(CONCEPT_SCENES)에 없는 개념은 LLM을 부르지 않음
+# - 미리 짠 장면(CURATED_SCENES)이 있는 개념은 장면 선택 LLM을 부르지 않고 attempt 차례 장면을 씀(_curated_scene)
+#   모델 호출 1회를 아끼고(작은 모델의 장면 선택 실패·형식 오류 제거), 서로 다르게 짠 장면이라 재설명 때 확실히 다른 장면이 나옴
+# - 미리 짠 장면도 장면 목록(CONCEPT_SCENES)도 없는 개념은 LLM을 부르지 않음
 # - 같은 개념을 다시 설명하면 직전 장면을 넘겨 다른 장면을 고르게 함(장면 선택은 temperature 0이라 입력이 같으면 장면도 같음)
 #   그래도 같은 장면이 오면 막지 않고 그대로 보여 주되, 다양화 효과를 잴 수 있게 로그에 남김
 # - 애니메이션은 설명을 돕는 부가 자료라, 실패(LLM 오류·검증 실패·실행 불가 연산)해도 503으로 흐름을 멈추지 않고
 #   텍스트 보충만 보여 줌. 실패 이유는 장면 선택 성공률 측정을 위해 로그에 남김
-def _animation(s, ctx, concept_id):
+def _animation(s, ctx, concept_id, attempt):
+    curated = CURATED_SCENES.get(concept_id)
     kinds = CONCEPT_SCENES.get(concept_id)
-    if not kinds:
+    if not curated and not kinds:
         return None, None
     try:
         previous = s.scenes.get(concept_id)
-        request = ctx.gateway.choose_animation(ctx.concept(concept_id), s.entry, kinds, previous=previous)
+        if curated:
+            request = _curated_scene(s, concept_id, curated, attempt)
+        else:
+            request = ctx.gateway.choose_animation(ctx.concept(concept_id), s.entry, kinds, previous=previous)
         if request is None:
             return None, None
         animation = simulate(request).model_dump()
@@ -354,7 +374,7 @@ def _approach(s, ctx, fix):
     return fix.attempts + 1 if fix.concept == s.target and _is_root(s, ctx) else fix.attempts
 
 
-## @brief S4 보충; 장면이 있으면 먼저 고르고(LLM 1회) 그 장면에 맞춰 설명한 뒤(LLM 1회) 같은 화면에 확인 문항을 붙임
+## @brief S4 보충; 장면이 있으면 먼저 고르고(미리 짠 장면이 없을 때만 LLM 1회) 그 장면에 맞춰 설명한 뒤(LLM 1회) 같은 화면에 확인 문항을 붙임
 # - 장면을 먼저 고르는 이유: 설명이 장면 값을 알아야 글 예시와 애니메이션이 같은 예시가 됨(E2E에서 최소 힙 글 + 최대 힙 장면 발견)
 # - 실행에 성공한 장면만 설명에 넘김. 장면이 없거나 실패하면 지금처럼 장면 없이 글만 씀
 # - 설명 실패는 지금처럼 LLMUnavailable(503)로 끝내 상태를 보존하고, 애니메이션 실패는 텍스트만으로 진행
@@ -362,7 +382,7 @@ def _remediate(s, ctx):
     _expect(ctx, 'continue')
     fix = s.fixes[s.cursor]
     fix.attempts += 1
-    scene, animation = _animation(s, ctx, fix.concept)
+    scene, animation = _animation(s, ctx, fix.concept, fix.attempts)
     approach = _approach(s, ctx, fix)
     text = ctx.gateway.explain(ctx.concept(fix.concept), approach, s.entry, scene)
     _log(s, ctx, 'remediated', fix.concept, attempt=fix.attempts, approach=approach,
