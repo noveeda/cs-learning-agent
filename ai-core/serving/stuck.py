@@ -1,6 +1,7 @@
 ## @file
 # @brief 막힘 세션 흐름(S1~S8) 엔진; 요청 한 번에 한 단계만 실행하고 상태 저장은 Spring이 담당
 """Stuck-session flow: diagnose missing prerequisites, remediate bottom-up, check understanding, return."""
+import random
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypedDict
 
@@ -85,6 +86,11 @@ class StuckState(StrictModel):
     opted_out: bool = False
     # 화면에 보여 줄 현재 내용; 새로고침 뒤에도 같은 화면을 복구하도록 상태에 저장
     view: dict = Field(default_factory=dict)
+    # 문항 순서를 섞는 세션 seed; 세션마다 다른 문항을 내되 같은 세션 안에서는 복원해도 같은 문항을 냄
+    # - None: 이 필드가 생기기 전에 저장한 세션. 은행 순서(첫 문항부터)를 그대로 써 진행 중 화면과 어긋나지 않게 함
+    seed: int | None = None
+    # 개념별로 직전에 보여 준 장면 요청; 재설명 때 장면 선택에 넘겨 같은 장면이 되풀이되지 않게 함
+    scenes: dict[str, dict] = Field(default_factory=dict)
     log: list[Event] = Field(default_factory=list)
 
 
@@ -102,13 +108,17 @@ class LLMUnavailable(RuntimeError):
 
 ## @brief 흐름이 쓰는 LLM 역할 5가지의 계약; 실제 구현은 stuck_llm, 테스트는 가짜 구현을 주입
 # - choose_animation: 보충 개념에 보여 줄 장면 요청을 kinds 안에서 고르거나, 알맞은 장면이 없으면 None
+#   previous는 같은 세션에서 이 개념에 직전에 보여 준 장면 요청(첫 설명이면 None). 있으면 다른 장면을 골라야 함
+# - explain의 attempt: 설명 방식 차례(1부터). 보통은 보충 시도 횟수와 같고, 1단계 개념의 막힌 개념은 2부터 시작(_approach)
+#   마지막 방식보다 큰 값이 오면 마지막 방식을 씀
 # - explain의 scene: 같은 화면에 보일 장면 요약(_animation 참고, 없으면 None). 글 예시를 장면과 같은 값으로 맞추는 데 씀
 class Gateway(Protocol):
     def identify(self, excerpt: str, concept_map: ConceptMap) -> str | None: ...
     def explain(self, concept: Concept, attempt: int, entry: Entry, scene: dict | None = None) -> str: ...
     def grade_explanation(self, item: Item, answer: str) -> list[bool]: ...
     def summarize(self, state: StuckState, concept_map: ConceptMap) -> str: ...
-    def choose_animation(self, concept: Concept, entry: Entry, kinds: tuple[str, ...]) -> AnimationRequest | None: ...
+    def choose_animation(self, concept: Concept, entry: Entry, kinds: tuple[str, ...],
+                         previous: dict | None = None) -> AnimationRequest | None: ...
 
 
 ## @brief LLM 역할이 아직 연결되지 않았음을 알리는 기본 구현; 상태를 바꾸지 않고 재시도 가능한 오류로 끝냄
@@ -146,6 +156,22 @@ def _item_view(item):
 
 def _concept_view(ctx, concept_id):
     return {'id': concept_id, 'title': ctx.concept(concept_id).title}
+
+
+## @brief 세션 seed로 문항 목록을 섞은 순서를 돌려줌; 같은 seed·개념·용도면 늘 같은 순서(복원·재시도에도 같은 문항)
+# - seed가 None(옛 저장 세션)이면 은행 순서 그대로
+# - 문자열 seed는 실행마다 같은 난수열을 만들므로(해시 무작위화 영향 없음) 서버를 다시 띄워도 순서가 같음
+def _ordered(s, items, concept_id, purpose):
+    if s.seed is None:
+        return items
+    shuffled = list(items)
+    random.Random(f'{s.seed}:{concept_id}:{purpose}').shuffle(shuffled)
+    return shuffled
+
+
+## @brief 막힌 개념이 선수 개념 없는 1단계 개념인지; 진단할 선수 개념이 없어 안내 문구와 설명 방식이 달라짐
+def _is_root(s, ctx):
+    return not ctx.concept(s.target).prerequisites
 
 
 def _log(s, ctx, kind, concept=None, item=None, **detail):
@@ -186,7 +212,7 @@ def _next_probe(s, ctx):
         concept, depth = s.frontier.pop(0)
         if any(p.concept == concept for p in s.probes):
             continue
-        candidates = ctx.items_for(concept, 'diagnosis')
+        candidates = _ordered(s, ctx.items_for(concept, 'diagnosis'), concept, 'diagnosis')
         if not candidates:
             # 문항 은행이 아직 없는 개념은 판단하지 않고 기록만 남김; 빈틈으로 단정하지 않기 위함
             s.probes.append(Probe(concept=concept, depth=depth, result='no_items'))
@@ -224,7 +250,9 @@ def _start_remediation(s, ctx):
               'gaps': [_concept_view(ctx, c) for c in ordered],
               # 판정 근거: 어떤 문항에 어떤 답을 내서 빈틈으로 봤는지 학습자에게 보여 줌
               'evidence': [_evidence_view(ctx, p) for p in s.probes],
-              'opted_out': s.opted_out}
+              'opted_out': s.opted_out,
+              # 1단계 개념이면 "빈틈을 찾지 못했어요" 대신 "선수 개념이 없는 기초 개념" 안내를 보여 주게 함
+              'root': _is_root(s, ctx)}
     _log(s, ctx, 'remediation_planned', s.target, order=[f.concept for f in s.fixes])
 
 
@@ -291,6 +319,8 @@ def _diagnose(s, ctx):
 #   요약 = 장면 요청(종류·order·buckets·시작 값·연산) + 코드가 계산한 단계 캡션(steps)
 #   캡션까지 넘기는 이유: 모델이 단계별 상태를 직접 계산하면 틀릴 수 있음(실측에서 최대 힙에 없는 교환을 씀). 상태는 코드가 계산한 것만 씀
 # - 장면 목록(CONCEPT_SCENES)에 없는 개념은 LLM을 부르지 않음
+# - 같은 개념을 다시 설명하면 직전 장면을 넘겨 다른 장면을 고르게 함(장면 선택은 temperature 0이라 입력이 같으면 장면도 같음)
+#   그래도 같은 장면이 오면 막지 않고 그대로 보여 주되, 다양화 효과를 잴 수 있게 로그에 남김
 # - 애니메이션은 설명을 돕는 부가 자료라, 실패(LLM 오류·검증 실패·실행 불가 연산)해도 503으로 흐름을 멈추지 않고
 #   텍스트 보충만 보여 줌. 실패 이유는 장면 선택 성공률 측정을 위해 로그에 남김
 def _animation(s, ctx, concept_id):
@@ -298,14 +328,27 @@ def _animation(s, ctx, concept_id):
     if not kinds:
         return None, None
     try:
-        request = ctx.gateway.choose_animation(ctx.concept(concept_id), s.entry, kinds)
+        previous = s.scenes.get(concept_id)
+        request = ctx.gateway.choose_animation(ctx.concept(concept_id), s.entry, kinds, previous=previous)
         if request is None:
             return None, None
         animation = simulate(request).model_dump()
-        return {**request.model_dump(), 'steps': [frame['caption'] for frame in animation['frames']]}, animation
+        scene = request.model_dump()
+        if scene == previous:
+            _log(s, ctx, 'animation_repeated', concept_id)
+        # 화면에 실제로 보인(실행에 성공한) 장면만 직전 장면으로 기억
+        s.scenes[concept_id] = scene
+        return {**scene, 'steps': [frame['caption'] for frame in animation['frames']]}, animation
     except (LLMUnavailable, ValueError) as exc:
         _log(s, ctx, 'animation_failed', concept_id, reason=str(exc)[:300])
         return None, None
+
+
+## @brief 보충 대상의 설명 방식 차례; 1단계 개념의 막힌 개념은 한 차례 앞당겨 2(작은 예시 단계별)부터 시작
+# - 학습자는 이미 그 개념의 정의를 읽고 막힌 상태라 정의부터(1) 다시 말하는 설명은 도움이 덜 되기 때문
+# - 선수 개념 보충(빈틈)은 학습자가 아직 정의를 보지 않았을 수 있어 지금처럼 1부터
+def _approach(s, ctx, fix):
+    return fix.attempts + 1 if fix.concept == s.target and _is_root(s, ctx) else fix.attempts
 
 
 ## @brief S4 보충; 장면이 있으면 먼저 고르고(LLM 1회) 그 장면에 맞춰 설명한 뒤(LLM 1회) 같은 화면에 확인 문항을 붙임
@@ -317,19 +360,22 @@ def _remediate(s, ctx):
     fix = s.fixes[s.cursor]
     fix.attempts += 1
     scene, animation = _animation(s, ctx, fix.concept)
-    text = ctx.gateway.explain(ctx.concept(fix.concept), fix.attempts, s.entry, scene)
-    _log(s, ctx, 'remediated', fix.concept, attempt=fix.attempts, animation_kind=animation['kind'] if animation else None)
+    approach = _approach(s, ctx, fix)
+    text = ctx.gateway.explain(ctx.concept(fix.concept), approach, s.entry, scene)
+    _log(s, ctx, 'remediated', fix.concept, attempt=fix.attempts, approach=approach,
+         animation_kind=animation['kind'] if animation else None)
     s.view = {'kind': 'remediation', 'concept': _concept_view(ctx, fix.concept), 'attempt': fix.attempts, 'text': text,
               'is_target': s.cursor == len(s.fixes) - 1}
     if animation:
         s.view['animation'] = animation
-    checks = ctx.items_for(fix.concept, 'check')
+    checks = _ordered(s, ctx.items_for(fix.concept, 'check'), fix.concept, 'check')
     if not checks:
         # 확인 문항이 아직 없으면 이해를 판정하지 않고 넘어감; 통과로 기록하지 않기 위해 별도 결과로 남김
         fix.outcome, s.stage, s.pending = 'unchecked', 'decide', None
         s.view['note'] = '확인 문항이 아직 없어 이해 확인을 건너뜁니다.'
         return
     # 재보충 때는 다른 확인 문항을 써서 같은 문항을 외워 통과하는 일을 줄임(문항이 모자라면 순환)
+    # - 섞은 순서를 시도 횟수로 따라가므로 문항이 남아 있는 동안은 같은 세션에서 같은 문항을 다시 내지 않음
     item = checks[(fix.attempts - 1) % len(checks)]
     s.pending, s.stage = item.id, 'check'
     s.view['item'] = _item_view(item)
@@ -342,13 +388,15 @@ def _check(s, ctx):
     item = ctx.item(s.pending)
     s.check_passed = grade(item, answer)
     _log(s, ctx, 'check_answered', item.concept, item.id, answer=answer, correct=s.check_passed)
-    explanations = ctx.items_for(item.concept, 'explanation')
+    explanations = _ordered(s, ctx.items_for(item.concept, 'explanation'), item.concept, 'explanation')
     if not explanations:
         _conclude(s, ctx, s.check_passed)
         return
-    s.pending, s.stage = explanations[0].id, 'explain'
+    # 확인 문항과 같은 방식으로 재보충마다 다음 서술 문항을 냄(서술 문항이 하나뿐이면 같은 문항)
+    chosen = explanations[(s.fixes[s.cursor].attempts - 1) % len(explanations)]
+    s.pending, s.stage = chosen.id, 'explain'
     s.view = {'kind': 'question', 'purpose': 'explanation', 'concept': _concept_view(ctx, item.concept),
-              'item': _item_view(explanations[0])}
+              'item': _item_view(chosen)}
 
 
 ## @brief 혼합형 확인의 두 번째 단계; 서술을 루브릭으로 채점(LLM 1회)하고 두 결과가 모두 통과해야 이해로 인정
@@ -435,8 +483,9 @@ _GRAPH = _build_graph()
 ## @brief 상태와 입력을 받아 한 단계 진행한 새 상태 반환
 # - 원본은 바꾸지 않음: LLM 실패·잘못된 입력이면 예외를 던지고 Spring은 마지막 저장 상태를 유지
 # - 검수 전(draft) 지도로는 진단하지 않음: 정답 빈틈의 기준이 확정되지 않았기 때문
+# - seed: 새 세션의 문항 순서 seed(테스트·재현용). 없으면 새로 뽑아 상태에 저장하고, 진행 중 세션에서는 무시
 def step(original: StuckState | None, step_input: StepInput, gateway: Gateway, concept_map: ConceptMap,
-         items: list[Item], now: float) -> StuckState:
+         items: list[Item], now: float, seed: int | None = None) -> StuckState:
     if concept_map.status != 'reviewed':
         raise ValueError('검수를 마친 개념 지도로만 진단할 수 있습니다.')
     if original is None:
@@ -445,7 +494,8 @@ def step(original: StuckState | None, step_input: StepInput, gateway: Gateway, c
         entry = step_input.entry
         if entry.kind == 'roadmap' and entry.concept not in {c.id for c in concept_map.concepts}:
             raise ValueError(f'개념 지도에 없는 개념입니다: {entry.concept}')
-        state = StuckState(entry=entry, stage='identify' if entry.kind == 'excerpt' else 'diagnose', target=entry.concept)
+        state = StuckState(entry=entry, stage='identify' if entry.kind == 'excerpt' else 'diagnose', target=entry.concept,
+                           seed=seed if seed is not None else random.randrange(2 ** 31))
         context = _Context(gateway, concept_map, tuple(items), step_input, now)
         _log(state, context, 'stuck_started', entry.concept, entry_kind=entry.kind)
         if entry.kind == 'roadmap':
