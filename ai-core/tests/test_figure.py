@@ -4,7 +4,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from serving.figure import Figure, check_figure, label_width
+from serving.figure import Figure, check_figure, column_widths, label_width
 from serving.item_bank import Item
 
 QUESTION = '간선이 1→2:6, 1→3:2, 3→2:3인 방향 그래프에서 정점 1부터 정점 2까지의 최단 거리는? 숫자만 쓰세요.'
@@ -57,6 +57,14 @@ class FigureStructureTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValidationError):
                 Figure.model_validate(graph(nodes=[{**nodes[0], **bad}, *nodes[1:]]))
 
+    # 검증 목적: 값이 정해지지 않은 빈 칸(가득 찬 배열의 자리 등)과 이름 없는 표는 허용하고, 다른 모양의 빈 라벨은 거부
+    def test_allows_empty_cell_and_unnamed_table(self):
+        figure = {'nodes': [{'id': f'c{i}', 'label': '', 'shape': 'cell', 'x': i / 2, 'y': 0} for i in range(4)],
+                  'tables': [{'id': 't', 'columns': ['k'], 'x': 0, 'y': 1}]}
+        self.assertEqual(errors(figure, '키 k'), [])
+        with self.assertRaises(ValidationError):
+            Figure.model_validate({'nodes': [{'id': 'a', 'label': '', 'shape': 'box', 'x': 0, 'y': 0}]})
+
     # 검증 목적: 도형도 표도 없는 빈 도식은 그릴 내용이 없으므로 null(도식 없음)로 두게 함
     def test_rejects_empty_figure(self):
         with self.assertRaises(ValidationError):
@@ -78,6 +86,11 @@ class FigureLeakTests(unittest.TestCase):
         found = errors({'tables': [{**table, 'rows': [['a', '4'], ['b', '11']]}]}, question)
         self.assertTrue(any('11' in e for e in found), found)
 
+    # 검증 목적: 지문의 유니코드 빼기(−)와 라벨의 하이픈 빼기(-)를 같은 글자로 보아 음수 가중치 도식을 막지 않음
+    def test_label_match_treats_minus_signs_alike(self):
+        figure = {'nodes': [{'id': 'a', 'label': '-2', 'shape': 'circle', 'x': 0, 'y': 0}]}
+        self.assertEqual(errors(figure, '간선 3→2:−2'), [])
+
     # 검증 목적: 공백·대소문자 차이만 있는 라벨은 지문의 같은 글로 인정해 정상 도식을 막지 않음
     def test_label_match_ignores_spacing_and_case(self):
         question = '준비 큐에는 P2, P3가 있다.'
@@ -96,6 +109,14 @@ class FigureLayoutTests(unittest.TestCase):
         question = '원형 노드 서브넷마스크가 있다.'
         found = errors({'nodes': [{'id': 'a', 'label': '서브넷마스크', 'shape': 'circle', 'x': 0, 'y': 0}]}, question)
         self.assertTrue(any('폭' in e for e in found), found)
+
+    # 검증 목적: 표 열 폭은 가장 긴 값에 맞춰 넓어져(최소 80px) 라우팅 표의 주소 같은 긴 값도 칸 안에 들어감
+    def test_table_columns_widen_for_long_values(self):
+        table = {'id': 't', 'name': '라우팅 표', 'columns': ['목적지', '다음 홉'], 'rows': [['10.20.8.0/21', 'R2']], 'x': 0, 'y': 0}
+        widths = column_widths(Figure.model_validate({'tables': [table]}).tables[0])
+        self.assertGreater(widths[0], 80)
+        self.assertEqual(widths[1], 80)
+        self.assertEqual(errors({'tables': [table]}, '라우팅 표: 목적지 10.20.8.0/21의 다음 홉은 R2'), [])
 
     # 검증 목적: 같은 자리에 겹친 도형은 서로 가리므로 찾아냄; 맞닿은 칸(cell)은 배열처럼 이어 그릴 수 있게 허용
     def test_flags_overlap_but_allows_touching_cells(self):

@@ -12,7 +12,7 @@ export type FigureNode = { id: string; label: string; shape: "box" | "circle" | 
 /** @brief 두 도형(또는 표)을 잇는 선; directed가 거짓이면 화살표 없이 그림 */
 export type FigureEdge = { from: string; to: string; label?: string | null; directed?: boolean };
 /** @brief 이름·열·행이 있는 표; keys 열은 밑줄로 표시 */
-export type FigureTable = { id: string; name: string; columns: string[]; rows?: string[][]; keys?: string[]; x: number; y: number };
+export type FigureTable = { id: string; name?: string; columns: string[]; rows?: string[][]; keys?: string[]; x: number; y: number };
 /** @brief 문항 하나의 도식(문항 은행 figure 필드) */
 export type FigureData = { nodes?: FigureNode[]; edges?: FigureEdge[]; tables?: FigureTable[] };
 
@@ -25,6 +25,9 @@ const SHAPES: Record<FigureNode["shape"], [number, number]> = {
 const TABLE_COL_W = 80;
 const TABLE_ROW_H = 28;
 const TABLE_NAME_H = 24;
+const TABLE_FONT = 13;
+// 한글·한자·전각 문자는 글자 크기만큼, 나머지는 0.6배 폭으로 어림(figure.py label_width와 같은 규칙)
+const WIDE = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/;
 // 그림 둘레 여백: 선 라벨과 테두리가 잘리지 않게 함
 const MARGIN = 16;
 // 좁은 화면에서 줄일 수 있는 최소 폭; 더 줄이면 글자가 읽히지 않으므로 그보다 좁으면 도식만 가로로 밀어 봄
@@ -33,6 +36,13 @@ const MIN_WIDTH = 400;
 const PARALLEL_OFFSET = 7;
 
 type Rect = { left: number; top: number; right: number; bottom: number; round: boolean };
+
+/** @brief 표 열마다 화면 폭; 기본 80px이고 가장 긴 열 이름·값이 좌우 여백 포함 들어가도록 넓힘 */
+function columnWidths(table: FigureTable) {
+  const width = (text: string) => [...text].reduce((sum, ch) => sum + (WIDE.test(ch) ? TABLE_FONT : TABLE_FONT * 0.6), 0);
+  return table.columns.map((column, i) =>
+    Math.max(TABLE_COL_W, Math.ceil(Math.max(...[column, ...(table.rows ?? []).map((row) => row[i])].map(width)) + 12)));
+}
 
 /** @brief 도형·표의 화면 경계 상자 계산; 선을 도형 테두리에서 끊고 viewBox를 정하는 데 씀 */
 function layout(figure: FigureData) {
@@ -47,7 +57,8 @@ function layout(figure: FigureData) {
     const left = table.x * CELL_W;
     const top = table.y * CELL_H;
     const height = TABLE_NAME_H + TABLE_ROW_H * (1 + (table.rows?.length ?? 0));
-    rects.set(table.id, { left, top, right: left + table.columns.length * TABLE_COL_W, bottom: top + height, round: false });
+    const width = columnWidths(table).reduce((sum, w) => sum + w, 0);
+    rects.set(table.id, { left, top, right: left + width, bottom: top + height, round: false });
   }
   const all = [...rects.values()];
   const box = {
@@ -113,19 +124,21 @@ function Shape({ node, rect }: { node: FigureNode; rect: Rect }) {
   );
 }
 
-/** @brief 표 하나: 이름 줄, 열 이름 줄(키 열은 밑줄), 행 값 칸 순서로 그림 */
+/** @brief 표 하나: 이름 줄, 열 이름 줄(키 열은 밑줄), 행 값 칸 순서로 그림; 열 폭은 columnWidths를 따름 */
 function Table({ table }: { table: FigureTable }) {
   const left = table.x * CELL_W;
   const top = table.y * CELL_H + TABLE_NAME_H;
-  const rows = table.rows ?? [];
+  const widths = columnWidths(table);
+  // 열마다 왼쪽 끝 위치(앞 열 폭의 누적 합)
+  const starts = widths.map((_, i) => left + widths.slice(0, i).reduce((sum, w) => sum + w, 0));
   return (
     <g className="figure-table" data-table-id={table.id}>
-      <text className="figure-table-name" x={left} y={top - 8}>{table.name}</text>
-      {[table.columns, ...rows].map((cells, row) => cells.map((value, col) => (
+      {table.name && <text className="figure-table-name" x={left} y={top - 8}>{table.name}</text>}
+      {[table.columns, ...(table.rows ?? [])].map((cells, row) => cells.map((value, col) => (
         <g key={`${row}-${col}`}>
-          <rect className={row === 0 ? "figure-table-head" : undefined} x={left + col * TABLE_COL_W} y={top + row * TABLE_ROW_H} width={TABLE_COL_W} height={TABLE_ROW_H} />
+          <rect className={row === 0 ? "figure-table-head" : undefined} x={starts[col]} y={top + row * TABLE_ROW_H} width={widths[col]} height={TABLE_ROW_H} />
           <text
-            x={left + (col + 0.5) * TABLE_COL_W}
+            x={starts[col] + widths[col] / 2}
             y={top + (row + 0.5) * TABLE_ROW_H}
             // 키 밑줄은 글자 기준선에 맞아야 하므로 중앙 정렬 대신 기준선 + dy로 세로 가운데를 맞춤
             {...(row === 0 && table.keys?.includes(value) && { className: "figure-key", dy: "0.35em" })}

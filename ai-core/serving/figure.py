@@ -3,6 +3,8 @@
 # - 도식은 문항마다 미리 만들어 문항 은행(items-*.jsonl)의 figure 필드에 저장; 실행 중 모델 호출 없음
 # - 좌표를 데이터에 넣어 자동 배치 없이 그림; 프런트 ItemFigure.tsx가 같은 크기 상수로 SVG를 그림
 # - 강조·결과 상태 필드는 두지 않음: 최단 경로 표시나 정답 보기 표시처럼 답을 알려 주는 그림을 데이터로 만들 수 없게 함
+import math
+import re
 import unicodedata
 from typing import Literal
 
@@ -18,7 +20,10 @@ SHAPES = {'box': (88, 40), 'circle': (44, 44), 'cylinder': (72, 48), 'cell': (50
 NODE_FONT, EDGE_FONT, TABLE_FONT = 15, 13, 13
 TABLE_COL_W, TABLE_ROW_H, TABLE_NAME_H = 80, 28, 24
 # 글 최소화를 위한 분량 상한: 라벨은 짧은 이름·숫자만, 도형·선·표 수는 화면 한 장에 읽히는 정도로 제한
-MAX_LABEL, MAX_EDGE_LABEL = 12, 6
+# - 표 값은 IP 주소·접두사(10.20.8.0/21) 같은 값이 들어가도록 조금 더 길게 허용하고, 열 폭이 가장 긴 값에 맞춰 넓어짐
+MAX_LABEL, MAX_EDGE_LABEL, MAX_TABLE_VALUE = 12, 6, 16
+# 한글·한자·전각 문자 범위; 이 글자는 글자 크기만큼, 나머지는 0.6배 폭으로 어림(프런트 ItemFigure.tsx와 같은 규칙)
+WIDE = re.compile('[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]')
 # 겹침 판정 여유(px): 맞닿은 칸은 겹침이 아니고, 선이 도형 모서리를 스치는 정도는 허용
 TOUCH = 2
 
@@ -26,13 +31,20 @@ Coordinate = Field(ge=0, multiple_of=0.5)
 
 
 ## @brief 도형 하나(정점, 칸, 상자 등); 좌표는 격자 칸 단위이고 도형 중심이 그 칸의 가운데에 옴
+# - 빈 라벨은 cell에만 허용: 가득 찬 배열의 자리처럼 값이 정해지지 않은 칸을 그리기 위함
 class FigureNode(BaseModel):
     model_config = ConfigDict(extra='forbid')
     id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,24}$')
-    label: str = Field(min_length=1, max_length=MAX_LABEL)
+    label: str = Field(max_length=MAX_LABEL)
     shape: Literal['box', 'circle', 'cylinder', 'cell', 'text']
     x: float = Coordinate
     y: float = Coordinate
+
+    @model_validator(mode='after')
+    def label_present(self):
+        if not self.label.strip() and self.shape != 'cell':
+            raise ValueError(f'{self.id}: 빈 라벨은 칸(cell)에만 쓸 수 있습니다.')
+        return self
 
 
 ## @brief 두 도형(또는 표)을 잇는 선; directed가 참이면 to 쪽에 화살표를 그림
@@ -45,11 +57,12 @@ class FigureEdge(BaseModel):
 
 
 ## @brief 관계·행 목록 같은 표; (x, y) 칸의 왼쪽 위에서 시작해 이름 줄, 열 이름 줄, 행 순서로 그림
+# - name: 표 위에 적는 이름(선택); 비어 있으면 이름 줄을 비워 둠
 # - keys: 키로 밑줄을 그을 열 이름; 지문이 키를 알려 준 경우에만 씀
 class FigureTable(BaseModel):
     model_config = ConfigDict(extra='forbid')
     id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,24}$')
-    name: str = Field(min_length=1, max_length=MAX_LABEL)
+    name: str = Field(default='', max_length=MAX_LABEL)
     columns: list[str] = Field(min_length=1, max_length=5)
     rows: list[list[str]] = Field(default_factory=list, max_length=6)
     keys: list[str] = Field(default_factory=list)
@@ -67,8 +80,8 @@ class FigureTable(BaseModel):
     def consistent_table(self):
         if any(len(row) != len(self.columns) for row in self.rows):
             raise ValueError(f'{self.id}: 행마다 열 수와 같은 개수의 값이 있어야 합니다.')
-        if any(not value or len(value) > MAX_LABEL for row in self.rows for value in row):
-            raise ValueError(f'{self.id}: 표 값은 1~{MAX_LABEL}자여야 합니다.')
+        if any(not value or len(value) > MAX_TABLE_VALUE for row in self.rows for value in row):
+            raise ValueError(f'{self.id}: 표 값은 1~{MAX_TABLE_VALUE}자여야 합니다.')
         if not set(self.keys) <= set(self.columns):
             raise ValueError(f'{self.id}: 키는 표의 열 이름이어야 합니다.')
         return self
@@ -104,12 +117,18 @@ class Figure(BaseModel):
 
 ## @brief 라벨 글자 폭 어림값(px); 한글·전각 문자는 글자 크기만큼, 영숫자·기호는 0.6배로 셈
 def label_width(text: str, font: int) -> float:
-    return sum(font if unicodedata.east_asian_width(ch) in 'WF' else font * 0.6 for ch in text)
+    return sum(font if WIDE.match(ch) else font * 0.6 for ch in text)
+
+
+## @brief 표 열마다 화면 폭(px); 기본 80px이고 열 이름·값 중 가장 긴 글이 좌우 여백 포함 들어가도록 넓힘
+def column_widths(table: FigureTable) -> list[int]:
+    return [max(TABLE_COL_W, math.ceil(max(label_width(v, TABLE_FONT) for v in (column, *(r[i] for r in table.rows))) + 12))
+            for i, column in enumerate(table.columns)]
 
 
 ## @brief 표의 화면 크기(폭, 높이); 이름 줄 + 열 이름 줄 + 행 수만큼 높이를 잡음
 def table_size(table: FigureTable) -> tuple[int, int]:
-    return len(table.columns) * TABLE_COL_W, TABLE_NAME_H + TABLE_ROW_H * (1 + len(table.rows))
+    return sum(column_widths(table)), TABLE_NAME_H + TABLE_ROW_H * (1 + len(table.rows))
 
 
 ## @brief 도형·표마다 화면 경계 상자(왼쪽, 위, 오른쪽, 아래) 계산; 겹침·격자 범위·선 통과 검사가 함께 씀
@@ -128,7 +147,8 @@ def bounds(figure: Figure) -> dict[str, tuple[float, float, float, float]]:
 
 ## @brief 정답 누설 검사용 정규화; 공백·대소문자·전각/반각 차이만 없애고 글자 자체는 바꾸지 않음
 def _normalize(text: str) -> str:
-    return ''.join(unicodedata.normalize('NFKC', text).split()).lower()
+    # 유니코드 빼기(−)는 NFKC로도 하이픈(-)이 되지 않아 따로 맞춤; 지문은 −2, 모델 라벨은 -2로 쓰는 경우가 많음
+    return ''.join(unicodedata.normalize('NFKC', text).replace('\u2212', '-').split()).lower()
 
 
 ## @brief 선분이 상자를 지나는지 판정(Liang–Barsky 선분 자르기); 양 끝이 아닌 도형을 지나는 선을 찾는 데 씀
@@ -158,7 +178,7 @@ def _segments_cross(a, b, c, d) -> bool:
 
 
 ## @brief 도식을 지문과 대조해 오류 문장 목록 반환(빈 목록이면 통과)
-# - 누설: 모든 라벨·표 글이 지문(question)에 그대로 있어야 함; 계산 결과·정답 보기 글을 그려 넣는 것을 막음
+# - 누설: 모든 라벨·표 글이 지문(question)에 그대로 있어야 함(빈 칸·이름 없는 표는 대조할 글이 없어 건너뜀); 계산 결과·정답 보기 글을 그려 넣는 것을 막음
 #   선택지 글은 허용하지 않음: 보기 하나만 그림에 옮기면 그 보기가 답이라는 신호가 되기 때문
 # - 라벨 폭: 어림 폭이 도형·표 칸 안에 들어가야 함
 # - 겹침: 도형·표 경계 상자가 겹치면 안 되고(맞닿음은 허용), 선이 양 끝이 아닌 도형을 지나거나 다른 선과 엇갈리면 안 됨
@@ -179,9 +199,6 @@ def check_figure(figure: Figure, question: str) -> list[str]:
     for table in figure.tables:
         if label_width(table.name, NODE_FONT) > table_size(table)[0]:
             errors.append(f'표 {table.id}: 이름 "{table.name}"이(가) 표 폭보다 넓습니다.')
-        for value in (*table.columns, *(v for row in table.rows for v in row)):
-            if label_width(value, TABLE_FONT) > TABLE_COL_W - 8:
-                errors.append(f'표 {table.id}: 값 "{value}"이(가) 칸 폭보다 넓습니다.')
 
     boxes = bounds(figure)
     names = list(boxes)

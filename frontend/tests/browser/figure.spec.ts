@@ -87,3 +87,21 @@ test("is a still image without animations", async ({ page }) => {
   await render(page);
   expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
 });
+
+/** @brief 긴 표 값(IP 접두사)은 열 폭을 넓혀 칸 안에 그리고, 이름 없는 표·빈 칸은 빈 글 없이 그리는지 확인 */
+test("widens long table columns and draws unnamed tables and empty cells", async ({ page }) => {
+  const svg = await render(page, {
+    nodes: [{ id: "c0", label: "", shape: "cell", x: 0, y: 3 }, { id: "c1", label: "", shape: "cell", x: 0.5, y: 3 }],
+    tables: [{ id: "r", columns: ["목적지", "다음 홉"], rows: [["10.20.8.0/21", "R2"]], x: 0, y: 0 }],
+  });
+  await expect(svg.locator(".figure-table-name")).toHaveCount(0);
+  const widths = await svg.locator(".figure-table-head").evaluateAll((els) => els.map((el) => Number(el.getAttribute("width"))));
+  expect(widths[0]).toBeGreaterThan(80);
+  expect(widths[1]).toBe(80);
+  const fits = await svg.locator(".figure-table text").evaluateAll((els) => els.every((el) => {
+    const cell = el.previousElementSibling as SVGRectElement;
+    return (el as SVGTextElement).getBBox().width <= Number(cell.getAttribute("width"));
+  }));
+  expect(fits).toBe(true);
+  await expect(svg.locator(".shape-cell rect")).toHaveCount(2);
+});
