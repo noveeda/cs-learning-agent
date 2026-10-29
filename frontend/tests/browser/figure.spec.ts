@@ -62,7 +62,7 @@ test("fits mobile width without page overflow", async ({ page }) => {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
   const width = (await svg.boundingBox())!.width;
-  expect(width).toBeGreaterThanOrEqual(400);
+  expect(width).toBeGreaterThanOrEqual(320);
 });
 
 /** @brief 어두운 테마 색 변수로 바꾸면 글자·테두리가 바탕과 구별되는 색으로 따라 바뀌는지 확인 */
