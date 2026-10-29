@@ -91,6 +91,13 @@ class FigureLeakTests(unittest.TestCase):
         figure = {'nodes': [{'id': 'a', 'label': '-2', 'shape': 'circle', 'x': 0, 'y': 0}]}
         self.assertEqual(errors(figure, '간선 3→2:−2'), [])
 
+    # 검증 목적: 지문의 목록(회의 11개 등)을 빠짐없이 옮길 수 있게 표 행은 12개까지 허용하고 그보다 많으면 거부
+    def test_table_rows_up_to_twelve(self):
+        rows = [[str(i)] for i in range(12)]
+        self.assertEqual(errors({'tables': [{'id': 't', 'columns': ['0'], 'rows': rows, 'x': 0, 'y': 0}]}, '0 1 2 3 4 5 6 7 8 9 10 11'), [])
+        with self.assertRaises(ValidationError):
+            Figure.model_validate({'tables': [{'id': 't', 'columns': ['0'], 'rows': rows + [['1']], 'x': 0, 'y': 0}]})
+
     # 검증 목적: 공백·대소문자 차이만 있는 라벨은 지문의 같은 글로 인정해 정상 도식을 막지 않음
     def test_label_match_ignores_spacing_and_case(self):
         question = '준비 큐에는 P2, P3가 있다.'

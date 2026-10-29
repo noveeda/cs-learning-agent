@@ -64,7 +64,7 @@ class FigureTable(BaseModel):
     id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,24}$')
     name: str = Field(default='', max_length=MAX_LABEL)
     columns: list[str] = Field(min_length=1, max_length=5)
-    rows: list[list[str]] = Field(default_factory=list, max_length=6)
+    rows: list[list[str]] = Field(default_factory=list, max_length=12)
     keys: list[str] = Field(default_factory=list)
     x: float = Coordinate
     y: float = Coordinate
