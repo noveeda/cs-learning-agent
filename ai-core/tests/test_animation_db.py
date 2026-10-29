@@ -102,6 +102,12 @@ class ScenesFileTests(unittest.TestCase):
                     for arrow in frame.arrows:
                         self.assertLessEqual(width(arrow.label or ''), 6, f'{concept} {arrow.label}')
 
+    # 검증 목적: 트랜잭션 장면이 끝난 트랜잭션 이름을 다시 begin하지 않는지 확인(새 트랜잭션은 새 이름)
+    def test_transaction_scenes_never_reuse_names(self):
+        for scene in self.scenes['transaction-acid']:
+            begun = [op['tx'] for op in scene['ops'] if op['op'] == 'begin']
+            self.assertEqual(len(begun), len(set(begun)), scene)
+
     # 검증 목적: 해시 인덱스는 기존 hash_table 장면을 쓰고, 나머지는 새 db_ 장면 종류가 개념에 맞게 쓰였는지 확인
     def test_scene_kinds_match_concepts(self):
         expected = {'relational-model': {'db_table'}, 'sql-query': {'db_table'},
@@ -180,6 +186,8 @@ class TableTests(unittest.TestCase):
         grouped = animation.frames[-2]
         self.assertEqual(table_rows(grouped, '결과'), [[d, str(s)] for d, s in sums.items()])
         self.assertEqual(table_rows(animation.frames[-1], '결과'), [[d, str(s)] for d, s in sums.items() if s >= 500])
+        # HAVING 캡션도 GROUP BY 단계처럼 집계 대상 열까지 적어 SQL 원문(SUM(pay))과 같게 읽히는지 확인
+        self.assertIn('HAVING SUM(pay) >= 500', animation.frames[-1].caption)
         # 그룹으로 모은 단계에서는 같은 dept 행이 이웃해야 함
         depts = [r[1] for r in table_rows(animation.frames[1], 'Emp')]
         self.assertEqual(depts, ['CS', 'CS', 'EE', 'EE', 'ME'])
@@ -401,6 +409,32 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(committed(animation.frames[-1]), {'A': 100, 'B': 80})
         self.assertIn('지속성', animation.frames[-1].caption)
 
+    # 검증 목적: commit은 트랜잭션 값을 removed로 그리지 않고(롤백과 구별), rollback만 removed로 그리는지 확인
+    # - 커밋한 값이 빨간 점선으로 보이면 학생이 커밋을 취소로 오해하기 때문
+    def test_commit_is_not_drawn_as_rollback(self):
+        ops = [{'op': 'begin', 'tx': 'T1'}, {'op': 'write', 'tx': 'T1', 'item': 'A', 'value': 70}, {'op': 'commit', 'tx': 'T1'},
+               {'op': 'begin', 'tx': 'T2'}, {'op': 'write', 'tx': 'T2', 'item': 'A', 'value': 5}, {'op': 'rollback', 'tx': 'T2'}]
+        animation = run({'kind': 'db_transaction', 'items': {'A': 100}, 'ops': ops})
+        commit, rollback = animation.frames[3], animation.frames[6]
+        self.assertNotEqual(next(b.tone for b in commit.boxes if b.id == 'T1A'), 'removed')
+        self.assertEqual(next(b.tone for b in commit.boxes if b.id == 'dbA'), 'new')
+        self.assertEqual(next(b.tone for b in rollback.boxes if b.id == 'T2A'), 'removed')
+
+    # 검증 목적: 쓰기 캡션이 "DB 값은 그대로"라는 일반 규칙이 아니라 다른 트랜잭션이 보는 커밋된 값이 그대로임을 말하는지 확인
+    # - 실제 DBMS는 커밋 전에도 디스크에 쓸 수 있으므로(장애 시 되돌림) 지연 갱신 모델을 일반 규칙처럼 가르치지 않기 위함
+    def test_write_caption_describes_committed_value(self):
+        animation = run({'kind': 'db_transaction', 'items': {'A': 100},
+                         'ops': [{'op': 'begin', 'tx': 'T1'}, {'op': 'write', 'tx': 'T1', 'item': 'A', 'value': 70}]})
+        self.assertIn('다른 트랜잭션', animation.frames[-1].caption)
+        self.assertNotIn('DB 값은 그대로', animation.frames[-1].caption)
+
+    # 검증 목적: 세 번째 트랜잭션 T3를 별도 열(x=7)에 그려, 끝난 트랜잭션 이름을 다시 쓰지 않고 새 트랜잭션을 보여 줄 수 있는지 확인
+    def test_third_transaction_has_own_column(self):
+        ops = [{'op': 'begin', 'tx': 'T1'}, {'op': 'commit', 'tx': 'T1'}, {'op': 'begin', 'tx': 'T3'},
+               {'op': 'read', 'tx': 'T3', 'item': 'A'}]
+        animation = run({'kind': 'db_transaction', 'items': {'A': 100}, 'ops': ops})
+        self.assertEqual(next(b.x for b in animation.frames[-1].boxes if b.id == 'T3A'), 7)
+
     # 검증 목적: 다른 트랜잭션은 커밋 전 값을 읽지 못하고 커밋 뒤에야 새 값을 읽는지 확인(격리성)
     def test_read_sees_only_committed_values(self):
         ops = [{'op': 'begin', 'tx': 'T1'}, {'op': 'write', 'tx': 'T1', 'item': 'A', 'value': 50},
@@ -409,6 +443,8 @@ class TransactionTests(unittest.TestCase):
         read = animation.frames[-1]
         self.assertEqual(next(b.label for b in read.boxes if b.id == 'T2A'), '100')
         self.assertIn('격리성', read.caption)
+        # 커밋된 값만 읽는 방식(read committed·MVCC)이라는 가정을 캡션에 밝히는지 확인
+        self.assertIn('커밋된 값만 읽는', read.caption)
 
     # 검증 목적: 시작하지 않은 트랜잭션의 연산, 이미 진행 중인 트랜잭션의 재시작, 커밋 전 같은 항목 쓰기 충돌을 거부하는지 확인
     def test_invalid_transactions_rejected(self):

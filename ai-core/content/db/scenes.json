@@ -32,6 +32,6 @@
   "transaction-acid": [
     {"kind": "db_transaction", "items": {"A": 100, "B": 50}, "ops": [{"op": "begin", "tx": "T1"}, {"op": "write", "tx": "T1", "item": "A", "value": 70}, {"op": "write", "tx": "T1", "item": "B", "value": 80}, {"op": "rollback", "tx": "T1"}]},
     {"kind": "db_transaction", "items": {"A": 100, "B": 50}, "ops": [{"op": "begin", "tx": "T1"}, {"op": "write", "tx": "T1", "item": "A", "value": 70}, {"op": "commit", "tx": "T1"}, {"op": "begin", "tx": "T2"}, {"op": "write", "tx": "T2", "item": "B", "value": 0}, {"op": "crash"}]},
-    {"kind": "db_transaction", "items": {"A": 100}, "ops": [{"op": "begin", "tx": "T1"}, {"op": "write", "tx": "T1", "item": "A", "value": 50}, {"op": "begin", "tx": "T2"}, {"op": "read", "tx": "T2", "item": "A"}, {"op": "commit", "tx": "T2"}, {"op": "commit", "tx": "T1"}, {"op": "begin", "tx": "T2"}, {"op": "read", "tx": "T2", "item": "A"}]}
+    {"kind": "db_transaction", "items": {"A": 100}, "ops": [{"op": "begin", "tx": "T1"}, {"op": "write", "tx": "T1", "item": "A", "value": 50}, {"op": "begin", "tx": "T2"}, {"op": "read", "tx": "T2", "item": "A"}, {"op": "commit", "tx": "T2"}, {"op": "commit", "tx": "T1"}, {"op": "begin", "tx": "T3"}, {"op": "read", "tx": "T3", "item": "A"}]}
   ]
 }

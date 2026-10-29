@@ -257,7 +257,7 @@ def simulate_table(req: TableRequest) -> Animation:
     parts = [f'{r.name} {len(r.rows)}행' + (f'(기본 키 {", ".join(r.key)})' if r.key else '') for r in relations]
     links = [f'{r.name}.{r.foreign.column} → {r.foreign.table}' for r in relations if r.foreign]
     frames = [relation_frame(relations, '표 ' + ', '.join(parts) + (f', 외래 키 {links[0]}' if links else ''))]
-    grouped = None  # (결과 표, 집계 이름): HAVING이 적용될 바로 앞 GROUP BY 결과
+    grouped = None  # (결과 표, 집계 식 SUM(pay)): HAVING이 적용될 바로 앞 GROUP BY 결과
     for op in req.ops:
         if op.op == 'check_key':
             relation = find_relation(relations, op.table, 'check_key')
@@ -315,15 +315,15 @@ def simulate_table(req: TableRequest) -> Animation:
                 marks = {**{rid: 'active' for rid, _ in members}, result.rows[-1][0]: 'new'}
                 what = f'{label}({op.column or "*"})'
                 frames.append(relation_frame(relations, f'{group} 그룹 {len(members)}행 → {what} = {value}', marks=marks))
-            grouped = (result, label)
+            grouped = (result, f'{label}({op.column or "*"})')
         elif op.op == 'having':
             if not grouped:
                 raise ValueError('having: 먼저 group으로 그룹을 만들어야 합니다')
-            result, label = grouped
+            result, aggregate = grouped
             passed = {rid for rid, values in result.rows if compare(values[1], op.cmp, op.value, 'HAVING')}
             marks = {rid: 'active' if rid in passed else 'removed' for rid, _ in result.rows}
             frames.append(relation_frame(
-                relations, f'HAVING {label} {op.cmp} {op.value}: 그룹 조건으로 {len(passed)}그룹만 남김', marks=marks))
+                relations, f'HAVING {aggregate} {op.cmp} {op.value}: 그룹 조건으로 {len(passed)}그룹만 남김', marks=marks))
             result.rows = [row for row in result.rows if row[0] in passed]
         else:
             relation = find_relation(relations, op.table, 'project')
@@ -799,7 +799,8 @@ def simulate_hash_index(req: HashIndexRequest) -> Animation:
 # --- 트랜잭션(db_transaction): COMMIT·ROLLBACK·장애와 ACID ---
 
 Item = Literal['A', 'B', 'C']
-Tx = Literal['T1', 'T2']
+# 트랜잭션 이름: 끝난 트랜잭션 이름을 다시 쓰지 않고 새 트랜잭션을 보여 줄 수 있게 세 개까지 둠
+Tx = Literal['T1', 'T2', 'T3']
 
 
 ## @brief 트랜잭션 시작·확정·취소
@@ -828,7 +829,7 @@ class CrashOp(Strict):
     op: Literal['crash']
 
 
-## @brief 트랜잭션 장면. 항목 3개·트랜잭션 2개·연산 10개는 한 화면에서 값 흐름을 따라갈 수 있는 분량
+## @brief 트랜잭션 장면. 항목 3개·트랜잭션 3개·연산 10개는 한 화면에서 값 흐름을 따라갈 수 있는 분량
 # - 같은 항목을 두 트랜잭션이 동시에 쓰는 경우(잠금 대기)는 그리지 않고 거부함
 class TransactionRequest(Strict):
     kind: Literal['db_transaction']
@@ -837,13 +838,15 @@ class TransactionRequest(Strict):
                                                                                                        max_length=10)
 
 
-# 트랜잭션 열 위치: DB(커밋된 값) x=1, T1 x=3, T2 x=5
-TX_COLUMN = {'T1': 3, 'T2': 5}
+# 트랜잭션 열 위치: DB(커밋된 값) x=1, T1 x=3, T2 x=5, T3 x=7
+TX_COLUMN = {'T1': 3, 'T2': 5, 'T3': 7}
 
 
 ## @brief 트랜잭션 화면: 행마다 항목 하나, DB 열은 커밋된 값, T 열은 그 트랜잭션이 읽거나 쓴 값, 맨 아래는 상태
-# - tones: 상자 id → tone. views에 없는 상자도 removed로 남길 수 있게 dropped(트랜잭션 → 보기)를 따로 받음
-def tx_frame(committed, views, status, caption, tones=None, dropped=None, arrows=()) -> Frame:
+# - tones: 상자 id → tone
+# - leaving: 이번 단계에 끝나는 트랜잭션 → (보기, tone). 상태에서는 빠졌지만 이 단계에만 그 열 값을 보여 줌
+#   commit은 normal(값이 DB로 옮겨 감), rollback·장애는 removed(값이 버려짐)로 구별해 커밋을 취소로 오해하지 않게 함
+def tx_frame(committed, views, status, caption, tones=None, leaving=None, arrows=()) -> Frame:
     tones = tones or {}
     names = sorted(committed)
     boxes = [Box(id='hDB', label='DB', x=1, y=0, shape='label')]
@@ -851,10 +854,11 @@ def tx_frame(committed, views, status, caption, tones=None, dropped=None, arrows
     for y, item in enumerate(names, start=1):
         boxes.append(Box(id=f'i{item}', label=item, x=0, y=y, shape='label'))
         boxes.append(Box(id=f'db{item}', label=str(committed[item]), x=1, y=y, shape='cell', tone=tones.get(f'db{item}', 'normal')))
-    for tx, view in list(views.items()) + list((dropped or {}).items()):
+    shown = [(tx, view, None) for tx, view in views.items()] + [(tx, view, tone) for tx, (view, tone) in (leaving or {}).items()]
+    for tx, view, ending in shown:
         for item, value in view.items():
             box_id = f'{tx}{item}'
-            tone = 'removed' if dropped and tx in dropped else tones.get(box_id, 'normal')
+            tone = ending or tones.get(box_id, 'normal')
             boxes.append(Box(id=box_id, label=str(value), x=TX_COLUMN[tx], y=1 + names.index(item), shape='cell', tone=tone))
     boxes += [Box(id=f's{tx}', label=state, x=TX_COLUMN[tx], y=len(names) + 2, shape='label') for tx, state in status.items()]
     return Frame(boxes=boxes, arrows=list(arrows), caption=caption)
@@ -866,7 +870,10 @@ def assigns(values: dict) -> str:
 
 
 ## @brief 트랜잭션 장면 실행. 쓰기는 트랜잭션 열에만 남기고 commit 때 DB 열로 옮김(커밋 전 값은 다른 트랜잭션에 안 보임)
-# - rollback·장애는 트랜잭션 열을 removed로 지우고 DB 열은 그대로 둠: 원자성(전부 아니면 전무)·지속성(커밋은 남음)
+# - 단순화 모델: DB 열은 "커밋된 값(다른 트랜잭션이 읽는 값)"이고, 읽기는 커밋된 값만 읽는 방식(read committed·MVCC)을 가정
+#   실제 DBMS는 커밋 전에도 디스크에 쓸 수 있고 장애 시 되돌림. 그래서 캡션은 "디스크 값"이 아니라 "커밋된 값"으로 말함
+# - commit은 트랜잭션 열 값을 normal로 둔 채 DB 열로 화살표를 그리고, rollback·장애만 removed로 지움
+#   원자성(전부 아니면 전무)·지속성(커밋은 남음)
 def simulate_transaction(req: TransactionRequest) -> Animation:
     committed = dict(req.items)
     views, writes, status = {}, {}, {}
@@ -896,7 +903,8 @@ def simulate_transaction(req: TransactionRequest) -> Animation:
             if other:
                 raise ValueError(f'write {op.item}: {other}이(가) 커밋하지 않은 항목이라 쓸 수 없습니다(잠금 대기는 그리지 않음)')
             views[op.tx][op.item] = writes[op.tx][op.item] = op.value
-            frame(f'{op.tx} write {op.item}={op.value}: 커밋 전이라 DB 값은 그대로', tones={f'{op.tx}{op.item}': 'new'})
+            frame(f'{op.tx} write {op.item}={op.value}: 커밋 전 → 다른 트랜잭션이 보는 커밋된 값은 그대로',
+                  tones={f'{op.tx}{op.item}': 'new'})
         elif op.op == 'read':
             require(op.tx, 'read')
             check_item(op.item, 'read')
@@ -905,7 +913,7 @@ def simulate_transaction(req: TransactionRequest) -> Animation:
                 continue
             views[op.tx][op.item] = committed[op.item]
             other = next((tx for tx in writes if tx != op.tx and op.item in writes[tx]), None)
-            why = f'{other}의 커밋 전 값은 안 보임(격리성)' if other else '커밋된 값'
+            why = f'커밋된 값만 읽는 방식이라 {other}의 커밋 전 값은 안 보임(격리성)' if other else '커밋된 값'
             frame(f'{op.tx} read {op.item} = {committed[op.item]}: {why}', tones={f'{op.tx}{op.item}': 'active'},
                   arrows=[Arrow(source=f'db{op.item}', target=f'{op.tx}{op.item}', label='read')])
         elif op.op in ('commit', 'rollback'):
@@ -915,19 +923,20 @@ def simulate_transaction(req: TransactionRequest) -> Animation:
                 committed.update(changed)
                 status[op.tx] = '커밋'
                 caption = (f'{op.tx} commit: {assigns(changed)} DB에 확정' if changed else f'{op.tx} commit: 바꾼 값 없음')
-                frame(caption, tones={f'db{item}': 'new' for item in changed}, dropped={op.tx: view})
+                frame(caption, tones={f'db{item}': 'new' for item in changed}, leaving={op.tx: (view, 'normal')},
+                      arrows=[Arrow(source=f'{op.tx}{item}', target=f'db{item}', label='commit') for item in changed])
             else:
                 status[op.tx] = '취소'
                 caption = (f'{op.tx} rollback: {assigns(changed)} 모두 취소 → DB 그대로(원자성)' if changed
                            else f'{op.tx} rollback: 취소할 변경 없음')
-                frame(caption, tones={f'db{item}': 'active' for item in changed}, dropped={op.tx: view})
+                frame(caption, tones={f'db{item}': 'active' for item in changed}, leaving={op.tx: (view, 'removed')})
         else:
             lost = sorted(views)
-            dropped = {tx: views.pop(tx) for tx in lost}
+            leaving = {tx: (views.pop(tx), 'removed') for tx in lost}
             writes.clear()
             status.update({tx: '취소' for tx in lost})
-            caption = '장애 → 재시작: 커밋된 값 유지(지속성)' + (f', {", ".join(lost)} 변경 취소(원자성)' if lost else '')
-            frame(caption, tones={f'db{item}': 'active' for item in committed}, dropped=dropped)
+            caption = '장애 → 재시작: 커밋된 값 유지(지속성)' + (f', 커밋 안 한 {", ".join(lost)} 변경은 되돌림(원자성)' if lost else '')
+            frame(caption, tones={f'db{item}': 'active' for item in committed}, leaving=leaving)
     return build_animation('db_transaction', '트랜잭션과 ACID', frames)
 
 
