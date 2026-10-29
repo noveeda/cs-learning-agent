@@ -112,6 +112,15 @@ class FigureLayoutTests(unittest.TestCase):
         found = errors(graph(nodes=line, edges=[{'from': 'n1', 'to': 'n2', 'label': '6'}]))
         self.assertTrue(any('지나' in e for e in found), found)
 
+    # 검증 목적: 두 선이 엇갈리면 선 라벨이 겹쳐 어느 값이 어느 선인지 헷갈리므로 찾아냄; 끝점을 공유하는 선은 교차가 아님
+    def test_flags_crossing_edges(self):
+        square = [{'id': f'n{i}', 'label': str(i), 'shape': 'circle', 'x': x, 'y': y}
+                  for i, (x, y) in enumerate(((0, 0), (2, 0), (2, 2), (0, 2)), 1)]
+        crossing = errors({'nodes': square, 'edges': [{'from': 'n1', 'to': 'n3'}, {'from': 'n2', 'to': 'n4'}]}, '1 2 3 4')
+        self.assertTrue(any('교차' in e for e in crossing), crossing)
+        ring = [{'from': 'n1', 'to': 'n2'}, {'from': 'n2', 'to': 'n3'}, {'from': 'n3', 'to': 'n4'}, {'from': 'n4', 'to': 'n1'}]
+        self.assertEqual(errors({'nodes': square, 'edges': ring}, '1 2 3 4'), [])
+
 
 class ItemFigureTests(unittest.TestCase):
     ## @brief 검증용 최소 단답 진단 문항

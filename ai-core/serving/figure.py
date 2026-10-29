@@ -150,11 +150,19 @@ def _crosses(x1, y1, x2, y2, box) -> bool:
     return True
 
 
+## @brief 두 선분이 서로의 안쪽에서 엇갈리는지 판정(방향 부호 비교); 끝점을 공유하거나 맞닿기만 하는 경우는 교차가 아님
+def _segments_cross(a, b, c, d) -> bool:
+    def side(p, q, r):
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+    return side(a, b, c) * side(a, b, d) < 0 and side(c, d, a) * side(c, d, b) < 0
+
+
 ## @brief 도식을 지문과 대조해 오류 문장 목록 반환(빈 목록이면 통과)
 # - 누설: 모든 라벨·표 글이 지문(question)에 그대로 있어야 함; 계산 결과·정답 보기 글을 그려 넣는 것을 막음
 #   선택지 글은 허용하지 않음: 보기 하나만 그림에 옮기면 그 보기가 답이라는 신호가 되기 때문
 # - 라벨 폭: 어림 폭이 도형·표 칸 안에 들어가야 함
-# - 겹침: 도형·표 경계 상자가 겹치면 안 되고(맞닿음은 허용), 선이 양 끝이 아닌 도형을 지나면 안 됨
+# - 겹침: 도형·표 경계 상자가 겹치면 안 되고(맞닿음은 허용), 선이 양 끝이 아닌 도형을 지나거나 다른 선과 엇갈리면 안 됨
+#   선이 엇갈리면 가운데에 놓이는 선 라벨끼리 겹쳐 어느 값이 어느 선인지 헷갈리기 때문
 def check_figure(figure: Figure, question: str) -> list[str]:
     errors = []
     allowed = _normalize(question)
@@ -182,9 +190,13 @@ def check_figure(figure: Figure, question: str) -> list[str]:
             (l1, t1, r1, b1), (l2, t2, r2, b2) = boxes[a], boxes[b]
             if l1 < r2 - TOUCH and l2 < r1 - TOUCH and t1 < b2 - TOUCH and t2 < b1 - TOUCH:
                 errors.append(f'{a}와(과) {b}가 겹칩니다.')
-    for edge in figure.edges:
-        (l1, t1, r1, b1), (l2, t2, r2, b2) = boxes[edge.source], boxes[edge.target]
-        x1, y1, x2, y2 = (l1 + r1) / 2, (t1 + b1) / 2, (l2 + r2) / 2, (t2 + b2) / 2
+    centers = {k: ((left + right) / 2, (top + bottom) / 2) for k, (left, top, right, bottom) in boxes.items()}
+    for i, edge in enumerate(figure.edges):
+        (x1, y1), (x2, y2) = centers[edge.source], centers[edge.target]
+        for other_edge in figure.edges[i + 1:]:
+            if _segments_cross(centers[edge.source], centers[edge.target],
+                               centers[other_edge.source], centers[other_edge.target]):
+                errors.append(f'선 {edge.source}→{edge.target}과(와) 선 {other_edge.source}→{other_edge.target}이(가) 교차합니다.')
         for other, (left, top, right, bottom) in boxes.items():
             if other not in (edge.source, edge.target) and _crosses(
                     x1, y1, x2, y2, (left + TOUCH, top + TOUCH, right - TOUCH, bottom - TOUCH)):
