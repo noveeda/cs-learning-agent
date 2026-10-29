@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "seed": 0,
+  "concepts": [
+    "btree-index",
+    "ip-subnet",
+    "linked-list",
+    "memory-address",
+    "memory-hierarchy",
+    "network-layers",
+    "normalization",
+    "process-state",
+    "round-robin",
+    "virtual-memory-pages"
+  ]
+}
