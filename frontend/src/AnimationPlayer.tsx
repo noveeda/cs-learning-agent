@@ -17,6 +17,7 @@ import {
   CELL_HEIGHT,
   CELL_WIDTH,
   clampStep,
+  compactRows,
   fitViewBox,
   squeezesLabel,
   trackBoxes,
@@ -127,12 +128,14 @@ export function AnimationPlayer({ animation }: { animation: AnimationData }) {
   const [playing, setPlaying] = useState(false);
   const reduced = useReducedMotion();
   const markerId = useId();
-  const total = animation.frames.length;
+  // 빈 행을 접은 표시용 프레임; 이후 그리기·크기 계산은 모두 이 좌표를 씀(원본 animation은 그대로)
+  const frames = useMemo(() => compactRows(animation.frames), [animation]);
+  const total = frames.length;
   const current = clampStep(step, total);
-  const frame = animation.frames[current];
-  const tracked = useMemo(() => trackBoxes(animation.frames), [animation]);
+  const frame = frames[current];
+  const tracked = useMemo(() => trackBoxes(frames), [frames]);
   const visible = useTransitionBoxes(tracked[current], reduced);
-  const { width, height } = fitViewBox(animation.frames);
+  const { y, width, height } = fitViewBox(frames);
   const boxes = new Map(frame.boxes.map((box) => [box.id, box]));
   /** @brief 상대 단계로 이동하고 자동 재생 정지; 읽던 단계가 남은 타이머에 의해 바뀌는 현상 방지 */
   const go = (offset: number) => {
@@ -170,7 +173,7 @@ export function AnimationPlayer({ animation }: { animation: AnimationData }) {
       <figcaption className="animation-title">{animation.title}</figcaption>
       <svg
         className="animation-canvas"
-        viewBox={`0 0 ${width} ${height}`}
+        viewBox={`0 ${y} ${width} ${height}`}
         // 화면 폭이 좁으면 비율을 유지한 채 줄이고, 넓어도 원래 크기 이상으로 키우지 않음
         style={{ maxWidth: width }}
         role="img"

@@ -459,20 +459,33 @@ export function StuckPanel({
                 반영했어요.
               </p>
             )}
-            <h3>보충할 빈틈</h3>
-            {view.gaps.length ? (
-              <ol className="stuck-gaps">
-                {view.gaps.map((gap) => (
-                  <li key={gap.id}>{gap.title}</li>
-                ))}
-              </ol>
+            {view.root ? (
+              // 1단계 개념: 진단할 선수 개념이 없어 문항 없이 왔으므로, 진단 실패처럼 보이는 "빈틈 없음" 대신 이유를 알려 줌
+              <p className="stuck-help">
+                {view.target.title}은(는) 먼저 알아야 할 선수 개념이 없는 기초
+                개념이에요. 다른 방식으로 다시 설명할게요.
+              </p>
             ) : (
-              <p className="stuck-help">선수 개념에서 빈틈을 찾지 못했어요.</p>
+              <>
+                <h3>보충할 빈틈</h3>
+                {view.gaps.length ? (
+                  <ol className="stuck-gaps">
+                    {view.gaps.map((gap) => (
+                      <li key={gap.id}>{gap.title}</li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="stuck-help">
+                    선수 개념에서 빈틈을 찾지 못했어요.
+                  </p>
+                )}
+                <p className="stuck-help">
+                  빈틈은 선수 개념부터 차례로 보충하고, 마지막에{" "}
+                  {view.target.title}
+                  을(를) 다시 확인해요.
+                </p>
+              </>
             )}
-            <p className="stuck-help">
-              빈틈은 선수 개념부터 차례로 보충하고, 마지막에 {view.target.title}
-              을(를) 다시 확인해요.
-            </p>
             {view.evidence.length > 0 && (
               <>
                 <h3>이렇게 판단했어요</h3>

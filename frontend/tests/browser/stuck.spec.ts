@@ -462,6 +462,36 @@ test("이미 알아요·바로 설명은 문항 없이 해당 입력만 보냄",
   ]);
 });
 
+test("1단계 개념(선수 개념 없음)은 빈틈 없음 대신 기초 개념 안내를 보여 줌", async ({
+  page,
+}) => {
+  await mockStuck(
+    page,
+    {
+      stage: "remediate",
+      view: {
+        ...views.diagnosis,
+        target: { id: "recursion", title: "재귀" },
+        gaps: [],
+        evidence: [],
+        root: true,
+      },
+    },
+    [],
+  );
+  await openStackLesson(page);
+  await page.getByRole("button", { name: "막혔어요", exact: true }).click();
+  const sheet = panel(page);
+  await expect(sheet).toContainText(
+    "재귀은(는) 먼저 알아야 할 선수 개념이 없는 기초 개념이에요. 다른 방식으로 다시 설명할게요.",
+  );
+  // 진단할 선수 개념이 없으므로 빈틈 목록·빈틈 없음 문구·선수 개념 보충 순서 안내는 보이지 않음
+  await expect(sheet).not.toContainText("빈틈을 찾지 못했어요");
+  await expect(sheet).not.toContainText("보충할 빈틈");
+  await expect(sheet).not.toContainText("빈틈은 선수 개념부터");
+  await expect(sheet.getByRole("button", { name: "보충 시작" })).toBeVisible();
+});
+
 test("E2 붙여넣기: 지원 범위 밖 안내 후 원래 학습으로 돌아감", async ({
   page,
 }) => {
