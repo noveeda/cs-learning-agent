@@ -1,6 +1,7 @@
 /**
  * @file
  * @brief 개념 지도 조회·대화 복구·질문 전송과 NDJSON 스트림 해석; 화면 컴포넌트와 통신 처리 분리
+ * - 근거 하네스(AI core CS_HARNESS=1)의 진행 상태(status)·교재 그림(figure)도 여기서 해석
  */
 import type { AnimationData } from './animation';
 import type { Concept } from './roadmap';
@@ -9,8 +10,20 @@ export type ChatMessage = { role: 'user' | 'assistant'; content: string };
 export type Artifact = { artifact_id: string; kind?: 'diagram'; url: string; diagram: { title: string } };
 /** @brief 애니메이션 artifact; AI core create_animation 결과로 SVG 경로 없이 프레임(animation)을 직접 담음 */
 export type AnimationArtifact = { artifact_id: string; kind: 'animation'; animation: AnimationData };
-// 채팅 답변에 붙는 artifact는 둘 중 하나; kind로 구분하고 도식 쪽은 kind가 없던 기존 저장값도 그대로 받음
-export type ChatArtifact = Artifact | AnimationArtifact;
+/** @brief 교재 그림 artifact; 하네스가 검색한 교재 PNG를 url로 받고 캡션·출처(교재명·저자·절·라이선스)를 함께 표시 */
+export type FigureArtifact = {
+  artifact_id: string; kind: 'figure'; url: string;
+  figure: { title: string; caption: string; source: string };
+};
+// 채팅 답변에 붙는 화면 artifact는 셋 중 하나; kind로 구분하고 도식 쪽은 kind가 없던 기존 저장값도 그대로 받음
+export type ChatArtifact = Artifact | AnimationArtifact | FigureArtifact;
+/**
+ * @brief 하네스 근거 기록 artifact; 다음 질문이 직전 개념·문단을 이어받도록 Spring 이력에만 저장되는 데이터
+ * - 화면에 보일 그림이 아니므로 스트림·복구에서 화면 artifact로 쓰지 않음
+ */
+type GroundingArtifact = { artifact_id: string; kind: 'grounding' };
+/** @brief 하네스 진행 단계; check는 몇 번째 문장(index, 1부터)을 전체(total) 중에 확인하는지 함께 옴 */
+export type HarnessStatus = { type: 'status'; stage: string; index?: number; total?: number };
 export type Message = ChatMessage & { artifact?: ChatArtifact; failed?: boolean };
 export type AgentEvent =
   | { type: 'started' | 'done' | 'text_start' }
@@ -18,6 +31,7 @@ export type AgentEvent =
   | { type: 'tool_finished'; name: string; ok: boolean }
   | { type: 'tool_error'; name?: string; error: string }
   | ({ type: 'artifact' } & ChatArtifact)
+  | HarnessStatus
   | { type: 'answer' | 'text_delta'; text: string }
   | { type: 'context'; input_tokens: number; dropped_messages: number; context_limit: number }
   | { type: 'error'; message: string };
@@ -27,14 +41,35 @@ export function isAnimationArtifact(artifact: ChatArtifact): artifact is Animati
   return artifact.kind === 'animation';
 }
 
+/** @brief 화면이 도식 패널을 교재 그림(캡션·출처·PNG 저장) 모양으로 보여 줘야 하는 artifact인지 판단 */
+export function isFigureArtifact(artifact: ChatArtifact): artifact is FigureArtifact {
+  return artifact.kind === 'figure';
+}
+
 /** @brief 대화 속 artifact 버튼·패널 제목; 종류마다 제목이 담긴 위치가 달라 한곳에서 꺼냄 */
 export function artifactTitle(artifact: ChatArtifact): string {
-  return isAnimationArtifact(artifact) ? artifact.animation.title : artifact.diagram.title;
+  if (isAnimationArtifact(artifact)) return artifact.animation.title;
+  return isFigureArtifact(artifact) ? artifact.figure.title : artifact.diagram.title;
 }
 
 /** @brief 패널 열기 버튼·안내 문구에 쓰는 artifact 종류 이름 */
-export function artifactNoun(artifact: ChatArtifact): '도식' | '애니메이션' {
-  return isAnimationArtifact(artifact) ? '애니메이션' : '도식';
+export function artifactNoun(artifact: ChatArtifact): '도식' | '애니메이션' | '그림' {
+  if (isAnimationArtifact(artifact)) return '애니메이션';
+  return isFigureArtifact(artifact) ? '그림' : '도식';
+}
+
+// 하네스 단계별 진행 문구; 단계 이름은 AI core harness.answer의 status 이벤트와 같음
+const HARNESS_STAGES: Record<string, string> = {
+  scope: '질문 범위 확인 중', search: '근거 찾는 중', write: '설명 쓰는 중', check: '확인 중',
+};
+
+/**
+ * @brief 하네스 status 이벤트를 진행 문구로 바꿈; 모르는 단계는 빈 문자열(직전 문구 유지)
+ * - 문장 확인은 한 문장씩 판정·수정하느라 오래 걸리므로 몇 번째 문장인지 보여 멈춘 것이 아님을 알림
+ */
+export function harnessProgress(event: HarnessStatus): string {
+  const label = HARNESS_STAGES[event.stage] ?? '';
+  return label && event.index && event.total ? `${label} (${event.index}/${event.total})` : label;
 }
 
 /**
@@ -107,9 +142,10 @@ export async function loadConversation(id: string): Promise<Message[]> {
   const response = await fetch(`/api/conversations/${id}`, { cache: 'no-store' });
   if (!response.ok) throw new Error('대화를 불러오지 못했습니다. 새로고침해 주세요.');
   const conversation = await response.json();
-  return conversation.messages.map((m: ChatMessage & { status: string; artifacts?: ChatArtifact[] }) => ({
+  return conversation.messages.map((m: ChatMessage & { status: string; artifacts?: (ChatArtifact | GroundingArtifact)[] }) => ({
     role: m.role, content: m.content, failed: m.status !== 'complete',
-    artifact: m.artifacts?.at(-1),
+    // 근거 기록(grounding)은 답 끝에 저장되므로 빼지 않으면 그림 대신 마지막 artifact가 됨
+    artifact: m.artifacts?.filter((a) => a.kind !== 'grounding').at(-1),
   }));
 }
 
@@ -130,7 +166,9 @@ export async function requestChat(
   /** @brief 완성된 JSON 한 줄을 해석해 결과를 누적하고 화면에 진행 이벤트 전달 */
   function accept(line: string) {
     if (!line.trim()) return;
-    const event: AgentEvent = JSON.parse(line);
+    const event: AgentEvent | ({ type: 'artifact' } & GroundingArtifact) = JSON.parse(line);
+    // 근거 기록은 Spring이 저장만 하면 되는 데이터라 화면 이벤트·결과 artifact에서 뺌
+    if (event.type === 'artifact' && event.kind === 'grounding') return;
     if (event.type === 'error') throw new Error(event.message);
     if (event.type === 'answer') answer = event.text;
     if (event.type === 'artifact') artifact = event;
