@@ -7,6 +7,7 @@ import { ArrowUpRight, BookOpen, RotateCcw } from "lucide-react";
 import {
   diagnosisHighlights,
   filterBySubject,
+  hideDeepConcepts,
   layoutConcepts,
   listSubjects,
   statusLabels,
@@ -55,7 +56,7 @@ export function ConceptMapStatus({
 
 /** @brief 선택 상태와 일시적인 호버·초점을 분리해 지도와 상세 패널 렌더링 */
 export function Roadmap({
-  concepts,
+  concepts: allConcepts,
   state,
   onSelect,
   onStatusChange,
@@ -74,6 +75,8 @@ export function Roadmap({
   diagnosis: RoadmapDiagnosis | null;
   onStuck: (concept: Concept) => void;
 }) {
+  // 과목 안 6단계 이상 개념은 지도·상세 패널·선수 이름에서 모두 뺌; 숨긴 개념이 선수·후속 목록에 남아 고를 수 없는 링크가 되지 않게 함
+  const concepts = useMemo(() => hideDeepConcepts(allConcepts), [allConcepts]);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   // 과목 필터("all" 또는 과목 ID); 저장하지 않는 화면 상태라 새로고침하면 전체로 돌아감
