@@ -54,6 +54,35 @@ export function filterBySubject(concepts: Concept[], subject: string): Concept[]
   }));
 }
 
+// 로드맵에 보이는 과목 안 단계의 끝(선수 관계가 없는 개념이 1단계)
+// - 시연·학습 화면에 개념이 너무 많아 깊은 개념(현재 자료구조 18개)을 가리기 위한 표시 제한; AI core 지도·문항은 그대로 둠
+export const MAX_VISIBLE_LEVEL = 5;
+
+/**
+ * @brief 과목 안 선수 관계 단계가 MAX_VISIBLE_LEVEL 이하인 개념만 남기고, 숨긴 개념을 가리키는 선수 관계는 뺀 사본 반환
+ * - 단계는 같은 과목 선수 개념만으로 셈: 운영체제 개념이 자료구조 큐를 선수로 둬도 과목 안에서는 1단계
+ * - 숨긴 개념의 후속 개념은 늘 더 깊어 함께 숨겨지므로, 남은 개념끼리의 선은 끊기지 않음
+ * - 원본 개념은 바꾸지 않음
+ */
+export function hideDeepConcepts(concepts: Concept[]): Concept[] {
+  const byId = new Map(concepts.map((concept) => [concept.id, concept]));
+  const levels = new Map<string, number>();
+  const level = (id: string): number => {
+    if (!levels.has(id)) {
+      const concept = byId.get(id)!;
+      const inSubject = concept.prerequisites.filter((p) => byId.get(p.id)?.subject === concept.subject);
+      levels.set(id, inSubject.length ? Math.max(...inSubject.map((p) => level(p.id))) + 1 : 1);
+    }
+    return levels.get(id)!;
+  };
+  const shown = concepts.filter((concept) => level(concept.id) <= MAX_VISIBLE_LEVEL);
+  const ids = new Set(shown.map((concept) => concept.id));
+  return shown.map((concept) => ({
+    ...concept,
+    prerequisites: concept.prerequisites.filter((p) => ids.has(p.id)),
+  }));
+}
+
 /** @brief 단계(layer)와 같은 줄 안의 가로 위치(x, 줄 가운데가 0) */
 export type ConceptLayout = {
   layers: string[][];

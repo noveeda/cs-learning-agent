@@ -25,7 +25,7 @@ $$
 // 실제 UI를 그리되 모델·운영 저장소에 의존하지 않는 고정 API 응답 사용
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/concept-map", (route) =>
-    route.fulfill({ json: { ...conceptMap, stuck_supported: ["stack"] } }),
+    route.fulfill({ json: { ...conceptMap, stuck_supported: ["linked-list"] } }),
   );
   await page.route("**/api/conversations/*", (route) =>
     route.fulfill({ json: { messages: [] } }),
@@ -97,18 +97,18 @@ test("스트리밍 중과 최종 답변에서 같은 표·수식·강조를 표�
 
 for (const kind of ["remediation", "summary"] as const) {
   test(`막힘 ${kind}: 공통 표·수식·강조와 패널 내부 스크롤`, async ({ page }) => {
-    const concept = { id: "stack", title: "스택" };
+    const concept = { id: "linked-list", title: "연결 리스트" };
     const view = kind === "remediation"
       ? { kind, text: answer, concept, attempt: 1, is_target: true }
-      : { kind, text: answer, results: [], return_to: "#/learn?concept=stack" };
+      : { kind, text: answer, results: [], return_to: "#/learn?concept=linked-list" };
     await page.route("**/api/stuck/sessions", (route) => route.fulfill({ json: {
       id: "0123456789abcdef0123456789abcdef", version: 1,
       stage: kind === "remediation" ? "check" : "complete", view,
-      entry: { kind: "roadmap", concept: "stack", return_to: "#/learn?concept=stack" },
+      entry: { kind: "roadmap", concept: "linked-list", return_to: "#/learn?concept=linked-list" },
     } }));
     // 저장된 대화가 없는 개념 직링크는 로드맵으로 돌아가므로 실제 학습 시작으로 대화 ID를 먼저 저장
     await page.goto("/#/roadmap");
-    await page.getByRole("button", { name: "스택 · 미학습", exact: true }).click();
+    await page.getByRole("button", { name: "연결 리스트 · 미학습", exact: true }).click();
     await page.getByRole("button", { name: "학습 시작", exact: true }).click();
     await page.getByRole("button", { name: "막혔어요", exact: true }).click();
     const content = page.locator(".stuck-text");
