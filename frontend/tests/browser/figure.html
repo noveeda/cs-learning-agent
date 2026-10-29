@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- 문항 도식 브라우저 테스트·확인용 고정 페이지: 개발 서버에서만 열리고 vite build 입력(index.html)에는 들어가지 않음 -->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>문항 도식 확인</title>
+    <!-- 앱(style.css)과 같은 한글 글꼴; 테스트 브라우저에 설치된 한글 글꼴이 없어도 라벨이 보이게 함 -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600&display=swap" />
+  </head>
+  <body>
+    <main id="root"></main>
+    <script type="module">
+      import "/src/tokens.css";
+      import { createElement } from "react";
+      import { createRoot } from "react-dom/client";
+      import { ItemFigure } from "/src/ItemFigure.tsx";
+
+      const root = createRoot(document.getElementById("root"));
+      // 테스트가 figure 데이터를 넣어 그리게 하는 진입점; 그린 뒤 다음 화면 갱신까지 기다림
+      window.renderFigure = (figure) => new Promise((resolve) => {
+        root.render(createElement(ItemFigure, { figure }));
+        document.fonts.ready.then(() => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      });
+      window.figureReady = true;
+    </script>
+  </body>
+</html>

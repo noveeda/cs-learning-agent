@@ -160,6 +160,16 @@ class ExplainTests(unittest.TestCase):
         gw.explain(STACK, 1, ENTRY)
         self.assertEqual(retriever.excludes[-1], set())
 
+    # 검증 목적: 1차 보충 없이 시작해(1단계 개념은 설명 차례 2부터) 쓴 문단 기억이 이어져도, 남은 문단이 없으면
+    # 기억을 비우고 상위 문단부터 다시 써서 근거 없음 문구로 끝나지 않는지 확인
+    def test_exhausted_passages_start_over(self):
+        retriever = FakeRetriever()
+        gw = gateway(retriever=retriever)
+        for attempt in (2, 3, 4) * len(PASSAGES):
+            self.assertNotEqual(gw.explain(STACK, attempt, ENTRY), NO_SOURCE_TEXT)
+        # 첫 호출 뒤에도 빈 exclude로 다시 검색한 적이 있어야 함(기억을 비우고 처음부터)
+        self.assertIn(set(), retriever.excludes[1:])
+
     # 검증 목적(Review Focus 5): 개념에 문단이 없으면(빈칸 개념·색인 없음) 모델을 부르지 않고 근거 없음 문구를 돌려줌
     def test_explain_no_passage_returns_no_source_text(self):
         client = FakeClient()
@@ -295,9 +305,9 @@ class RecordingHarness(HarnessStuckGateway):
         self.calls.append('summarize')
         return super().summarize(*args)
 
-    def choose_animation(self, *args):
+    def choose_animation(self, *args, **kwargs):
         self.calls.append('animate')
-        return super().choose_animation(*args)
+        return super().choose_animation(*args, **kwargs)
 
 
 class FlowParityTests(unittest.TestCase):

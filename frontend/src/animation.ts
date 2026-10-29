@@ -41,12 +41,41 @@ export type AnimationData = { kind: string; title: string; frames: Frame[] };
 export const CELL_WIDTH = 64;
 export const CELL_HEIGHT = 56;
 
+// 그림 위아래 여백(viewBox 단위); 행을 접어 맨 위·아래 상자가 그림 테두리에 바로 붙지 않게 조금 띄움
+export const VIEW_PADDING = 8;
+
 /**
- * @brief 모든 프레임에서 가장 큰 x·y를 덮는 고정 SVG 크기 계산
+ * @brief 어느 프레임도 쓰지 않는 행을 접은 표시용 프레임을 만듦(엔진 격자 좌표·원본 프레임은 바꾸지 않음)
+ * - 엔진은 12×8 격자에 장면마다 고정 위치를 씀(호출 스택은 아래 y 5~7, 반환값은 위 y 0~1). 그대로 그리면 중간 빈 행이 큰 빈 공간이 됨
+ * - 최소~최대 y로만 자르면 위아래 끝을 모두 쓰는 장면(호출 스택·그래프 탐색)은 줄지 않으므로, 빈 행 묶음을 한 행 간격으로 접음
+ * - 첫 행 위의 빈 행은 모두 없애고, 한 행짜리 빈 틈(층 사이 간격)은 그대로 둬 원래 배치 모양을 유지
+ * - 전체 프레임 기준 하나의 행 대응표를 써 단계마다 상자 위치가 출렁이지 않게 함
+ */
+export function compactRows(frames: readonly Frame[]): Frame[] {
+  const used = new Set(frames.flatMap((frame) => frame.boxes.map((box) => box.y)));
+  const rows = new Map<number, number>();
+  let shown = 0;
+  let empty = 0;
+  for (let y = Math.min(...used); y <= Math.max(...used); y++) {
+    if (used.has(y)) {
+      shown += Math.min(empty, 1);
+      rows.set(y, shown++);
+      empty = 0;
+    } else empty++;
+  }
+  return frames.map((frame) => ({
+    ...frame,
+    boxes: frame.boxes.map((box) => ({ ...box, y: rows.get(box.y)! })),
+  }));
+}
+
+/**
+ * @brief 모든 프레임에서 가장 큰 x·y를 덮는 고정 SVG viewBox(y 시작·폭·높이) 계산
  * - 단계마다 크기를 다시 재면 축소 비율이 바뀌어 화면이 출렁이므로 전체 프레임 기준 하나로 고정
+ * - 위아래로 VIEW_PADDING만큼 여백을 더하고, y는 그 여백만큼 위에서 시작
  * - 상자가 없는 장면도 칸 하나 크기를 둬 0 크기 SVG를 막음
  */
-export function fitViewBox(frames: Frame[]): { width: number; height: number } {
+export function fitViewBox(frames: Frame[]): { y: number; width: number; height: number } {
   let maxX = 0;
   let maxY = 0;
   for (const frame of frames)
@@ -54,7 +83,7 @@ export function fitViewBox(frames: Frame[]): { width: number; height: number } {
       maxX = Math.max(maxX, box.x);
       maxY = Math.max(maxY, box.y);
     }
-  return { width: (maxX + 1) * CELL_WIDTH, height: (maxY + 1) * CELL_HEIGHT };
+  return { y: -VIEW_PADDING, width: (maxX + 1) * CELL_WIDTH, height: (maxY + 1) * CELL_HEIGHT + 2 * VIEW_PADDING };
 }
 
 /**

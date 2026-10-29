@@ -107,7 +107,9 @@ PROMPTS = {
                '연산은 시작 상태부터 차례로 실행할 수 있는 것만 쓴다: 빈 스택·큐·힙에서 꺼내기, 없는 값 삭제, 범위 밖 인덱스, '
                '가득 찬 큐에 넣기, 이진 탐색 트리에 같은 값 다시 넣기는 쓰지 않는다. '
                '해시 테이블 키는 0 이상의 정수로 고른다: 음수 키의 나머지 계산은 언어마다 달라 학습자를 헷갈리게 한다. '
-               '그래프의 start와 간선 끝점은 nodes에 있는 이름만 쓰고, 트리 순회의 values에는 같은 값을 두 번 넣지 않는다. JSON schema에 맞게 응답한다.',
+               '그래프의 start와 간선 끝점은 nodes에 있는 이름만 쓰고, 트리 순회의 values에는 같은 값을 두 번 넣지 않는다. '
+               'previous가 있으면 같은 학습자에게 이 개념을 설명하며 직전에 보여 준 장면이다. 학습자는 그 장면으로 이해하지 못했으므로 '
+               'scenes 안에서 종류를 바꾸거나 시작 값·연산을 바꾼 다른 장면을 만든다. JSON schema에 맞게 응답한다.',
     'scope': HARNESS_COMMON + ' 작업: 학생 질문이 개념 목록의 어느 개념을 설명해 달라는 것인지 고른다. '
              '질문이 직접 묻는 주제 개념을 하나 고르고, "스택과 큐의 차이"처럼 두 개념을 비교하는 질문일 때만 두 개를 고른다. '
              'previous는 직전 대화에서 다룬 개념이다. "더 쉽게", "다른 예시로"처럼 개념을 말하지 않고 직전 설명을 이어 달라는 요청이면 '
@@ -251,7 +253,9 @@ class StuckModelGateway:
     # - schema에 null은 없지만 응답이 null이면(가이드 디코딩이 꺼진 서버 등) None을 돌려 엔진이 텍스트만 보여 주게 함
     # - 확인·서술 문항과 정답은 넘기지 않음: 애니메이션이 정답 풀이가 되지 않게 하기 위함
     # - 실행 가능 여부(빈 스택 pop 등)는 여기서 보지 않음: 호출한 엔진이 simulate로 확인하고 실패하면 텍스트만 보여 줌
-    def choose_animation(self, concept: Concept, entry: Entry, kinds: tuple[str, ...]) -> AnimationRequest | None:
+    # - previous(직전 장면 요청)가 있으면 입력에 넣어 다른 장면을 고르게 함. temperature는 0 그대로 둬 형식·값 정확성을 지킴
+    def choose_animation(self, concept: Concept, entry: Entry, kinds: tuple[str, ...],
+                         previous: dict | None = None) -> AnimationRequest | None:
         def parse(content):
             scene = json.loads(content)['scene']
             if scene is None:
@@ -266,6 +270,8 @@ class StuckModelGateway:
         user = {'concept': {'title': concept.title, 'description': concept.description, 'objectives': concept.objectives},
                 'stuck_at': ({'concept': self._title(entry.concept)} if entry.kind == 'roadmap' else {'excerpt': entry.excerpt}),
                 'scenes': list(kinds), 'formats': scene_formats(kinds, limits)}
+        if previous is not None:
+            user['previous'] = previous
         return self._call('animate', user, parse, _schema('animate', scene_schema(kinds, limits)))
 
     ## @brief S5·S6 서술 채점; 루브릭 항목마다 충족 여부를 같은 순서의 list[bool]로 반환
