@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 
-// 실제 API가 중계하는 검수 완료 지도를 그대로 응답해 36개 배치를 검증
+// 실제 API가 중계하는 검수 완료 지도를 그대로 응답해 배치를 검증; 과목 안 6단계 이상 18개를 숨겨 18개가 보임
 const conceptMap = JSON.parse(
   readFileSync(
     new URL("../../../ai-core/content/dsa/concept-map.json", import.meta.url),
@@ -14,7 +14,8 @@ const conceptMap = JSON.parse(
 );
 const roadmapKey = "cs-dsa-roadmap-v1";
 const firstTitle = "메모리 주소와 연속 배치";
-const stackTitle = "스택";
+// 6단계 이상(스택 등)은 지도에서 숨기므로 선수 개념이 하나인 5단계 개념으로 선택·학습 진입을 검증
+const dynamicArrayTitle = "동적 배열";
 const question = (title: string) => `${title} 개념을 예시와 함께 설명해줘`;
 /** @brief 개념 제목과 학습 상태로 지도 노드 버튼 찾기 */
 const node = (page: Page, title: string, status = "미학습") =>
@@ -53,32 +54,32 @@ test("개념 선택·상태를 새로고침 후 복구하고 완료 상태로 �
     return route.fulfill({ status: 500 });
   });
   await page.goto("/#/roadmap");
-  await expect(page.locator(".roadmap-node")).toHaveCount(36);
-  await node(page, stackTitle).click();
+  await expect(page.locator(".roadmap-node")).toHaveCount(18);
+  await node(page, dynamicArrayTitle).click();
   const detail = page.getByRole("region", { name: "선택한 개념" });
   await expect(
-    detail.getByRole("heading", { name: stackTitle, exact: true }),
+    detail.getByRole("heading", { name: dynamicArrayTitle, exact: true }),
   ).toBeVisible();
   await page
     .getByLabel("학습 상태", { exact: true })
     .selectOption({ label: "완료" });
   await page.reload();
   await expect(
-    detail.getByRole("heading", { name: stackTitle, exact: true }),
+    detail.getByRole("heading", { name: dynamicArrayTitle, exact: true }),
   ).toBeVisible();
   await expect(page.getByLabel("학습 상태", { exact: true })).toHaveValue(
     "completed",
   );
-  await expect(node(page, stackTitle, "완료")).toBeVisible();
+  await expect(node(page, dynamicArrayTitle, "완료")).toBeVisible();
   await startLearning(page);
-  await expect(page).toHaveURL(/#\/learn\?concept=stack$/);
+  await expect(page).toHaveURL(/#\/learn\?concept=dynamic-array$/);
   await expect(page.getByLabel("질문", { exact: true })).toHaveValue(
-    question(stackTitle),
+    question(dynamicArrayTitle),
   );
   await expect
     .poll(() =>
       page.evaluate(
-        (key) => JSON.parse(localStorage.getItem(key)!).statuses.stack,
+        (key) => JSON.parse(localStorage.getItem(key)!).statuses["dynamic-array"],
         roadmapKey,
       ),
     )
@@ -90,27 +91,28 @@ test("상세에 학습 목표·선수 개념 근거·후속 개념을 보여 주
   page,
 }) => {
   await page.goto("/#/roadmap");
-  await node(page, stackTitle).click();
+  await node(page, "트리").click();
   const detail = page.getByRole("region", { name: "선택한 개념" });
   const objectives = conceptMap.concepts.find(
-    (concept: { id: string }) => concept.id === "stack",
+    (concept: { id: string }) => concept.id === "tree",
   ).objectives as string[];
   for (const objective of objectives)
     await expect(detail.locator(".concept-objectives")).toContainText(
       objective,
     );
-  await expect(detail).toContainText("7단계");
-  await expect(detail).toContainText("추상 자료형");
+  await expect(detail).toContainText("3단계");
+  await expect(detail).toContainText("참조와 포인터");
   await detail
-    .getByRole("button", { name: "깊이 우선 탐색", exact: true })
+    .getByRole("button", { name: "이진 트리", exact: true })
     .click();
   await expect(detail.getByRole("heading", { level: 2 })).toHaveText(
-    "깊이 우선 탐색",
+    "이진 트리",
   );
-  // DFS는 선수 개념이 셋: 각 버튼 아래에 지도에 적힌 근거를 함께 표시
+  await detail.getByRole("button", { name: "트리", exact: true }).click();
+  // 트리는 선수 개념이 둘: 각 버튼 아래에 지도에 적힌 근거를 함께 표시
   await expect(
     detail.locator(".concept-links").first().locator("li"),
-  ).toHaveCount(3);
+  ).toHaveCount(2);
   await detail.getByRole("button", { name: "재귀", exact: true }).click();
   await expect(detail).toContainText("기초 개념부터 바로 시작할 수 있어요.");
 });
@@ -156,7 +158,7 @@ test("자유 학습·개념별 대화를 분리하고 새 학습은 해당 개�
   await expect(page.getByLabel("학습 상태", { exact: true })).toHaveValue(
     "in-progress",
   );
-  await node(page, stackTitle).click();
+  await node(page, dynamicArrayTitle).click();
   await startLearning(page);
   await page.getByRole("button", { name: "질문 보내기" }).click();
   await expect(input).toBeEnabled();
@@ -164,7 +166,7 @@ test("자유 학습·개념별 대화를 분리하고 새 학습은 해당 개�
   expect(new Set(calls.map((call) => call.conversation_id)).size).toBe(3);
   await page.reload();
   await expect(page.getByRole("log", { name: "대화 기록" })).toContainText(
-    `${question(stackTitle)} 답변`,
+    `${question(dynamicArrayTitle)} 답변`,
   );
   await openRoadmap(page);
   await node(page, firstTitle, "학습 중").click();
@@ -185,7 +187,7 @@ test("자유 학습·개념별 대화를 분리하고 새 학습은 해당 개�
   expect(saved.roadmap.conversationIds["memory-address"]).not.toBe(
     calls[1].conversation_id,
   );
-  expect(saved.roadmap.conversationIds.stack).toBe(calls[2].conversation_id);
+  expect(saved.roadmap.conversationIds["dynamic-array"]).toBe(calls[2].conversation_id);
   expect(saved.free).toBe(calls[0].conversation_id);
   await page
     .locator(".sidebar")
@@ -206,12 +208,12 @@ for (const width of [320, 390]) {
     await expect(
       page.getByRole("group", { name: "1단계", exact: true }),
     ).toBeVisible();
-    await expect(node(page, stackTitle)).toContainText("먼저: 추상 자료형");
-    await node(page, stackTitle).click();
+    await expect(node(page, dynamicArrayTitle)).toContainText("먼저: 배열");
+    await node(page, dynamicArrayTitle).click();
     await expect(
       page
         .getByRole("region", { name: "선택한 개념" })
-        .getByRole("heading", { name: stackTitle, exact: true }),
+        .getByRole("heading", { name: dynamicArrayTitle, exact: true }),
     ).toBeVisible();
     expect(
       await page.evaluate(
@@ -220,7 +222,7 @@ for (const width of [320, 390]) {
     ).toBe(true);
     await startLearning(page);
     await expect(page.getByLabel("질문", { exact: true })).toHaveValue(
-      question(stackTitle),
+      question(dynamicArrayTitle),
     );
     expect(
       await page.evaluate(
@@ -289,7 +291,7 @@ test("저장 실패를 알리고 선택·학습 상태·이동을 적용하지 �
   await expect(page.getByLabel("학습 상태", { exact: true })).toHaveValue(
     "not-started",
   );
-  await node(page, stackTitle).click();
+  await node(page, dynamicArrayTitle).click();
   await expect(
     page
       .getByRole("region", { name: "선택한 개념" })
@@ -303,9 +305,11 @@ test("데스크톱 지도는 선수 개념을 항상 위 단계에 두고 1440px
   page,
 }) => {
   await page.goto("/#/roadmap");
-  await expect(page.locator(".roadmap-node")).toHaveCount(36);
-  await expect(page.locator(".roadmap-layer")).toHaveCount(10);
-  await expect(page.locator(".prerequisite-edge")).toHaveCount(51);
+  await expect(page.locator(".roadmap-node")).toHaveCount(18);
+  await expect(page.locator(".roadmap-layer")).toHaveCount(5);
+  await expect(page.locator(".prerequisite-edge")).toHaveCount(19);
+  // 과목 안 6단계 이상 개념은 그리지 않음
+  await expect(page.locator('.roadmap-node[data-concept="stack"]')).toHaveCount(0);
   const boxes = Object.fromEntries(
     await page.locator(".roadmap-node").evaluateAll((nodes) =>
       nodes.map((item) => {
@@ -319,7 +323,8 @@ test("데스크톱 지도는 선수 개념을 항상 위 단계에 두고 1440px
     prerequisites: { id: string }[];
   }[])
     for (const p of concept.prerequisites)
-      expect(boxes[p.id].bottom).toBeLessThan(boxes[concept.id].top);
+      if (boxes[concept.id])
+        expect(boxes[p.id].bottom).toBeLessThan(boxes[concept.id].top);
   // 노드끼리 겹치지 않음
   const list = Object.values(boxes) as DOMRect[];
   for (const [i, a] of list.entries())
@@ -343,19 +348,19 @@ test("노드 호버는 직접 선수·후속 개념과 화살표 선을 강조�
   await page.goto("/#/roadmap");
   // 웹 글꼴이 늦게 적용되면 지도가 아래로 밀려 마우스가 노드 밖에 남으므로 글꼴 적용 뒤 호버
   await page.evaluate(() => document.fonts.ready);
-  const stack = node(page, stackTitle);
+  const binaryTree = node(page, "이진 트리");
   const first = node(page, firstTitle);
   // 선택 개념(첫 개념)의 선은 탐색하지 않아도 강조
   await expect(
     page.locator('.prerequisite-edge[data-emphasis="related"]'),
   ).toHaveCount(2);
-  await stack.hover();
-  await expect(stack).toHaveAttribute("data-active", "true");
-  await expect(node(page, "추상 자료형과 구현")).toHaveAttribute(
+  await binaryTree.hover();
+  await expect(binaryTree).toHaveAttribute("data-active", "true");
+  await expect(node(page, "트리")).toHaveAttribute(
     "data-emphasis",
     "related",
   );
-  await expect(node(page, "깊이 우선 탐색")).toHaveAttribute(
+  await expect(node(page, "힙")).toHaveAttribute(
     "data-emphasis",
     "related",
   );
@@ -371,8 +376,8 @@ test("노드 호버는 직접 선수·후속 개념과 화살표 선을 강조�
       ]),
     ),
   ).toEqual([
-    ["adt", "stack", "url(#roadmap-arrow)"],
-    ["stack", "dfs", "url(#roadmap-arrow)"],
+    ["tree", "binary-tree", "url(#roadmap-arrow)"],
+    ["binary-tree", "heap", "url(#roadmap-arrow)"],
   ]);
   await expect(first).toHaveAttribute("aria-pressed", "true");
   await expect(
@@ -381,7 +386,7 @@ test("노드 호버는 직접 선수·후속 개념과 화살표 선을 강조�
       .getByRole("heading", { level: 2 }),
   ).toHaveText(firstTitle);
   await page.getByRole("heading", { name: "로드맵", exact: true }).hover();
-  await expect(stack).toHaveAttribute("data-active", "false");
+  await expect(binaryTree).toHaveAttribute("data-active", "false");
   await expect(node(page, "해시 함수")).toHaveCSS("opacity", "1");
 });
 
@@ -434,7 +439,7 @@ test("개념 지도 로딩 실패를 안내하고 다시 시도하면 지도를 
   await expect(page.locator(".roadmap-node")).toHaveCount(0);
   fail = false;
   await alert.getByRole("button", { name: "다시 시도" }).click();
-  await expect(page.locator(".roadmap-node")).toHaveCount(36);
+  await expect(page.locator(".roadmap-node")).toHaveCount(18);
 });
 
 test("지도를 받는 동안 로딩 안내를 보여 줌", async ({ page }) => {
@@ -451,7 +456,7 @@ test("지도를 받는 동안 로딩 안내를 보여 줌", async ({ page }) => 
     "개념 지도를 불러오는 중",
   );
   release();
-  await expect(page.locator(".roadmap-node")).toHaveCount(36);
+  await expect(page.locator(".roadmap-node")).toHaveCount(18);
 });
 
 test("옛 9개 개념 저장값과 개념 주소는 무시하되 지우지 않음", async ({
@@ -473,7 +478,7 @@ test("옛 9개 개념 저장값과 개념 주소는 무시하되 지우지 않�
     page.getByRole("heading", { name: "로드맵", exact: true }),
   ).toBeVisible();
   await expect(node(page, firstTitle)).toHaveAttribute("aria-pressed", "true");
-  await node(page, stackTitle).click();
+  await node(page, dynamicArrayTitle).click();
   expect(await page.evaluate(() => localStorage.getItem("cs-roadmap-v1"))).toBe(
     old,
   );
@@ -481,7 +486,8 @@ test("옛 9개 개념 저장값과 개념 주소는 무시하되 지우지 않�
 
 /**
  * @brief 여러 과목을 합친 지도 응답(MVP 4 형식)의 목업; 자료구조 지도 뒤에 운영체제 개념 2개를 붙임
- * - process-state → queue는 과목 사이 선수 관계라 운영체제만 걸렀을 때 선이 사라져야 함
+ * - process-state → array는 과목 사이 선수 관계라 운영체제만 걸렀을 때 선이 사라져야 함
+ * - 실제 지도의 queue는 6단계라 숨겨지므로 보이는 배열을 과목 사이 선수로 둠
  */
 const mixedMap = {
   ...conceptMap,
@@ -501,7 +507,7 @@ const mixedMap = {
       title: "프로세스와 상태",
       description: "실행 중인 프로그램과 그 상태 변화",
       objectives: ["프로세스 상태 전이를 설명할 수 있다."],
-      prerequisites: [{ id: "queue", reason: "준비 큐가 큐다." }],
+      prerequisites: [{ id: "array", reason: "준비 큐를 배열로 둔다." }],
       subject: "os",
     },
     {
@@ -522,27 +528,27 @@ test("여러 과목 지도는 과목 표식·필터를 보여 주고 과목 사�
     route.fulfill({ json: mixedMap }),
   );
   await page.goto("/#/roadmap");
-  await expect(page.locator(".roadmap-node")).toHaveCount(38);
+  await expect(page.locator(".roadmap-node")).toHaveCount(20);
   await expect(page.locator('.roadmap-node[data-subject="os"]')).toHaveCount(2);
   const filter = page.getByRole("group", { name: "과목" });
   await filter.getByRole("button", { name: "운영체제" }).click();
-  // 숨긴 자료구조 개념(queue)을 가리키던 선은 그리지 않음
+  // 숨긴 자료구조 개념(array)을 가리키던 선은 그리지 않음
   await expect(page.locator(".roadmap-node")).toHaveCount(2);
   await expect(page.locator(".prerequisite-edge")).toHaveCount(1);
   await expect(
-    page.locator('.prerequisite-edge[data-source="queue"]'),
+    page.locator('.prerequisite-edge[data-source="array"]'),
   ).toHaveCount(0);
   await node(page, "프로세스와 상태 · 운영체제").click();
   const detail = page.getByRole("region", { name: "선택한 개념" });
   await expect(detail).toContainText("운영체제 · 1단계");
   // 상세 패널은 과목 사이 선수 개념을 그대로 보여 주고, 누르면 필터를 풀어 그 개념을 지도에 보여 줌
-  await detail.getByRole("button", { name: "큐", exact: true }).click();
+  await detail.getByRole("button", { name: "배열", exact: true }).click();
   await expect(filter.getByRole("button", { name: "전체" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await expect(page.locator(".roadmap-node")).toHaveCount(38);
-  await expect(node(page, "큐 · 자료구조·알고리즘")).toHaveAttribute(
+  await expect(page.locator(".roadmap-node")).toHaveCount(20);
+  await expect(node(page, "배열 · 자료구조·알고리즘")).toHaveAttribute(
     "aria-pressed",
     "true",
   );

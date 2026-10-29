@@ -6,17 +6,20 @@ import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 
 const dsa = JSON.parse(readFileSync(new URL("../../../ai-core/content/dsa/concept-map.json", import.meta.url), "utf8"));
-const os = JSON.parse(readFileSync(new URL("../../../ai-core/content/os/concept-map.json", import.meta.url), "utf8"));
-const target = { id: "sjf", title: "SJF 스케줄링" };
-const gap = { id: "priority-queue", title: "우선순위 큐" };
+const arch = JSON.parse(readFileSync(new URL("../../../ai-core/content/arch/concept-map.json", import.meta.url), "utf8"));
+// 과목 사이 진단 경로: 캐시와 지역성(컴퓨터구조) ← 메모리 계층·배열 ← 메모리 주소(자료구조)
+// - 6단계 이상 자료구조 개념(우선순위 큐 등)은 지도에서 숨기므로, 보이는 개념끼리 이어지는 경로로 검증
+// - memory-address → array는 여러 단계를 건너는 긴 간선이라 다른 칸을 지나지 않는지도 함께 봄
+const target = { id: "cache-locality", title: "캐시와 지역성" };
+const gap = { id: "memory-address", title: "메모리 주소와 연속 배치" };
 const sessionId = "0123456789abcdef0123456789abcdef";
 const restartedId = "fedcba9876543210fedcba9876543210";
 const question = {
   kind: "question", purpose: "diagnosis", concept: gap,
-  item: { id: "priority-queue-d1", format: "short_exact", question: "우선순위 큐에서 꺼내는 순서는?" },
+  item: { id: "memory-address-d1", format: "short_exact", question: "4바이트 원소 배열의 다음 원소 주소는?" },
 };
 const diagnosis = { kind: "diagnosis_result", target, gaps: [gap], evidence: [], opted_out: false };
-const remediation = { kind: "remediation", concept: gap, attempt: 1, text: "가장 높은 우선순위의 원소를 꺼내요.", is_target: false };
+const remediation = { kind: "remediation", concept: gap, attempt: 1, text: "연속 배치에서는 원소 크기만큼 주소가 늘어요.", is_target: false };
 const passed = { kind: "result", concept: gap, passed: true };
 const summary = {
   kind: "summary", text: "빈틈을 채웠어요.", return_to: "#/roadmap",
@@ -28,9 +31,9 @@ const path = (page: Page, from: string, to: string) => page.locator(`.prerequisi
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/concept-map", route => route.fulfill({ json: {
-    ...dsa, id: "cs", title: "CS 전공", subjects: [{ id: "dsa", title: dsa.title }, { id: "os", title: os.title }],
-    concepts: [...dsa.concepts.map((c: object) => ({ ...c, subject: "dsa" })), ...os.concepts.map((c: object) => ({ ...c, subject: "os" }))],
-    stuck_supported: ["sjf", "priority-queue"],
+    ...dsa, id: "cs", title: "CS 전공", subjects: [{ id: "dsa", title: dsa.title }, { id: "arch", title: arch.title }],
+    concepts: [...dsa.concepts.map((c: object) => ({ ...c, subject: "dsa" })), ...arch.concepts.map((c: object) => ({ ...c, subject: "arch" }))],
+    stuck_supported: ["cache-locality", "memory-address"],
   } }));
   await page.route("**/api/conversations/*", route => route.fulfill({ json: { messages: [] } }));
 });
@@ -70,30 +73,33 @@ async function mockSession(page: Page) {
   };
 }
 
-/** @brief 실제 지도에서 SJF를 선택해 진단 결과까지 진행 */
+/** @brief 실제 지도에서 캐시와 지역성을 선택해 진단 결과까지 진행 */
 async function diagnose(page: Page) {
   await page.goto("/#/roadmap");
-  await page.getByRole("group", { name: "과목", exact: true }).getByRole("button", { name: "운영체제", exact: true }).click();
-  await expect(node(page, "priority-queue")).toHaveCount(0);
-  await node(page, "sjf").click();
+  await page.getByRole("group", { name: "과목", exact: true }).getByRole("button", { name: arch.title, exact: true }).click();
+  await expect(node(page, "memory-address")).toHaveCount(0);
+  await node(page, "cache-locality").click();
   await page.getByRole("button", { name: "막혔어요", exact: true }).click();
-  await panel(page).getByLabel("우선순위 큐에서 꺼내는 순서는?").fill("7,3,9,4");
+  await panel(page).getByLabel("4바이트 원소 배열의 다음 원소 주소는?").fill("1004");
   await panel(page).getByRole("button", { name: "답 제출", exact: true }).click();
-  await expect(panel(page).locator(".stuck-gaps")).toContainText("우선순위 큐");
+  await expect(panel(page).locator(".stuck-gaps")).toContainText("메모리 주소와 연속 배치");
 }
 
 /** @brief 진단의 실제 선수 경로를 강조하고 문항을 지난 뒤에도 표시·통과 판정을 복원하는지 검증 */
-test("SJF의 자료구조 빈틈과 실제 선수 경로를 표시하고 보충·통과 단계 새로고침에서 복구함", async ({ page }) => {
+test("캐시와 지역성의 자료구조 빈틈과 실제 선수 경로를 표시하고 보충·통과 단계 새로고침에서 복구함", async ({ page }) => {
   await mockSession(page);
   await diagnose(page);
-  await expect(node(page, "priority-queue")).toContainText("모름");
-  await expect(node(page, "priority-queue")).toHaveAttribute("data-diagnosis", "gap");
-  await expect(node(page, "sjf")).toHaveAttribute("data-diagnosis-target", "true");
+  await expect(node(page, "memory-address")).toContainText("모름");
+  await expect(node(page, "memory-address")).toHaveAttribute("data-diagnosis", "gap");
+  await expect(node(page, "cache-locality")).toHaveAttribute("data-diagnosis-target", "true");
   await expect(page.getByText("진단에서 찾은 모르는 개념", { exact: true })).toBeVisible();
-  await expect(path(page, "priority-queue", "priority-scheduling")).toHaveAttribute("data-diagnosis", "true");
-  await expect(path(page, "priority-scheduling", "sjf")).toHaveAttribute("data-diagnosis", "true");
-  await expect(path(page, "fcfs", "priority-scheduling")).not.toHaveAttribute("data-diagnosis");
-  await expect(path(page, "heap", "priority-queue")).not.toHaveAttribute("data-diagnosis");
+  await expect(path(page, "memory-address", "memory-hierarchy")).toHaveAttribute("data-diagnosis", "true");
+  await expect(path(page, "memory-hierarchy", "cache-locality")).toHaveAttribute("data-diagnosis", "true");
+  await expect(path(page, "memory-address", "array")).toHaveAttribute("data-diagnosis", "true");
+  await expect(path(page, "array", "cache-locality")).toHaveAttribute("data-diagnosis", "true");
+  // 목표로 이어지지 않는 가지(명령어 사이클)와 빈틈보다 앞선 선(복잡도 분석 → 배열)은 강조하지 않음
+  await expect(path(page, "memory-address", "instruction-cycle")).not.toHaveAttribute("data-diagnosis");
+  await expect(path(page, "complexity-analysis", "array")).not.toHaveAttribute("data-diagnosis");
   // 긴 직접 간선이 중간 단계의 다른 칸을 지나면 그 개념도 선수 경로인 것처럼 보이므로 차단
   const crossings = await page.evaluate(() => {
     const nodes = [...document.querySelectorAll<HTMLElement>(".roadmap-node")];
@@ -113,22 +119,22 @@ test("SJF의 자료구조 빈틈과 실제 선수 경로를 표시하고 보충�
   });
   expect(crossings).toEqual([]);
   // 호버 중에도 진단 경로를 흐리게 만들지 않음
-  await node(page, "array").hover();
-  await expect(node(page, "priority-queue")).toHaveCSS("opacity", "1");
-  await expect(path(page, "priority-queue", "priority-scheduling")).toHaveCSS("opacity", "1");
+  await node(page, "big-o").hover();
+  await expect(node(page, "memory-address")).toHaveCSS("opacity", "1");
+  await expect(path(page, "memory-address", "memory-hierarchy")).toHaveCSS("opacity", "1");
   await panel(page).getByRole("button", { name: "보충 시작" }).click();
   await page.reload();
-  await expect(panel(page)).toContainText("가장 높은 우선순위");
-  await expect(node(page, "priority-queue")).toContainText("모름");
+  await expect(panel(page)).toContainText("원소 크기만큼");
+  await expect(node(page, "memory-address")).toContainText("모름");
   await panel(page).getByRole("button", { name: "계속", exact: true }).click();
-  await expect(node(page, "priority-queue")).toContainText("확인 통과");
-  await expect(node(page, "priority-queue")).toHaveAttribute("data-diagnosis", "passed");
+  await expect(node(page, "memory-address")).toContainText("확인 통과");
+  await expect(node(page, "memory-address")).toHaveAttribute("data-diagnosis", "passed");
   // 진단 통과는 사용자가 지정하는 일반 학습 상태를 바꾸지 않음
-  await expect(node(page, "priority-queue")).toHaveAttribute("aria-label", /미학습/);
+  await expect(node(page, "memory-address")).toHaveAttribute("aria-label", /미학습/);
   await page.reload();
-  await expect(node(page, "priority-queue")).toContainText("확인 통과");
+  await expect(node(page, "memory-address")).toContainText("확인 통과");
   await panel(page).getByRole("button", { name: "다음", exact: true }).click();
-  await expect(node(page, "priority-queue")).toContainText("확인 통과");
+  await expect(node(page, "memory-address")).toContainText("확인 통과");
   await panel(page).getByRole("button", { name: "원래 학습으로 돌아가기" }).click();
   await expect(page.locator(".roadmap-node[data-diagnosis], .roadmap-node[data-diagnosis-target], .prerequisite-edge[data-diagnosis]")).toHaveCount(0);
 });
@@ -137,20 +143,20 @@ test("SJF의 자료구조 빈틈과 실제 선수 경로를 표시하고 보충�
 test("닫기·새로고침에는 표시가 없고 이어서 풀기에서만 복원하며 처음부터 다시는 표시를 지움", async ({ page }) => {
   await mockSession(page);
   await diagnose(page);
-  await expect(node(page, "priority-queue")).toContainText("모름");
+  await expect(node(page, "memory-address")).toContainText("모름");
   await panel(page).getByRole("button", { name: "막힘 패널 닫기" }).click();
   await expect(page.locator("[data-diagnosis], [data-diagnosis-target]")).toHaveCount(0);
   await page.reload();
   await expect(page.locator("[data-diagnosis], [data-diagnosis-target]")).toHaveCount(0);
   await page.getByRole("button", { name: "막힘 이어서 풀기" }).click();
-  await expect(node(page, "priority-queue")).toContainText("모름");
+  await expect(node(page, "memory-address")).toContainText("모름");
   await panel(page).getByRole("button", { name: "처음부터 다시", exact: true }).click();
-  await expect(node(page, "priority-queue")).toContainText("모름");
+  await expect(node(page, "memory-address")).toContainText("모름");
   await panel(page).getByRole("group", { name: "처음부터 다시 시작할까요?" }).getByRole("button", { name: "다시 시작", exact: true }).click();
-  await expect(panel(page).getByLabel("우선순위 큐에서 꺼내는 순서는?")).toBeVisible();
+  await expect(panel(page).getByLabel("4바이트 원소 배열의 다음 원소 주소는?")).toBeVisible();
   await expect(page.locator("[data-diagnosis], [data-diagnosis-target]")).toHaveCount(0);
   await page.reload();
-  await expect(panel(page).getByLabel("우선순위 큐에서 꺼내는 순서는?")).toBeVisible();
+  await expect(panel(page).getByLabel("4바이트 원소 배열의 다음 원소 주소는?")).toBeVisible();
   await expect(page.locator("[data-diagnosis], [data-diagnosis-target]")).toHaveCount(0);
 });
 
@@ -158,7 +164,7 @@ test("닫기·새로고침에는 표시가 없고 이어서 풀기에서만 복�
 test("서버 세션이 없어지면 저장된 진단 표시를 복구하지 않음", async ({ page }) => {
   const server = await mockSession(page);
   await diagnose(page);
-  await expect(node(page, "priority-queue")).toContainText("모름");
+  await expect(node(page, "memory-address")).toContainText("모름");
   server.expire();
   await page.reload();
   await expect(panel(page).getByRole("alert")).toContainText("막힘 세션을 찾을 수 없습니다");
@@ -169,7 +175,7 @@ test("서버 세션이 없어지면 저장된 진단 표시를 복구하지 않�
 test("진단 세션이 저장되어 있어도 실험 화면에는 지도나 막힘 패널이 나타나지 않음", async ({ page }) => {
   await mockSession(page);
   await diagnose(page);
-  await expect(node(page, "priority-queue")).toContainText("모름");
+  await expect(node(page, "memory-address")).toContainText("모름");
   await page.goto("/#/experiment");
   await expect(page.locator(".roadmap-node, .stuck-panel")).toHaveCount(0);
   await expect(page.locator("[data-diagnosis], [data-diagnosis-target]")).toHaveCount(0);
@@ -180,17 +186,17 @@ test("진단 세션이 저장되어 있어도 실험 화면에는 지도나 막�
 test("닫힌 패널의 늦은 진단 응답은 새 패널의 지도 표시를 덮어쓰지 않음", async ({ page }) => {
   const server = await mockSession(page);
   await page.goto("/#/roadmap");
-  await node(page, "sjf").click();
+  await node(page, "cache-locality").click();
   await page.getByRole("button", { name: "막혔어요", exact: true }).click();
-  await panel(page).getByLabel("우선순위 큐에서 꺼내는 순서는?").fill("7,3,9,4");
+  await panel(page).getByLabel("4바이트 원소 배열의 다음 원소 주소는?").fill("1004");
   const release = server.holdNextStep();
   const submitted = page.waitForRequest(request => request.url().endsWith("/step"));
   await panel(page).getByRole("button", { name: "답 제출", exact: true }).click();
   await submitted;
   await panel(page).getByRole("button", { name: "막힘 패널 닫기" }).click();
-  await node(page, "priority-queue").click();
+  await node(page, "memory-address").click();
   await page.getByRole("button", { name: "막혔어요", exact: true }).click();
-  await expect(panel(page).getByLabel("우선순위 큐에서 꺼내는 순서는?")).toBeVisible();
+  await expect(panel(page).getByLabel("4바이트 원소 배열의 다음 원소 주소는?")).toBeVisible();
   const delivered = page.waitForResponse(response => response.url().includes(`/sessions/${sessionId}/step`));
   release();
   await (await delivered).finished();
