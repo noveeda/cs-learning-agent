@@ -354,9 +354,9 @@ def pipe_name(ins: PipeInstr) -> str:
 
 
 ## @brief 사이클별 프레임과 전달 화살표를 만듦
-# - 화살표: forwarding이면 생산 명령어의 결과 칸(ALU는 EX, lw는 MEM) → 소비 명령어 EX 칸('fwd')
+# - 화살표: forwarding이면 소비 명령어 EX 바로 전 사이클의 생산 명령어 칸(EX 또는 MEM) → 소비 명령어 EX 칸('fwd')
 #   forwarding이 없으면 생산 명령어 WB 칸 → 소비 명령어가 같은 사이클에 레지스터를 읽는 칸
-#   레지스터 파일에서 이미 읽을 수 있는 먼 의존은 화살표 없음
+#   레지스터 파일에서 이미 읽을 수 있는 먼 의존은 화살표 없음. 두 원본이 같은 생산 명령어면 화살표 하나만 그림
 def simulate_pipeline(req: PipelineRequest) -> Animation:
     rows = pipeline_schedule(req)
     total = rows[-1]['e'] + 2
@@ -369,10 +369,11 @@ def simulate_pipeline(req: PipelineRequest) -> Animation:
             if read > wb or (read == wb and req.forwarding):
                 continue
             if req.forwarding:
-                # 소비 명령어 EX 바로 전 사이클에 생산 명령어가 있는 단계(EX 또는 MEM)에서 값을 넘겨받음
-                links.append((row['e'], f'i{j}c{read}', f'i{i}c{row["e"]}', 'fwd', j, i, src))
+                link = (row['e'], f'i{j}c{read}', f'i{i}c{row["e"]}', 'fwd', j, i, src)
             else:
-                links.append((read, f'i{j}c{read}', f'i{i}c{read}', None, j, i, src))
+                link = (read, f'i{j}c{read}', f'i{i}c{read}', None, j, i, src)
+            if all(link[1:3] != other[1:3] for other in links):
+                links.append(link)
     header = [Box(id=f'cy{c}', label=str(c), x=1 + c, y=0, shape='label') for c in range(1, total + 1)]
     names = []
     for i, ins in enumerate(req.instructions):

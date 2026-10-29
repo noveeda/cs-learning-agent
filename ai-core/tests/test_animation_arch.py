@@ -171,6 +171,11 @@ class PipelineTests(unittest.TestCase):
         arrows = [(a.source, a.target) for a in animation.frames[5].arrows]
         self.assertIn(('i0c4', 'i1c5'), arrows)
 
+    # 검증 목적: 두 원본이 같은 생산 명령어(r1, r1)여도 전달 화살표는 하나(재생기의 화살표 key 중복 방지)
+    def test_same_producer_twice_draws_one_arrow(self):
+        animation = run(pipe(('add', 'r1', 'r2', 'r3'), ('add', 'r4', 'r1', 'r1'), forwarding=True))
+        self.assertEqual([(a.source, a.target) for a in animation.frames[-1].arrows], [('i0c3', 'i1c4')])
+
     # 검증 목적: lw의 원본 레지스터 개수 오류, 10사이클(격자 폭)을 넘는 장면을 거부
     def test_rejects_invalid_pipelines(self):
         with self.assertRaises(ValidationError):
