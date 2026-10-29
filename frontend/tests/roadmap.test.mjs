@@ -297,3 +297,41 @@ test('restores diagnosis metadata only for the matching session and tolerates da
   }
   assert.equal(roadmap.loadDiagnosis(sessionId, { getItem() { throw new Error('denied'); } }), null);
 });
+
+/**
+ * @brief 실제 다섯 과목 지도를 합친 응답에서 과목 안 단계 6 이상 개념만 로드맵에서 빠지는지 검증
+ * - 시연 화면의 개념 수(43개)와 숨김 목록(자료구조 18개)이 데이터에서 계산된 값과 같아야 함
+ * - 남은 개념의 같은 과목 선수 관계는 모두 남아 선이 끊기지 않고, 숨긴 개념을 가리키는 관계만 빠져야 함
+ */
+test('hides concepts at subject level 6 or deeper and keeps every remaining prerequisite line', () => {
+  const subjects = ['dsa', 'os', 'db', 'network', 'arch'];
+  const concepts = subjects.flatMap(subject => JSON.parse(readFileSync(
+    new URL(`../../ai-core/content/${subject}/concept-map.json`, import.meta.url))).concepts
+    .map(concept => ({ ...concept, subject, domain: subject, stuckSupported: false })));
+  const shown = roadmap.hideDeepConcepts(concepts);
+  const ids = new Set(shown.map(concept => concept.id));
+  assert.equal(roadmap.MAX_VISIBLE_LEVEL, 5);
+  assert.equal(shown.length, 43);
+  assert.deepEqual(concepts.filter(concept => !ids.has(concept.id)).map(concept => concept.id), [
+    'adt', 'stack', 'queue', 'hash-table', 'tree-traversal', 'bst', 'balanced-bst', 'priority-queue',
+    'merge-sort', 'quick-sort', 'heap-sort', 'graph-representation', 'bfs', 'dfs', 'topological-sort',
+    'shortest-path', 'greedy', 'mst']);
+  const byId = new Map(concepts.map(concept => [concept.id, concept]));
+  for (const concept of shown) {
+    const original = byId.get(concept.id);
+    // 같은 과목 선수 관계는 하나도 빠지지 않음: 단계 5 이하 개념의 선수 개념은 더 얕은 단계라 함께 보이기 때문
+    assert.deepEqual(concept.prerequisites,
+      original.prerequisites.filter(p => ids.has(p.id)), concept.id);
+    assert.deepEqual(concept.prerequisites.filter(p => byId.get(p.id).subject === concept.subject),
+      original.prerequisites.filter(p => byId.get(p.id).subject === concept.subject), concept.id);
+  }
+  // 다른 과목의 숨긴 개념(queue·priority-queue)을 가리키던 선만 빠짐; 운영체제 개념 자체는 그대로 보임
+  assert.deepEqual(shown.find(concept => concept.id === 'process-state').prerequisites, []);
+  assert.deepEqual(shown.find(concept => concept.id === 'priority-scheduling').prerequisites.map(p => p.id), ['fcfs']);
+  // 원본 개념은 바꾸지 않음
+  assert.deepEqual(byId.get('process-state').prerequisites.map(p => p.id), ['queue']);
+  // 남은 지도로 배치해도 선수 개념이 늘 위 단계에 있음(끝이 없는 선 없이 그릴 수 있음)
+  const { positions } = layoutConcepts(shown);
+  for (const concept of shown)
+    for (const p of concept.prerequisites) assert.ok(positions[p.id].layer < positions[concept.id].layer);
+});
