@@ -13,6 +13,7 @@ from .graph import simulate_graph_traversal, simulate_tree_traversal
 from .hierarchical import simulate_bst, simulate_hash_table, simulate_heap
 from .linear import simulate_array, simulate_linked_list, simulate_queue, simulate_stack
 from .model import Animation, AnimationRequest, AnimationRequestModel
+from .process import simulate_process_state, simulate_schedule_metrics
 from .scheduling import simulate_cpu_schedule
 from .sorting import simulate_sort
 
@@ -30,6 +31,7 @@ SIMULATORS = {
     'tree_traversal': simulate_tree_traversal,
     'cpu_schedule': simulate_cpu_schedule,
     'call_stack': simulate_call_stack,
+    'process_state': simulate_process_state, 'schedule_metrics': simulate_schedule_metrics,
 }
 
 
@@ -91,6 +93,8 @@ SCENE_FORMATS = {
     'cpu_schedule': {'kind': 'cpu_schedule', 'algorithm': 'fcfs', 'quantum': 2,
                      'processes': [{'name': 'P1', 'arrival': 0, 'burst': 3, 'priority': 2},
                                    {'name': 'P2', 'arrival': 1, 'burst': 2, 'priority': 1}]},
+    'process_state': {'kind': 'process_state', 'ops': [{'op': 'arrive', 'name': 'P1'}, {'op': 'dispatch'}, {'op': 'exit'}]},
+    'schedule_metrics': {'kind': 'schedule_metrics', 'algorithm': 'fcfs', 'processes': [{'name': 'P1', 'arrival': 0, 'burst': 3}]},
 }
 
 

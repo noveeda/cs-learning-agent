@@ -312,10 +312,14 @@ class CallStackRequest(Strict):
         return self
 
 
+# 과목별 장면 요청(모듈 끝에서 가져옴: 그 모듈이 위의 Strict·Proc 등을 쓰므로 순환 import가 정의 뒤에 일어나게 함)
+from .process import ProcessStateRequest, ScheduleMetricsRequest  # noqa: E402
+
 # 모델이 고르는 장면 요청 전체. kind 값으로 요청 타입을 구분함
 AnimationRequest = Annotated[
     Union[ArrayRequest, LinkedListRequest, StackRequest, QueueRequest, HashTableRequest, BSTRequest, HeapRequest,
-          GraphTraversalRequest, SortRequest, TreeTraversalRequest, CpuScheduleRequest, CallStackRequest],
+          GraphTraversalRequest, SortRequest, TreeTraversalRequest, CpuScheduleRequest, CallStackRequest,
+          ProcessStateRequest, ScheduleMetricsRequest],
     Field(discriminator='kind')]
 
 
