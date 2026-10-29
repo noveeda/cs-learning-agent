@@ -316,14 +316,23 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-/** @brief 로드맵에서 스택을 골라 학습 화면으로 들어감(개념별 대화 저장 후 이동) */
+/**
+ * @brief 이미 시작한 스택 학습 화면으로 들어감
+ * - 스택은 과목 안 7단계라 로드맵에서 숨겨지므로, 로드맵에서 학습을 시작했을 때와 같은 저장값(개념별 대화 ID)을 넣고 학습 주소를 엶
+ * - 숨긴 개념도 저장된 대화가 있으면 학습·막힘 흐름이 그대로 동작해야 함
+ */
 async function openStackLesson(page: Page) {
   await page.goto("/#/roadmap");
-  await page
-    .getByRole("button", { name: "스택 · 미학습", exact: true })
-    .click();
-  await page.getByRole("button", { name: "학습 시작", exact: true }).click();
+  await page.evaluate(() => {
+    localStorage.setItem("cs-dsa-roadmap-v1", JSON.stringify({
+      version: 1, selectedId: "stack", statuses: { stack: "in-progress" },
+      conversationIds: { stack: "abcdefabcdefabcdefabcdefabcdef12" },
+    }));
+    location.hash = "/learn?concept=stack";
+  });
+  await page.reload();
   await expect(page).toHaveURL(/#\/learn\?concept=stack$/);
+  await expect(page.getByLabel("질문", { exact: true })).toBeVisible();
 }
 
 const panel = (page: Page) =>
@@ -636,11 +645,11 @@ test("로드맵 상세: MVP 개념은 [막혔어요], 나머지는 지원 안내
   await page.goto("/#/roadmap");
   const detail = page.getByRole("region", { name: "선택한 개념" });
   await page
-    .getByRole("button", { name: "너비 우선 탐색 · 미학습", exact: true })
+    .getByRole("button", { name: "그래프 · 미학습", exact: true })
     .click();
   await expect(detail.getByRole("button", { name: "막혔어요" })).toHaveCount(0);
   await expect(detail).toContainText("아직 [막혔어요]를 지원하지 않는 개념");
-  await page.getByRole("button", { name: "큐 · 미학습", exact: true }).click();
+  await page.getByRole("button", { name: "연결 리스트 · 미학습", exact: true }).click();
   await detail.getByRole("button", { name: "막혔어요", exact: true }).click();
   await expect(panel(page)).toContainText("추상 자료형에 대한 설명");
   expect(
@@ -650,8 +659,8 @@ test("로드맵 상세: MVP 개념은 [막혔어요], 나머지는 지원 안내
     ),
   ).toEqual({
     version: 1,
-    sessions: { "roadmap:queue": sessionId },
-    active: "roadmap:queue",
+    sessions: { "roadmap:linked-list": sessionId },
+    active: "roadmap:linked-list",
   });
 });
 
