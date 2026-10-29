@@ -2,6 +2,7 @@
 # @brief 하네스 검증 규칙(문장 형식·한자·근거 구절 대조)과 범위·생성·판정·수정 역할의 요청 형태·출력 검증·재시도를 검증
 # - 모델은 가짜 클라이언트로 대신하고, 실제 26B 호출 예시는 PR 본문에 따로 남김
 import json
+import re
 import threading
 import unittest
 from types import SimpleNamespace
@@ -179,6 +180,69 @@ class HarnessGatewayTests(unittest.TestCase):
         self.assertEqual((repair_kw['temperature'], repair_kw['max_tokens']), (0.3, 256))
         for role in ('scope', 'ground', 'judge', 'repair'):
             self.assertEqual((ROLE_SETTINGS[role].timeout, ROLE_SETTINGS[role].attempts), (30, 2), role)
+
+
+## @brief JSON 값의 키 구조(순서 포함)만 남김: 객체는 [(키, 하위 구조)], 배열은 첫 원소의 구조
+def key_shape(value):
+    if isinstance(value, dict):
+        return [(k, key_shape(v)) for k, v in value.items()]
+    if isinstance(value, list):
+        return [key_shape(value[0])] if value else []
+    return None
+
+
+## @brief schema의 키 구조(properties 순서 포함)를 key_shape와 같은 모양으로 바꿈
+def schema_shape(schema):
+    if schema.get('type') == 'object':
+        return [(k, schema_shape(v)) for k, v in schema['properties'].items()]
+    if schema.get('type') == 'array':
+        return [schema_shape(schema['items'])]
+    return None
+
+
+# 프롬프트 끝의 출력 형식 예시: 공백 없는 JSON 한 줄
+FORMAT_LINE = re.compile(r'출력 형식\(공백 없는 JSON 한 줄\): (\{.*\})$')
+
+
+class SchemaColonTests(unittest.TestCase):
+    def requests(self):
+        client = FakeClient(ground=lambda user: json.dumps(sentences(('스택은 나중에 넣은 값을 먼저 꺼낸다.', ['p1']))),
+                            judge=lambda user: json.dumps({'verdict': 'supported', 'evidence': 'A stack is LIFO.'}),
+                            repair=lambda user: json.dumps({'text': '스택은 LIFO 구조다.', 'sources': ['p1']}))
+        gw = gateway(client)
+        gw.ground('스택이 뭐예요?', {'p1': 'A stack is LIFO.'}, ['스택'], [])
+        gw.judge('스택은 LIFO다.', 'A stack is LIFO.')
+        gw.repair('스택은 FIFO다.', 'A stack is LIFO.', 'p1')
+        return dict(client.requests)
+
+    # 검증 목적(26B ':' 응답 회귀 방지): 문자열 필드를 가진 하네스 역할(생성·판정·수정)의 지시 끝에
+    #   schema와 키·순서가 같은 공백 없는 JSON 예시가 있는지 확인
+    # - 원인: 26B는 스스로 쓰면 ```json 블록에 들여쓴 JSON과 자기 키 이름을 쓰는데, 운영 vLLM은 공백 없는 JSON만 허용함
+    #   (xgrammar disable_any_whitespace). 키 뒤 '": "'(공백 포함)를 못 쓰게 된 모델이 '":"'로 값을 열고 ': '를 값으로 씀
+    # - 공백 없는 정확한 형식을 보여 주면 모델이 쓰려는 글과 허용 문법이 맞아 ':' 응답이 사라짐(실측: 수정 12/18 → 0/18)
+    def test_harness_prompts_show_compact_format_matching_schema(self):
+        for role, kw in self.requests().items():
+            with self.subTest(role=role):
+                match = FORMAT_LINE.search(kw['messages'][0]['content'])
+                self.assertIsNotNone(match)
+                example = json.loads(match.group(1))
+                self.assertEqual(json.dumps(example, ensure_ascii=False, separators=(',', ':')), match.group(1))
+                self.assertEqual(key_shape(example), schema_shape(kw['response_format']['json_schema']['schema']))
+
+    # 검증 목적: 하네스 역할 schema 모양(키·순서·제약)을 고정해, 바꾸면 위 형식 예시와 실측을 다시 맞추게 함
+    def test_harness_schema_shapes_fixed(self):
+        requests = self.requests()
+        schema = lambda role: requests[role]['response_format']['json_schema']['schema']  # noqa: E731
+        sentence = {'type': 'object', 'additionalProperties': False, 'required': ['text', 'sources'],
+                    'properties': {'text': {'type': 'string', 'maxLength': 200},
+                                   'sources': {'type': 'array', 'minItems': 1, 'items': {'type': 'string', 'enum': ['p1']}}}}
+        self.assertEqual(schema('repair'), sentence)
+        self.assertEqual(schema('ground'), {'type': 'object', 'additionalProperties': False, 'required': ['sentences'],
+                                            'properties': {'sentences': {'type': 'array', 'minItems': 1, 'maxItems': 8,
+                                                                         'items': sentence}}})
+        self.assertEqual(schema('judge'), {'type': 'object', 'additionalProperties': False, 'required': ['verdict', 'evidence'],
+                                           'properties': {'verdict': {'type': 'string', 'enum': ['supported', 'unsupported', 'partial']},
+                                                          'evidence': {'type': 'string', 'maxLength': 400}}})
 
 
 if __name__ == '__main__':
