@@ -1,0 +1,92 @@
+{
+  "memory-address": [
+    {"kind": "dsa_memory", "base": 100, "width": 4, "values": [7, 3, 9, 5], "ops": [{"op": "access", "index": 0}, {"op": "access", "index": 2}, {"op": "access", "index": 3}]},
+    {"kind": "dsa_memory", "base": 200, "width": 8, "values": [12, 30, 45, 7], "ops": [{"op": "access", "index": 1}, {"op": "access", "index": 3}]},
+    {"kind": "dsa_reference", "ops": [{"op": "let", "name": "a", "value": 7}, {"op": "new", "name": "p", "value": 7}, {"op": "read", "name": "a"}, {"op": "read", "name": "p"}]}
+  ],
+  "reference": [
+    {"kind": "dsa_reference", "ops": [{"op": "let", "name": "a", "value": 5}, {"op": "copy", "name": "b", "source": "a"}, {"op": "set", "name": "b", "value": 8}, {"op": "new", "name": "p", "value": 7}, {"op": "copy", "name": "q", "source": "p"}, {"op": "set", "name": "q", "value": 9}]},
+    {"kind": "dsa_reference", "ops": [{"op": "new", "name": "p", "value": 4}, {"op": "new", "name": "q", "value": 6}, {"op": "copy", "name": "r", "source": "p"}, {"op": "read", "name": "r"}, {"op": "copy", "name": "r", "source": "q"}, {"op": "read", "name": "r"}, {"op": "new", "name": "p", "value": 1}]},
+    {"kind": "linked_list", "values": [3, 8], "ops": [{"op": "insert_after", "target": 3, "value": 5}, {"op": "delete", "value": 8}]}
+  ],
+  "recursion": [
+    {"kind": "call_stack", "function": "factorial", "n": 4},
+    {"kind": "dsa_recursion", "function": "sum", "n": 4},
+    {"kind": "dsa_recursion", "function": "no_base", "n": 3}
+  ],
+  "logarithm": [
+    {"kind": "log_steps", "mode": "halve", "n": 16},
+    {"kind": "log_steps", "mode": "double", "n": 16},
+    {"kind": "growth", "functions": ["log n", "n", "n²"], "sizes": [2, 4, 8, 16]}
+  ],
+  "big-o": [
+    {"kind": "growth", "functions": ["1", "log n", "n", "n log n", "n²"], "sizes": [2, 4, 8, 16]},
+    {"kind": "growth", "functions": ["3n", "n²"], "sizes": [1, 2, 3, 4, 8]},
+    {"kind": "loop_count", "pattern": "triangle", "n": 5}
+  ],
+  "complexity-analysis": [
+    {"kind": "loop_count", "pattern": "nested", "n": 4},
+    {"kind": "dsa_search", "algorithm": "linear", "values": [4, 9, 2, 7, 5, 1], "target": 6},
+    {"kind": "dsa_search", "algorithm": "linear", "values": [4, 9, 2, 7, 5, 1], "target": 4}
+  ],
+  "recurrence-relation": [
+    {"kind": "recursion_tree", "branch": 2, "work": "n", "n": 8},
+    {"kind": "recursion_tree", "branch": 1, "work": "1", "n": 8},
+    {"kind": "recursion_tree", "branch": 2, "work": "1", "n": 8}
+  ],
+  "array": [
+    {"kind": "dsa_memory", "base": 500, "width": 4, "values": [10, 20, 30, 40, 50], "ops": [{"op": "access", "index": 3}, {"op": "access", "index": 0}]},
+    {"kind": "array", "values": [10, 20, 30, 40, 50], "ops": [{"op": "insert", "index": 0, "value": 5}, {"op": "insert", "index": 6, "value": 60}]},
+    {"kind": "array", "values": [10, 20, 30, 40, 50], "ops": [{"op": "delete", "index": 1}, {"op": "delete", "index": 2}]}
+  ],
+  "dynamic-array": [
+    {"kind": "dynamic_array", "capacity": 1, "growth": "double", "values": [3, 8, 1, 6, 4]},
+    {"kind": "dynamic_array", "capacity": 4, "growth": "double", "values": [3, 8, 1, 6, 4]},
+    {"kind": "dynamic_array", "capacity": 1, "growth": "plus1", "values": [3, 8, 1, 6, 4]}
+  ],
+  "linked-list": [
+    {"kind": "linked_list", "values": [], "ops": [{"op": "insert_head", "value": 3}, {"op": "insert_head", "value": 7}, {"op": "insert_head", "value": 1}]},
+    {"kind": "linked_list", "values": [2, 4, 6, 8], "ops": [{"op": "insert_after", "target": 4, "value": 5}, {"op": "delete", "value": 6}]},
+    {"kind": "list_walk", "values": [2, 4, 6, 8, 10], "index": 3}
+  ],
+  "hash-function": [
+    {"kind": "hash_table", "buckets": 7, "ops": [{"op": "insert", "key": 10}, {"op": "insert", "key": 15}, {"op": "insert", "key": 23}, {"op": "search", "key": 15}]},
+    {"kind": "hash_table", "buckets": 5, "ops": [{"op": "insert", "key": 3}, {"op": "insert", "key": 8}, {"op": "insert", "key": 13}, {"op": "search", "key": 13}]},
+    {"kind": "hash_table", "buckets": 3, "ops": [{"op": "insert", "key": 1}, {"op": "insert", "key": 5}, {"op": "insert", "key": 9}, {"op": "insert", "key": 14}]}
+  ],
+  "tree": [
+    {"kind": "dsa_tree", "edges": [["A", "B"], ["A", "C"], ["A", "D"], ["B", "E"], ["B", "F"], ["D", "G"]], "ops": [{"op": "root"}, {"op": "children", "node": "A"}, {"op": "parent", "node": "F"}, {"op": "leaves"}]},
+    {"kind": "dsa_tree", "edges": [["A", "B"], ["A", "C"], ["A", "D"], ["B", "E"], ["B", "F"], ["D", "G"]], "ops": [{"op": "depth", "level": 0}, {"op": "depth", "level": 1}, {"op": "depth", "level": 2}, {"op": "height"}]},
+    {"kind": "dsa_tree", "edges": [["A", "B"], ["A", "C"], ["A", "D"], ["B", "E"], ["B", "F"], ["D", "G"]], "ops": [{"op": "subtree", "node": "B"}, {"op": "subtree", "node": "D"}, {"op": "subtree", "node": "E"}]}
+  ],
+  "binary-tree": [
+    {"kind": "bst", "ops": [{"op": "insert", "value": 5}, {"op": "insert", "value": 3}, {"op": "insert", "value": 8}, {"op": "insert", "value": 1}, {"op": "insert", "value": 4}]},
+    {"kind": "dsa_tree", "edges": [["A", "B"], ["A", "C"], ["B", "D"], ["B", "E"], ["C", "F"], ["C", "G"]], "ops": [{"op": "depth", "level": 0}, {"op": "depth", "level": 1}, {"op": "depth", "level": 2}, {"op": "height"}]},
+    {"kind": "heap", "order": "min", "ops": [{"op": "insert", "value": 1}, {"op": "insert", "value": 2}, {"op": "insert", "value": 3}, {"op": "insert", "value": 4}, {"op": "insert", "value": 5}, {"op": "insert", "value": 6}]}
+  ],
+  "binary-search": [
+    {"kind": "dsa_search", "algorithm": "binary", "values": [2, 5, 8, 12, 16, 23, 38, 56, 72, 91], "target": 23},
+    {"kind": "dsa_search", "algorithm": "binary", "values": [2, 5, 8, 12, 16, 23, 38, 56, 72, 91], "target": 60},
+    {"kind": "dsa_search", "algorithm": "linear", "values": [2, 5, 8, 12, 16, 23, 38, 56, 72, 91], "target": 23}
+  ],
+  "heap": [
+    {"kind": "heap", "order": "max", "ops": [{"op": "insert", "value": 4}, {"op": "insert", "value": 9}, {"op": "insert", "value": 2}, {"op": "insert", "value": 7}]},
+    {"kind": "heap", "order": "max", "ops": [{"op": "insert", "value": 9}, {"op": "insert", "value": 7}, {"op": "insert", "value": 4}, {"op": "insert", "value": 2}, {"op": "extract"}]},
+    {"kind": "heap", "order": "min", "ops": [{"op": "insert", "value": 5}, {"op": "insert", "value": 4}, {"op": "insert", "value": 3}, {"op": "insert", "value": 2}]}
+  ],
+  "sorting-basics": [
+    {"kind": "sort", "algorithm": "insertion", "values": [5, 2, 4, 1, 3]},
+    {"kind": "selection_sort", "values": [5, 3, 4, 1, 2]},
+    {"kind": "selection_sort", "values": [2, 3, 2, 1]}
+  ],
+  "graph": [
+    {"kind": "graph_traversal", "nodes": ["A", "B", "C", "D", "E", "F"], "edges": [["A", "B"], ["A", "C"], ["B", "D"], ["C", "E"], ["D", "F"], ["E", "F"]], "directed": false, "start": "A", "order": "bfs"},
+    {"kind": "graph_parts", "nodes": ["A", "B", "C", "D", "E", "F"], "edges": [["A", "B"], ["B", "C"], ["D", "E"]], "directed": false, "ops": [{"op": "components"}, {"op": "path", "source": "A", "target": "C"}, {"op": "path", "source": "A", "target": "E"}]},
+    {"kind": "graph_parts", "nodes": ["A", "B", "C", "D", "E"], "edges": [["A", "B"], ["A", "C"], ["B", "D"], ["B", "E"]], "directed": false, "ops": [{"op": "cycle"}, {"op": "add", "edge": ["D", "E"]}, {"op": "cycle"}]}
+  ],
+  "dynamic-programming": [
+    {"kind": "fib_dp", "mode": "naive", "n": 4},
+    {"kind": "fib_dp", "mode": "memo", "n": 5},
+    {"kind": "fib_dp", "mode": "table", "n": 7}
+  ]
+}
