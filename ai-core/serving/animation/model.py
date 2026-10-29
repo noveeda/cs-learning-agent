@@ -312,10 +312,16 @@ class CallStackRequest(Strict):
         return self
 
 
+# 과목별 장면 모듈의 요청 모델: 모듈이 이 파일의 공통 스키마(Strict·Box 등)를 쓰므로 공통 정의 뒤에서 가져옴
+from .dsa_analysis import REQUESTS as DSA_ANALYSIS_REQUESTS  # noqa: E402
+from .dsa_linear import REQUESTS as DSA_LINEAR_REQUESTS  # noqa: E402
+from .dsa_structure import REQUESTS as DSA_STRUCTURE_REQUESTS  # noqa: E402
+
 # 모델이 고르는 장면 요청 전체. kind 값으로 요청 타입을 구분함
 AnimationRequest = Annotated[
-    Union[ArrayRequest, LinkedListRequest, StackRequest, QueueRequest, HashTableRequest, BSTRequest, HeapRequest,
-          GraphTraversalRequest, SortRequest, TreeTraversalRequest, CpuScheduleRequest, CallStackRequest],
+    Union[(ArrayRequest, LinkedListRequest, StackRequest, QueueRequest, HashTableRequest, BSTRequest, HeapRequest,
+           GraphTraversalRequest, SortRequest, TreeTraversalRequest, CpuScheduleRequest, CallStackRequest,
+           *DSA_LINEAR_REQUESTS, *DSA_ANALYSIS_REQUESTS, *DSA_STRUCTURE_REQUESTS)],
     Field(discriminator='kind')]
 
 

@@ -8,6 +8,10 @@ from uuid import uuid4
 
 from serving.tools.diagram import inline_schema
 
+# model을 가장 먼저 불러옴: model이 끝에서 과목별 장면 모듈(dsa_*)의 요청 모델을 가져오고, 그 모듈들이 call_stack 등을 쓰므로
+# call_stack이 model보다 먼저 불리면 순환 import로 call_stack이 덜 만들어진 채 쓰임
+from . import model  # noqa: F401  isort: skip
+from . import dsa_analysis, dsa_linear, dsa_structure
 from .call_stack import simulate_call_stack
 from .graph import simulate_graph_traversal, simulate_tree_traversal
 from .hierarchical import simulate_bst, simulate_hash_table, simulate_heap
@@ -31,6 +35,8 @@ SIMULATORS = {
     'cpu_schedule': simulate_cpu_schedule,
     'call_stack': simulate_call_stack,
 }
+# 과목별 장면 모듈의 시뮬레이터(요청 모델은 model.py의 AnimationRequest에 합쳐 둠)
+SIMULATORS.update(dsa_linear.SIMULATORS | dsa_analysis.SIMULATORS | dsa_structure.SIMULATORS)
 
 
 # 막힘 보충(S4)에서 개념마다 보여 줄 수 있는 장면 종류(개념 지도 ID → kind)
@@ -92,6 +98,7 @@ SCENE_FORMATS = {
                      'processes': [{'name': 'P1', 'arrival': 0, 'burst': 3, 'priority': 2},
                                    {'name': 'P2', 'arrival': 1, 'burst': 2, 'priority': 1}]},
 }
+SCENE_FORMATS.update(dsa_linear.FORMATS | dsa_analysis.FORMATS | dsa_structure.FORMATS)
 
 
 ## @brief 허용 종류(kinds)의 형식 예시를 반환. 제한표에 걸린 필드는 허용 값의 첫 번째로 바꿈
