@@ -9,6 +9,7 @@
 #   GPU 둘(DDP): CUDA_VISIBLE_DEVICES=0,1 ~/.venvs/cs-train/bin/torchrun --nproc-per-node 2 -m finetune.train ... --skip-merge
 #     그 뒤 병합만: ~/.venvs/cs-train/bin/python -m finetune.train ... --skip-train
 #   시험: --limit 200 --valid-limit 50 --epochs 1, 속도 재기: --max-steps 20
+#   중간에 죽은 학습 잇기: 같은 인자에 --resume <out>/checkpoints/checkpoint-N (train_seconds·tokens_per_second는 이어 돈 구간 시간으로 계산해 전체 값이 아님)
 import argparse
 import json
 import os
@@ -163,7 +164,7 @@ def train(args, cfg: dict, tokenizer) -> dict:
                                     data_collator=PadCollator(tokenizer.pad_token_id), callbacks=[StopOnRisingEval()])
     torch.cuda.reset_peak_memory_stats()
     started = time.time()
-    trainer.train()
+    trainer.train(resume_from_checkpoint=args.resume)
     elapsed = time.time() - started
     final = trainer.evaluate()
     trainer.save_model(str(args.out / 'adapter'))
@@ -215,6 +216,7 @@ def main(argv=None):
     parser.add_argument('--eval-steps', type=int, default=100, help='검증·저장 간격(최적화 단계)')
     parser.add_argument('--skip-train', action='store_true', help='이미 있는 adapter로 병합만 함')
     parser.add_argument('--skip-merge', action='store_true')
+    parser.add_argument('--resume', help='학습이 중간에 죽었을 때 이어 돌릴 checkpoints/checkpoint-N 경로(어댑터·옵티마이저·스케줄러·난수 상태를 되살림)')
     args = parser.parse_args(argv)
     cfg = config(args.base)
     args.out.mkdir(parents=True, exist_ok=True)
