@@ -36,7 +36,7 @@ const excerptLimit = 2000;
 
 const evidenceLabels = {
   known: "맞힘",
-  gap: "빈틈",
+  gap: "모름",
   self_known: "이미 안다고 표시",
   // 엔진은 진단 문항이 없는 개념을 판단하지 않고 no_items로만 기록
   no_items: "진단 문항 없음",
@@ -358,7 +358,7 @@ export function StuckPanel({
         >
           <label className="stuck-question" htmlFor="stuck-excerpt">
             막힌 문장이나 문단을 붙여넣어 주세요. 어떤 개념에서 막혔는지 찾아
-            빈틈을 진단해요.
+            모르는 선수 개념을 진단해요.
           </label>
           <textarea
             id="stuck-excerpt"
@@ -425,7 +425,7 @@ export function StuckPanel({
                 onClick={() =>
                   send(
                     { type: "opt_out" },
-                    "진단을 마치고 보충 순서를 정하고 있어요.",
+                    "진단을 마치고 설명할 순서를 정하고 있어요.",
                   )
                 }
               >
@@ -463,14 +463,14 @@ export function StuckPanel({
               </p>
             )}
             {view.root ? (
-              // 1단계 개념: 진단할 선수 개념이 없어 문항 없이 왔으므로, 진단 실패처럼 보이는 "빈틈 없음" 대신 이유를 알려 줌
+              // 1단계 개념: 진단할 선수 개념이 없어 문항 없이 왔으므로, 진단 실패처럼 보이는 "모르는 선수 개념 없음" 대신 이유를 알려 줌
               <p className="stuck-help">
                 {view.target.title}은(는) 먼저 알아야 할 선수 개념이 없는 기초
                 개념이에요. 다른 방식으로 다시 설명할게요.
               </p>
             ) : (
               <>
-                <h3>보충할 빈틈</h3>
+                <h3>먼저 알아야 할 개념</h3>
                 {view.gaps.length ? (
                   <ol className="stuck-gaps">
                     {view.gaps.map((gap) => (
@@ -479,11 +479,11 @@ export function StuckPanel({
                   </ol>
                 ) : (
                   <p className="stuck-help">
-                    선수 개념에서 빈틈을 찾지 못했어요.
+                    모르는 선수 개념을 찾지 못했어요.
                   </p>
                 )}
                 <p className="stuck-help">
-                  빈틈은 선수 개념부터 차례로 보충하고, 마지막에{" "}
+                  모르는 개념부터 차례로 설명하고, 마지막에{" "}
                   {view.target.title}
                   을(를) 다시 확인해요.
                 </p>
@@ -529,7 +529,7 @@ export function StuckPanel({
                 disabled={busy}
                 onClick={() => send({ type: "continue" }, continueLabel)}
               >
-                보충 시작
+                설명 시작
               </button>
             </div>
           </section>
@@ -539,7 +539,7 @@ export function StuckPanel({
         return (
           <section>
             <span className="badge">
-              보충 설명 · {view.concept.title}
+              개념 설명 · {view.concept.title}
               {view.is_target ? " (막힌 개념)" : ""}
               {view.attempt > 1 ? ` · ${view.attempt}번째 설명` : ""}
             </span>
@@ -769,7 +769,7 @@ export function StuckPanel({
                 aria-label="처음부터 다시 시작할까요?"
               >
                 <p>
-                  지금까지의 진단·보충 진행을 버리고 처음부터 다시 시작할까요?
+                  지금까지의 진단·설명 진행을 버리고 처음부터 다시 시작할까요?
                   버린 진행은 이어서 할 수 없어요.
                 </p>
                 <div className="stuck-actions">
