@@ -28,6 +28,21 @@ class GradingTests(unittest.TestCase):
         self.assertFalse(grade(short, '5,8,3'))
         self.assertFalse(grade(short, '3,8'))
 
+    # 검증 목적: 값과 순서가 맞으면 쉼표 대신 공백·화살표를 쓰거나, 한 글자 값이면 구분자를 빼도 정답(막힘 확인에서 '321123'을 틀림으로 본 문제)
+    def test_short_exact_separator_variants(self):
+        single = item(format='short_exact', question='질문', answer='3,2,1,1,2,3')
+        self.assertTrue(grade(single, '321123'))
+        self.assertTrue(grade(single, '3 2 1 1 2 3'))
+        self.assertTrue(grade(single, '3->2->1->1->2->3'))
+        self.assertTrue(grade(single, '3 → 2 → 1 → 1 → 2 → 3'))
+        self.assertFalse(grade(single, '123321'))
+        self.assertFalse(grade(single, '32112'))
+        # 여러 자리 값은 구분자가 없으면 어디서 끊는지 알 수 없어 오답으로 둠
+        multi = item(format='short_exact', question='질문', answer='14,20,26,8')
+        self.assertTrue(grade(multi, '14 20 26 8'))
+        self.assertFalse(grade(multi, '1420268'))
+        self.assertFalse(grade(multi, '14,20,2,68'))
+
     # 검증 목적: 서술 문항을 결정적 채점기로 잘못 판정하지 않도록 거부
     def test_rejects_explanation(self):
         explanation = item(id='array-e9', purpose='explanation', format='explanation', question='설명하세요',
