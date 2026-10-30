@@ -87,6 +87,14 @@ function App() {
   });
   useEffect(() => {
     const onRoute = () => {
+      // 각주 링크(#user-content-…)는 화면 경로가 아니라 답 안의 위치라, 그 위치로 스크롤하고 마지막 경로로 복원
+      // - markdown.tsx가 클릭을 가로채지 못한 경우(키보드·다른 브라우저 동작)에도 학습 화면이 바뀌지 않게 하는 안전장치
+      if (window.location.hash.startsWith("#user-content-")) {
+        const id = decodeURIComponent(window.location.hash.slice(1));
+        window.history.replaceState(null, "", routeRef.current.hash);
+        document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
       // 응답 중 해시가 바뀌어 세션이 해제되는 것을 막기 위해 마지막 경로로 복원
       if (busyRef.current) {
         window.history.replaceState(null, "", routeRef.current.hash);
