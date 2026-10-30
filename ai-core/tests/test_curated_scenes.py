@@ -158,16 +158,17 @@ class ChatTests(unittest.TestCase):
         def choose_animation(self, *args):
             raise AssertionError('미리 짠 장면이 있으면 모델 장면 선택을 부르지 않음')
 
-    # 검증 목적: 채팅 애니메이션이 미리 짠 장면 중 하나를 쓰고, 같은 질문은 늘 같은 장면, 질문이 다르면 여러 장면이 나오는지 확인
-    def test_chat_picks_curated_scene_by_question(self):
+    # 검증 목적: 채팅 애니메이션이 미리 짠 장면 중 하나를 쓰고, 같은 질문을 다시 해도 바로 앞과 다른 장면이 나오는지 확인
+    def test_chat_rotates_curated_scenes(self):
         concept_map = load_concept_map()
         with patch('serving.harness_chat.CURATED_SCENES', load_fixture(self, {'dsa': {'stack': SCENES}})):
             def pick(question):
                 event = _animation_event(question, ['stack'], self.NoChoice(), concept_map)
                 return json.dumps(event['request'])
 
-            self.assertEqual(pick('스택이 뭐예요?'), pick('스택이 뭐예요?'))
-            self.assertEqual(len({pick(f'스택 질문 {n}') for n in range(20)}), 3)
+            picks = [pick('스택이 뭐예요?') for _ in range(6)]
+            self.assertTrue(all(a != b for a, b in zip(picks, picks[1:])))
+            self.assertEqual(len(set(picks)), 3)
             self.assertLessEqual({json.loads(pick(f'q{n}'))['ops'][0]['value'] for n in range(20)}, {1, 5, 7})
 
 
