@@ -24,6 +24,28 @@ const components: Components = {
       </div>
     );
   },
+  /**
+   * @brief 링크를 앱 화면을 벗어나지 않게 염
+   * - 각주 번호·되돌아가기(#…): 앱 화면 전환이 주소 해시(#/learn)를 쓰므로, 해시를 바꾸면 학습 화면이 다른 화면으로 바뀜
+   *   그래서 해시는 그대로 두고 같은 id의 각주 요소로 스크롤만 함
+   * - 바깥 링크(출처의 라이선스 등): 새 탭으로 열어 학습 중인 답을 잃지 않게 함
+   */
+  a({ node, href, ...props }) {
+    if (href?.startsWith("#")) {
+      const id = decodeURIComponent(href.slice(1));
+      return (
+        <a
+          href={href}
+          {...props}
+          onClick={(event) => {
+            event.preventDefault();
+            document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }}
+        />
+      );
+    }
+    return <a href={href} target="_blank" rel="noopener noreferrer" {...props} />;
+  },
 };
 
 /**
