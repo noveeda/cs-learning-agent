@@ -133,8 +133,8 @@ class HarnessStuckGateway(HarnessGateway):
 
         target = self._title(state.target)
         filled = [f.concept for f in state.fixes if f.concept != state.target]
-        parts = [f"{with_particle(target, '을')} 이해하려고 {with_particle(titles(filled), '을')} 보충했어요." if filled
-                 else f"{with_particle(target, '을')} 보충했어요."]
+        parts = [f"{with_particle(target, '을')} 이해하려고 {with_particle(titles(filled), '을')} 다시 설명했어요." if filled
+                 else f"{with_particle(target, '을')} 다시 설명했어요."]
         groups = {outcome: [f.concept for f in state.fixes if f.outcome == outcome]
                   for outcome in ('passed', 'unresolved', 'unchecked')}
         if groups['passed']:

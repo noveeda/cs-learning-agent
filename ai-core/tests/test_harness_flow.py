@@ -97,6 +97,8 @@ class FlowTests(unittest.TestCase):
         self.assertEqual([e['type'] for e in events], ['status', 'text_start', 'text_delta', 'answer', 'done'])
         self.assertEqual(events[2]['text'], BLOCKED_TEXT)
         self.assertEqual(events[3]['text'], BLOCKED_TEXT)
+        # 학생 화면에 공개한 개념 수(43개)와 같은 숫자로 안내하는지 확인
+        self.assertIn('43개 개념', BLOCKED_TEXT)
         self.assertEqual([c[0] for c in gw.calls], ['scope'])
 
     # 검증 목적: 개념에 근거 문단이 없으면(빈칸 개념·색인 없음) 모델 생성 없이 근거 없음 문구로 끝남

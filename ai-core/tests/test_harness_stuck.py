@@ -260,13 +260,13 @@ class SummaryTests(unittest.TestCase):
         client = FakeClient()
         text = gateway(client).summarize(self.state('priority-queue', [
             ('heap', 'passed'), ('queue', 'unresolved'), ('priority-queue', 'passed')]), CONCEPT_MAP)
-        self.assertEqual(text, '우선순위 큐를 이해하려고 힙, 큐를 보충했어요. 힙, 우선순위 큐는 이해 확인을 통과했어요. '
+        self.assertEqual(text, '우선순위 큐를 이해하려고 힙, 큐를 다시 설명했어요. 힙, 우선순위 큐는 이해 확인을 통과했어요. '
                                '큐는 아직 이해 확인을 통과하지 못했어요. 다시 살펴보세요.')
         text = gateway(client).summarize(self.state('stack', [('adt', 'passed'), ('stack', 'unchecked')]), CONCEPT_MAP)
-        self.assertEqual(text, '스택을 이해하려고 추상 자료형과 구현을 보충했어요. 추상 자료형과 구현은 이해 확인을 통과했어요. '
+        self.assertEqual(text, '스택을 이해하려고 추상 자료형과 구현을 다시 설명했어요. 추상 자료형과 구현은 이해 확인을 통과했어요. '
                                '스택은 확인 문항이 없어 이해 확인을 하지 않았어요.')
         text = gateway(client).summarize(self.state('heap', [('heap', 'passed')]), CONCEPT_MAP)
-        self.assertEqual(text, '힙을 보충했어요. 힙은 이해 확인을 통과했어요.')
+        self.assertEqual(text, '힙을 다시 설명했어요. 힙은 이해 확인을 통과했어요.')
         self.assertEqual(client.inputs, {})
 
     # 검증 목적: 영문·숫자·괄호로 끝나는 제목도 읽는 소리의 받침으로 조사를 고르는지 확인
