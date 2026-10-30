@@ -52,7 +52,6 @@ export function ClassSummary() {
   const smallSample = data !== null && data.totalSessions < 10;
   return <main className="class-summary" aria-label="반 전체 막힘 통계">
     <div className="class-toolbar">
-      <p>교수자용 · 이 서버에 저장된 전체 막힘 기록</p>
       <button className="button secondary" disabled={loading} onClick={() => setRequest(value => value + 1)}>새로고침</button>
     </div>
     {loading && <p role="status">{data ? "집계를 새로 불러오는 중입니다." : "막힘 기록을 집계하고 있습니다."}</p>}

@@ -2,7 +2,7 @@
  * @brief 반 막힘 요약의 빈도 막대·집계 표·모바일 배치; CS Studio의 기존 색·글꼴 유지
  */
 .class-summary { padding: 24px 28px 32px; font-size: 14px; line-height: 1.6; color: var(--color-text); }
-.class-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.class-toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 16px; }
 .class-toolbar p, .class-sample p { margin: 0; }
 .class-toolbar, .class-caption, .class-concept small, .class-footnote { color: #586159; }
 .class-sample { padding: 20px 0 16px; }
