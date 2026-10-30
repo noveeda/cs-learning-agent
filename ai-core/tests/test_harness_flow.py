@@ -10,7 +10,7 @@ from pathlib import Path
 from rag.search import Figure, Passage
 from rag.sources import BOOKS
 from serving.concept_map import load_concept_map
-from serving.harness import (BLOCKED_TEXT, FAILED_TEXT, NEEDS_CHECK_MARK, NO_SOURCE_TEXT, Grounding, Sentence, answer,
+from serving.harness import (BLOCKED_TEXT, FAILED_TEXT, NO_SOURCE_TEXT, Grounding, Sentence, answer,
                              render_answer)
 from serving.harness_log import HarnessLog
 from serving.stuck import LLMUnavailable
@@ -124,7 +124,7 @@ class FlowTests(unittest.TestCase):
         self.assertIn('[^p1]: > A queue removes the oldest element first.', final)
         self.assertIn('**출처**', final)
         self.assertIn(BOOKS['hailperin'].title, final)
-        self.assertNotIn(NEEDS_CHECK_MARK, final)
+        self.assertNotIn('확인 필요', final)
 
     # 검증 목적: 틀린 문장은 같은 문단으로 1회 수정하고, 수정 문장이 판정을 통과하면 표시 없이 나감
     def test_wrong_sentence_repaired_then_verified(self):
@@ -136,14 +136,14 @@ class FlowTests(unittest.TestCase):
         self.assertEqual([e['text'] for e in events if e['type'] == 'text_delta'], ['큐는 가장 오래된 원소부터 꺼낸다.[^p1]'])
         self.assertIn(('repair', '큐는 최신 원소부터 꺼낸다.', 'p1'), gw.calls)
 
-    # 검증 목적: 수정 뒤에도 통과하지 못한 문장은 "확인 필요" 표시를 달고 나감(절반 이하라 답은 유지)
-    def test_unrepairable_sentence_marked_needs_check(self):
+    # 검증 목적: 수정 뒤에도 통과하지 못한 문장은 화면에 내보내지 않음(절반 이하라 나머지 답은 유지)
+    def test_unrepairable_sentence_hidden(self):
         gw = FakeGateway(sentences=[('맞는 문장.', ('p1',)), ('틀린 문장.', ('p1',)), ('또 맞는 문장.', ('p2',))],
                          judges={'맞는 문장.': [OK], '틀린 문장.': [('partial', 'removes the oldest element')],
                                  '고친 문장.': [('unsupported', 'removes the oldest element')], '또 맞는 문장.': [OK2]},
                          repairs={'틀린 문장.': ('고친 문장.', ('p1',))})
         deltas = [e['text'] for e in self.run_flow(gw) if e['type'] == 'text_delta']
-        self.assertEqual(deltas, ['맞는 문장.[^p1]', f' 고친 문장.[^p1]{NEEDS_CHECK_MARK}', ' 또 맞는 문장.[^p2]'])
+        self.assertEqual(deltas, ['맞는 문장.[^p1]', ' 또 맞는 문장.[^p2]'])
 
     # 검증 목적: 판정이 "맞음"이어도 근거 구절이 문단에 없으면 틀림으로 보고 수정 단계로 보냄
     def test_judge_evidence_not_in_passage_counts_as_wrong(self):
@@ -153,12 +153,12 @@ class FlowTests(unittest.TestCase):
         deltas = [e['text'] for e in self.run_flow(gw) if e['type'] == 'text_delta']
         self.assertEqual(deltas, ['고친 문장.[^p1]'])
 
-    # 검증 목적: 판정 호출이 모델 오류로 실패하면 수정 없이 그 문장을 "확인 필요"로 둠
-    def test_judge_failure_marks_needs_check(self):
+    # 검증 목적: 판정 호출이 모델 오류로 실패하면 수정 없이 그 문장을 화면에서 뺌
+    def test_judge_failure_hides_sentence(self):
         gw = FakeGateway(sentences=[('하나.', ('p1',)), ('둘.', ('p1',)), ('셋.', ('p2',))],
                          judges={'하나.': [OK], '둘.': [LLMUnavailable('down')], '셋.': [OK2]})
         deltas = [e['text'] for e in self.run_flow(gw) if e['type'] == 'text_delta']
-        self.assertEqual(deltas[1], f' 둘.[^p1]{NEEDS_CHECK_MARK}')
+        self.assertEqual(deltas, ['하나.[^p1]', ' 셋.[^p2]'])
         self.assertNotIn('repair', [c[0] for c in gw.calls])
 
     # 검증 목적: 확인 필요 문장이 절반을 넘으면 이미 보낸 문장을 text_start로 지우고 생성 실패 문구와 원문으로 바꿈
@@ -197,10 +197,7 @@ class FlowTests(unittest.TestCase):
                 events = self.run_flow(gw)
                 verified = first == OK or (not isinstance(first, Exception) and repair_ok and second == OK)
                 shown = [e['text'] for e in events if e['type'] in ('text_delta', 'answer')]
-                self.assertTrue(any('대상.[^p1]' in text for text in shown))
-                for text in shown:
-                    marked = text.count(f'대상.[^p1]{NEEDS_CHECK_MARK}')
-                    self.assertEqual(marked, 0 if verified else text.count('대상.[^p1]'))
+                self.assertEqual(any('대상.[^p1]' in text for text in shown), verified)
                 grounding = next(e for e in events if e.get('kind') == 'grounding')['grounding']
                 self.assertEqual(any('대상' in v for v in grounding['verified']), verified)
 
@@ -275,11 +272,12 @@ class FlowTests(unittest.TestCase):
 
 
 class RenderTests(unittest.TestCase):
-    # 검증 목적: 각주 정의는 문장이 가리킨 문단만 원문 인용과 교재명·저자·절·라이선스·발췌로 쓰고, 확인 필요 표시를 유지
+    # 검증 목적: 각주 정의는 문장이 가리킨 문단만 원문 인용과 교재명·저자·절·라이선스·발췌로 쓰고, 확인 필요 문장은 본문·각주에서 뺌
     def test_render_answer_footnotes_and_sources(self):
         text = render_answer([Sentence('하나.', ('p2',), 'verified'), Sentence('둘.', ('p2',), 'needs_check')],
                              {'p1': PASSAGES[0], 'p2': PASSAGES[1]}, BOOKS)
-        self.assertTrue(text.startswith(f'하나.[^p2] 둘.[^p2]{NEEDS_CHECK_MARK}\n\n'))
+        self.assertTrue(text.startswith('하나.[^p2]\n\n'))
+        self.assertNotIn('둘.', text)
         self.assertNotIn('[^p1]', text)
         self.assertIn('[^p2]: > Round robin gives each thread a time slice in turn.', text)
         book = BOOKS['hailperin']
