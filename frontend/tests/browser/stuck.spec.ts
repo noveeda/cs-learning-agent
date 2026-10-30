@@ -370,7 +370,7 @@ test("E1 [막혔어요]: 진단→결과→보충→확인→서술→요약→�
   await expect(evidence.nth(0)).toContainText(
     "B. 연산 규칙으로 정의하고 구현은 숨긴다 ← 내 답",
   );
-  await expect(evidence.nth(1)).toContainText("빈틈");
+  await expect(evidence.nth(1)).toContainText("모름");
   await expect(evidence.nth(1)).toContainText("내 답: 인덱스");
   // 넓은 화면에서는 대화가 패널에 가리지 않고 옆에 남아 있음
   const chat = await page
@@ -378,7 +378,7 @@ test("E1 [막혔어요]: 진단→결과→보충→확인→서술→요약→�
     .boundingBox();
   const side = await sheet.boundingBox();
   expect(chat!.x + chat!.width).toBeLessThanOrEqual(side!.x);
-  await sheet.getByRole("button", { name: "보충 시작" }).click();
+  await sheet.getByRole("button", { name: "설명 시작" }).click();
   await expect(
     sheet.getByRole("heading", { name: "연결 리스트", level: 2 }),
   ).toBeVisible();
@@ -533,10 +533,12 @@ test("1단계 개념(선수 개념 없음)은 빈틈 없음 대신 기초 개념
     "재귀은(는) 먼저 알아야 할 선수 개념이 없는 기초 개념이에요. 다른 방식으로 다시 설명할게요.",
   );
   // 진단할 선수 개념이 없으므로 빈틈 목록·빈틈 없음 문구·선수 개념 보충 순서 안내는 보이지 않음
-  await expect(sheet).not.toContainText("빈틈을 찾지 못했어요");
-  await expect(sheet).not.toContainText("보충할 빈틈");
-  await expect(sheet).not.toContainText("빈틈은 선수 개념부터");
-  await expect(sheet.getByRole("button", { name: "보충 시작" })).toBeVisible();
+  await expect(sheet).not.toContainText("모르는 선수 개념을 찾지 못했어요");
+  await expect(
+    sheet.getByRole("heading", { name: "먼저 알아야 할 개념" }),
+  ).toHaveCount(0);
+  await expect(sheet).not.toContainText("모르는 개념부터 차례로");
+  await expect(sheet.getByRole("button", { name: "설명 시작" })).toBeVisible();
 });
 
 // 이해 확인 결과 화면 경우별 기대 문구; 엔진(stuck.py _explain)이 만드는 view 모양과 옛 저장 세션 모양
@@ -695,7 +697,7 @@ test("503은 화면을 유지하고 같은 버전으로 다시 시도하며, 요
   );
   await openStackLesson(page);
   await page.getByRole("button", { name: "막혔어요", exact: true }).click();
-  await panel(page).getByRole("button", { name: "보충 시작" }).click();
+  await panel(page).getByRole("button", { name: "설명 시작" }).click();
   const alert = panel(page).getByRole("alert");
   await expect(alert).toContainText("잠시 후 다시 시도해 주세요.");
   await expect(panel(page).locator(".stuck-gaps")).toHaveText("연결 리스트");
@@ -708,7 +710,7 @@ test("503은 화면을 유지하고 같은 버전으로 다시 시도하며, 요
   await alert.getByRole("button", { name: "다시 시도" }).click();
   await expect(panel(page).getByRole("status")).toContainText("수십 초");
   await expect(
-    panel(page).getByRole("button", { name: "보충 시작" }),
+    panel(page).getByRole("button", { name: "설명 시작" }),
   ).toBeDisabled();
   release();
   await expect(panel(page).locator(".stuck-text")).toContainText("노드는 값과");

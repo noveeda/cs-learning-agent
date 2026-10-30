@@ -140,7 +140,7 @@ export function LearningShell({
             <h1>{page === "class" ? "반 막힘 요약" : page === "roadmap" ? "로드맵" : "개념 학습"}</h1>
             <p>
               {page === "class"
-                ? "선수 개념의 빈틈과 보충 결과를 함께 살펴봐요"
+                ? "모르는 선수 개념과 설명 결과를 함께 살펴봐요"
                 : page === "roadmap"
                 ? "연결된 개념을 따라 학습해요"
                 : "개념을 그림으로 연결해요"}

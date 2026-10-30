@@ -26,7 +26,7 @@ MAX_SENTENCE_CHARS = 200
 HAN = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
 
 # 화면 고정 문구(계획 Global Constraints): 모델이 만들지 않으므로 검증 없이 그대로 보여 줌
-BLOCKED_TEXT = '이 도구는 자료구조·운영체제·데이터베이스·네트워크·컴퓨터구조의 61개 개념만 다룹니다. 로드맵에서 개념을 골라 학습해 주세요.'
+BLOCKED_TEXT = '이 도구는 자료구조·운영체제·데이터베이스·네트워크·컴퓨터구조의 43개 개념만 다룹니다. 로드맵에서 개념을 골라 학습해 주세요.'
 NO_SOURCE_TEXT = '교재에서 이 질문의 근거를 찾지 못했습니다.'
 FAILED_TEXT = '설명을 만들지 못했습니다. 아래 교재 원문을 확인해 주세요.'
 NEEDS_CHECK_MARK = ' ⚠️ **확인 필요**'

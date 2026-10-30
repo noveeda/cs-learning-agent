@@ -122,7 +122,7 @@ test("캐시와 지역성의 자료구조 빈틈과 실제 선수 경로를 표�
   await node(page, "big-o").hover();
   await expect(node(page, "memory-address")).toHaveCSS("opacity", "1");
   await expect(path(page, "memory-address", "memory-hierarchy")).toHaveCSS("opacity", "1");
-  await panel(page).getByRole("button", { name: "보충 시작" }).click();
+  await panel(page).getByRole("button", { name: "설명 시작" }).click();
   await page.reload();
   await expect(panel(page)).toContainText("원소 크기만큼");
   await expect(node(page, "memory-address")).toContainText("모름");
