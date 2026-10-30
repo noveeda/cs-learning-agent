@@ -1,14 +1,14 @@
 # 12B 하네스 역할 미세조정 학습·변환·측정 기록
 
-- 1~4절은 학습 데이터 생성(계획 Task 3), 5~8절은 측정 도구 확장과 미세조정 전 기준값(계획 Task 4), 9절은 학습과 GGUF 변환(계획 Task 5)이다.
+- 1~4절은 학습 데이터 생성(계획 Task 3), 5~8절은 측정 도구 확장과 미세조정 전 기준값(계획 Task 4), 9절은 학습과 GGUF 변환(계획 Task 5), 10절은 배포용 2차 학습(계획 Task 7)이다.
 
 - 설계: `docs/superpowers/specs/2026-10-29-finetune-12b-design.md`(4·5장, 7-1)
-- 계획: `docs/superpowers/plans/2026-10-29-finetune-12b.md` Task 3(데이터), Task 4(측정), Task 5(학습·변환)
+- 계획: `docs/superpowers/plans/2026-10-29-finetune-12b.md` Task 3(데이터), Task 4(측정), Task 5(학습·변환), Task 7(배포용 2차 학습)
 - 생성기: `ai-core/finetune/build_data.py`
 - 학습·병합: `ai-core/finetune/train.py`, 설정: `ai-core/finetune/train_config.py`
 - 결과 위치(Git 밖)
-  - 학습 데이터: `/home/infoserver/cs-learning-agent/ai-core/outputs/finetune/`
-  - GGUF: `~/.cache/cs-llm/finetune/<run>/model-Q4_0.gguf`(본 학습 `qat-r16-main`)
+  - 학습 데이터: `/home/infoserver/cs-learning-agent/ai-core/outputs/finetune/`(2차는 `finetune-all/`)
+  - GGUF: `~/.cache/cs-llm/finetune/<run>/model-Q4_0.gguf`(본 학습 `qat-r16-main`, 2차 `qat-r16-all`)
 
 ## 1. 무엇을 만드는가
 
@@ -432,3 +432,141 @@ CUDA_VISIBLE_DEVICES=1 ~/llama.cpp/build/bin/llama-server -m $R/model-Q4_0.gguf 
   - 이 서버: GGUF, sha256, `result.json`, `losses.json`만 남겼다. 병합 safetensors와 BF16 GGUF는 지웠다.
   - 5090: 병합 safetensors(23GB)를 지웠다. 중간 체크포인트는 학습 스크립트가 끝에 지운다. 어댑터(251MB)와 기록만 `~/cs-ft/runs/qat-r16-main/`에 남았다.
   - 5090의 바탕 모델(HF 캐시, 약 24GB)은 다시 학습할 때 필요해 남겼다.
+
+## 10. 배포용 2차 학습 (계획 Task 7)
+
+- 목적: 제외 개념 8개 몫(`holdout_*.jsonl`)까지 더해 61개념 전부로 다시 학습한 배포용 모델(설계 7-1)
+- 1차(`qat-r16-main`)와 학습 설정·명령은 같다(9-1·9-3). 바뀐 것은 데이터 폴더와 실행 이름(`qat-r16-all`)이고, 한 번 끊겨 `--resume`으로 이어 돌렸다(10-2).
+
+### 10-1. 데이터 합치기
+
+- 1차 `train.jsonl`·`valid.jsonl`은 그대로 두고, `holdout_{judge,ground,repair,scope}.jsonl`(2,575행)만 역할별 5%로 나눠 뒤에 붙였다.
+  - 나누기는 `build_data.split_rows(seed=0)`와 같다(역할마다 `'{seed}:{role}'`로 섞어 앞 5%를 valid로).
+  - 1차 valid를 다시 섞지 않은 이유: 1차와 2차의 검증 손실을 같은 행 위에서 비교할 수 있게 하기 위함
+- 합치기 전에 측정 세트와 겹치는 행을 다시 찾아 뺐다.
+  - 질문: `scope.jsonl`·`retrieval.jsonl`·제외 개념 추가 세트 `holdout-scope.jsonl`의 질문과 정규화(`split.normalize_question`) 후 같은 행
+  - 판정 문장: judge 행의 문장이 측정 판정 세트 `judge.jsonl`의 문장과 정규화 후 같은 행
+
+| 뺀 행 | 수 |
+|---|---:|
+| holdout ground — 측정 질문과 같음 | 7 |
+| holdout judge — 측정 질문과 같음 | 3 |
+| holdout scope — 측정 질문과 같음 | 3 |
+| 1차 train judge — 측정 판정 문장과 같음 | 4 |
+| 합계 | 17 |
+
+- holdout의 13행은 1차 데이터를 만들 때 제외 개념 추가 세트가 아직 없어 걸러지지 않았던 질문이다. 1차 파일(제외 개념이 나오지 않음)에는 이 세트 질문이 0행이었다.
+- **1차 train에서 찾은 4행**은 측정 판정 세트와 문장·근거 문단·정답 종류가 모두 같은 교란 문장이다(개념 바꾸기 1, 반대로 말하기 2, 숫자 바꾸기 1).
+  - 생성기는 교란 전의 맞는 문장만 측정 세트와 비교하고(`verified_pool`의 `judged`), 교란한 뒤의 문장은 비교하지 않았다. 측정 세트의 교란 문장과 글자까지 같은 교란 문장이 그대로 남았다.
+  - 1차 모델(Task 6)의 판정 측정 616문항 중 이 4문항은 학습에서 본 문장이다.
+- 결과(`ai-core/outputs/finetune-all/`, Git 밖)
+
+| 역할 | train | valid | 그중 holdout 몫(train / valid) |
+|---|---:|---:|---:|
+| judge | 6,440 | 339 | 744 / 39 |
+| ground | 4,127 | 217 | 1,193 / 63 |
+| repair | 714 | 38 | 129 / 7 |
+| scope | 3,216 | 169 | 368 / 19 |
+| 합계 | 14,497 | 763 | 2,434 / 128 |
+
+- 합치기 명령(`ai-core`에서, 결과와 뺀 행 수는 `finetune-all/meta.json`)
+
+```python
+import json
+from collections import Counter
+from pathlib import Path
+from finetune.build_data import ROLES, _read_jsonl, _write_jsonl, split_rows
+from finetune.split import measured_questions, normalize_question
+
+O = Path('outputs'); H = O / 'harness-sets'; src = O / 'finetune'; out = O / 'finetune-all'
+measured = measured_questions([H / 'scope.jsonl', H / 'retrieval.jsonl', H / 'holdout-scope.jsonl'])
+judged = {normalize_question(r['sentence']) for r in _read_jsonl(H / 'judge.jsonl')}
+
+def reason(r):  # 측정 질문과 같은 질문 → 측정 판정 문장과 같은 judge 문장 순으로 봄
+    if normalize_question(r['meta'].get('question') or '') in measured:
+        return 'measured_question'
+    if r['role'] == 'judge' and normalize_question(json.loads(r['messages'][1]['content'])['sentence']) in judged:
+        return 'measured_judge_sentence'
+
+dropped = Counter()
+def keep(name, rows):
+    for r in rows:
+        if why := reason(r):
+            dropped[f"{name}:{r['role']}:{why}"] += 1
+    return [r for r in rows if not reason(r)]
+
+train, valid = keep('train', _read_jsonl(src / 'train.jsonl')), keep('valid', _read_jsonl(src / 'valid.jsonl'))
+h_train, h_valid = split_rows(keep('holdout', [r for role in ROLES for r in _read_jsonl(src / f'holdout_{role}.jsonl')]), seed=0)
+out.mkdir(exist_ok=True)
+_write_jsonl(out / 'train.jsonl', train + h_train)
+_write_jsonl(out / 'valid.jsonl', valid + h_valid)
+```
+
+### 10-2. 학습과 변환
+
+- 명령: 9-3과 같고 `--data $HOME/cs-ft/data-all --out $HOME/cs-ft/runs/qat-r16-all`만 다르다.
+  - 5090에서는 `~/cs-ft/run-all.sh`(tmux `ft-all`)로 학습 → 병합을 이어 돌리고, nvidia-smi를 30초마다 기록했다.
+- 실행 이름 `qat-r16-all`. GPU 2장 × 2행 × 누적 4 = 유효 배치 16, 2에폭 1,814단계(1차 1,510단계)
+
+#### 한 번 끊겼다가 이어 돌림
+
+- 05:53 KST에 시작한 학습이 426단계(07:17)에서 죽었다.
+  - GPU 1번 프로세스(rank 1)에서 `CUBLAS_STATUS_INTERNAL_ERROR` 다음에 `the launch timed out and was terminated`(cudaErrorLaunchTimeout)가 났다.
+  - 5090의 GPU 1번에는 모니터가 연결돼 있고(`Display Attached: Yes`) 로그인 화면(gdm)이 떠 있다. 화면용 GPU의 실행 시간 감시에 걸린 것으로 보이지만, 커널 로그를 볼 권한이 없어 확정하지 못했다.
+  - 1차 학습(5시간)은 같은 GPU에서 끊기지 않았다.
+- `finetune.train`에 `--resume <out>/checkpoints/checkpoint-N`을 더했다. 학습기의 이어 돌리기(`resume_from_checkpoint`)를 그대로 쓴다.
+  - 어댑터·옵티마이저·학습률 스케줄러·난수 상태를 되살리고, 이미 지난 배치는 건너뛴다.
+  - 07:20에 checkpoint-400에서 이어 돌렸다(5090 `~/cs-ft/run-all-resume.sh`).
+- 이어 돌린 학습이 끊기기 전과 같은 길을 가는지 확인했다.
+  - 410단계의 누적 토큰 수가 끊기기 전과 같다(9,457,019). 같은 배치를 같은 순서로 받았다는 뜻이다.
+  - 학습 손실: 410단계 0.1185 → 0.1179, 420단계 0.07172 → 0.07258(GPU 연산 순서 차이 수준)
+  - 410단계 기울기 크기는 1.19 → 29.57로 한 번 튀었다. 기본 기울기 자르기(1.0)로 갱신 크기는 막히고, 420단계부터는 0.63·0.39·0.95로 돌아왔다.
+- 검증 손실 중단 감시(`StopOnRisingEval`)는 이어 돌린 뒤 빈 기록에서 다시 셌다. 400단계까지 검증 손실이 계속 내려가 있었으므로 판단은 달라지지 않는다.
+
+#### 결과
+
+- **걸린 시간**
+  - 학습: 처음 시도의 checkpoint-400까지 4,713초(400단계 검증 128초 포함) + 이어 돌린 구간 16,680초 = 21,393초(5시간 57분)
+  - 끊긴 뒤 버린 26단계와 다시 띄운 시간까지 넣으면, 학습 시작부터 병합 끝까지 6시간 8분(05:53:43 ~ 12:01:49 KST)
+  - 본 토큰 40,968,507개, 1,915토큰/초(검증 시간 포함). 1차는 1,939토큰/초
+  - `result.json`의 `train_seconds`(16,680)와 `tokens_per_second`(2,456)는 이어 돈 구간 시간만으로 계산한 값이라 위 수치와 다르다.
+- **GPU 최대 메모리**(32GB 중)
+  - torch 기준(이어 돌린 구간): rank 0 allocated 20,506MiB, reserved 28,756MiB, rank 1 reserved 25,224MiB
+  - nvidia-smi 30초 간격 기록 최대: 처음 시도 GPU0 27,945MiB·GPU1 27,249MiB, 이어 돌린 구간 GPU0 30,441MiB·GPU1 26,155MiB
+- **중단 규칙**: 검증 손실이 700·1000·1200단계에서 한 번씩 올랐지만 2회 연속 오른 적이 없어 2에폭을 다 돌았다. 가장 낮은 값은 마지막 1,814단계(0.0621)라 그 어댑터를 썼다.
+- **손실 곡선**(9-5와 같은 방식: 학습 손실은 100단계 구간 평균, 1에폭 ≈ 907단계)
+
+| 단계 | 학습 손실 | 검증 손실 |
+|---:|---:|---:|
+| 100 | 0.2652 | 0.1141 |
+| 200 | 0.1109 | 0.1043 |
+| 300 | 0.1077 | 0.1004 |
+| 400 | 0.0943 | 0.0887 |
+| 500 | 0.0937 | 0.0869 |
+| 600 | 0.0857 | 0.0824 |
+| 700 | 0.0871 | 0.0828 |
+| 800 | 0.0823 | 0.0802 |
+| 900 | 0.0869 | 0.0707 |
+| 1000 | 0.0757 | 0.0778 |
+| 1100 | 0.0656 | 0.0692 |
+| 1200 | 0.0613 | 0.0694 |
+| 1300 | 0.0591 | 0.0667 |
+| 1400 | 0.0531 | 0.0655 |
+| 1500 | 0.0545 | 0.0647 |
+| 1600 | 0.0536 | 0.0627 |
+| 1700 | 0.0527 | 0.0624 |
+| 1800 | 0.0498 | 0.0622 |
+| 1814 | — | 0.0621 |
+
+- 401~426단계는 처음 시도에서 한 번, 이어 돌릴 때 한 번 학습했다. 남은 어댑터에는 이어 돌린 쪽만 들어 있다.
+- 검증 손실은 1차(마지막 0.0575)보다 높지만 검증 행이 다르다(1차 635행 + holdout 몫 128행). 두 모델의 비교는 Task 7 Step 3 측정으로 한다.
+- **변환**(9-3 명령 그대로): 병합 27초 → 받기 234초 → BF16 GGUF 변환 112초(667텐서) → Q4_0 양자화 33초
+  - `~/.cache/cs-llm/finetune/qat-r16-all/model-Q4_0.gguf`: 6,975,878,848바이트(4.68 BPW)
+  - sha256 `fde010da88210653b48e79d3adcf65fc9ffabb08f0c750be919418b2f1308346`(같은 폴더 `model-Q4_0.gguf.sha256`)
+- **형식 점검**(시험 서버 GPU 1번 20331, 끝나고 내림): valid 중 holdout 몫(제외 개념) judge 10행
+  - 운영 경로 `HarnessGateway.judge` 10/10 성공, schema 없이 보내도 10/10이 공백 없는 한 줄 JSON이고 `finish_reason=stop`
+  - 판정 일치 10/10. 같은 질문의 다른 행이 train에 있을 수 있어 성능 판단에는 쓰지 않는다.
+- **남긴 것과 지운 것**
+  - 이 서버: GGUF, sha256, `result.json`, `losses.json`만 남겼다. 병합 safetensors와 BF16 GGUF는 지웠다.
+  - 5090: 병합 safetensors를 지웠다. 어댑터(251MB)와 기록은 `~/cs-ft/runs/qat-r16-all/`, 학습 데이터 사본은 `~/cs-ft/data-all/`, 로그는 `~/cs-ft/logs/all*.log`(처음 시도는 `*-try1.log`)에 남았다.
+- 측정(Task 7 Step 3)은 아직 하지 않았다.
