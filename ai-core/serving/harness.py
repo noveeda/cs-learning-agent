@@ -29,7 +29,6 @@ HAN = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
 BLOCKED_TEXT = '이 도구는 자료구조·운영체제·데이터베이스·네트워크·컴퓨터구조의 43개 개념만 다룹니다. 로드맵에서 개념을 골라 학습해 주세요.'
 NO_SOURCE_TEXT = '교재에서 이 질문의 근거를 찾지 못했습니다.'
 FAILED_TEXT = '설명을 만들지 못했습니다. 아래 교재 원문을 확인해 주세요.'
-NEEDS_CHECK_MARK = ' ⚠️ **확인 필요**'
 
 # 문장으로 인정하는 최소 내용: 한글·영문·숫자 5자 이상이고 한글·영문 글자가 하나 이상
 # - 실측에서 작은 모델이 ':' 같은 빈 문장을 냄. 이런 문장은 판정할 사실이 없어 화면만 흐리므로 형식 오류로 보고 재시도하게 함
@@ -43,7 +42,7 @@ GRADING_PUNCTUATION = set(string.punctuation + '·…“”‘’「」『』')
 
 ## @brief 검사를 마친 답의 한 문장
 # - sources: 근거 키 목록(문단 'p1'~'p3', 애니메이션 단계 'a1'~'aN')
-# - status: 판정을 통과하면 verified, 수정 뒤에도 통과하지 못하면 needs_check(화면에 "확인 필요" 표시)
+# - status: 판정을 통과하면 verified, 수정 뒤에도 통과하지 못하면 needs_check(화면에 내보내지 않음)
 @dataclass(frozen=True)
 class Sentence:
     text: str
@@ -121,10 +120,9 @@ class Grounding:
     verified: tuple[str, ...]
 
 
-## @brief 문장 하나를 화면 마크다운으로: 본문 + 근거 각주([^p1]) + 확인 필요 표시
+## @brief 문장 하나를 화면 마크다운으로: 본문 + 근거 각주([^p1])
 def _sentence_markdown(sentence: Sentence) -> str:
-    notes = ''.join(f'[^{key}]' for key in sentence.sources)
-    return sentence.text + notes + (NEEDS_CHECK_MARK if sentence.status == 'needs_check' else '')
+    return sentence.text + ''.join(f'[^{key}]' for key in sentence.sources)
 
 
 ## @brief 문단 하나의 출처 문구: 교재명, 저자, 절 번호와 제목, 라이선스(링크), 발췌 (spec 5-6)
@@ -149,7 +147,9 @@ def _sources_block(passages, books) -> str:
 ## @brief 검사를 마친 문장 목록을 최종 답 마크다운으로 조립
 # - 본문은 text_delta로 보낸 문장을 이은 것과 같음. 그래서 스트림 화면과 저장된 답이 같은 글이 됨
 # - 각주 정의는 문장이 실제로 가리킨 문단만 원문 인용 + 출처로 씀. 원문은 번역하지 않음(번역도 검증이 필요한 생성이므로)
+# - 판정을 통과한 문장만 본문·각주에 씀. 교재와 맞는지 확인하지 못한 문장은 표시를 달아 보여 주는 대신 아예 뺌
 def render_answer(sentences: list[Sentence], passages: dict[str, Passage], books) -> str:
+    sentences = [s for s in sentences if s.status == 'verified']
     body = ' '.join(_sentence_markdown(s) for s in sentences)
     keys = [k for k in dict.fromkeys(key for s in sentences for key in s.sources) if k in passages]
     notes = '\n\n'.join(f'[^{k}]: {_quote(passages[k].text, "    ")}\n\n    {_citation(passages[k], books)}'
@@ -280,7 +280,8 @@ def answer(question: str, previous: Grounding | None, gw, retriever, concept_map
             yield from _finish(fallback_answer(passages, BOOKS), fallback)
             return
 
-        sentences, needs_check = [], 0
+        # - shown: 화면에 내보낸 문장 수. 확인 필요 문장은 세기만 하고 내보내지 않음(통과한 문장만 보여 줌)
+        sentences, needs_check, shown = [], 0, 0
         for index, (text, keys) in enumerate(drafts, 1):
             yield {'type': 'status', 'stage': 'check', 'index': index, 'total': len(drafts)}
             entry = {'draft': text, 'repairs': 0}
@@ -291,10 +292,13 @@ def answer(question: str, previous: Grounding | None, gw, retriever, concept_map
                 record['outcome'] = 'fallback'
                 yield from _finish(fallback_answer(passages, BOOKS), fallback)
                 return
-            if not sentences:
-                yield {'type': 'text_start'}
-            yield {'type': 'text_delta', 'text': (' ' if sentences else '') + _sentence_markdown(sentence)}
             sentences.append(sentence)
+            if sentence.status != 'verified':
+                continue
+            if not shown:
+                yield {'type': 'text_start'}
+            yield {'type': 'text_delta', 'text': (' ' if shown else '') + _sentence_markdown(sentence)}
+            shown += 1
 
         record['outcome'] = 'answered'
         verified = tuple(s.text for s in sentences if s.status == 'verified')

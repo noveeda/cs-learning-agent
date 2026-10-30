@@ -116,3 +116,11 @@ test('각주 숨김 라벨과 되돌아가기 링크 이름을 한국어로 출�
   assert.match(html, /aria-label="본문으로 돌아가기"/);
   assert.doesNotMatch(html, /Footnotes|Back to reference/);
 });
+
+// 출처의 라이선스 링크를 누르면 앱 화면이 그 사이트로 바뀌어 학습 중인 답을 잃는 회귀 방지
+test('바깥 링크는 새 탭으로 열고 각주 링크는 주소 해시를 쓰지 않는다', () => {
+  const html = render('본문.[^p1]\n\n[^p1]: 원문. [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)');
+  assert.match(html, /<a href="https:\/\/creativecommons\.org\/licenses\/by\/4\.0\/" target="_blank" rel="noopener noreferrer">/);
+  assert.match(html, /data-footnote-ref/);
+  assert.doesNotMatch(html, /<a[^>]*data-footnote-ref[^>]*target="_blank"/);
+});

@@ -7,7 +7,8 @@ import json
 import logging
 import os
 import shutil
-import zlib
+import itertools
+from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
 
@@ -62,10 +63,14 @@ def _published_figure(event: dict, output_dir: Path) -> dict | None:
     return {**public, 'url': f"/api/artifacts/{event['artifact_id']}"}
 
 
+# 개념별 미리 짠 장면 차례(0, 1, 2, …); 채팅에서 같은 개념을 물을 때마다 다음 장면을 씀
+_SCENE_TURNS: defaultdict[str, itertools.count] = defaultdict(itertools.count)
+
+
 ## @brief 장면이 있는 첫 개념으로 장면 선택(모델 1회) + 시뮬레이션을 해 애니메이션 artifact를 만듦; 못 만들면 None
-# - 미리 짠 장면(CURATED_SCENES)이 있는 개념은 모델 장면 선택을 건너뛰고 그중 하나를 질문 문자열로 결정적으로 고름
-#   모델 호출 1회를 아끼고(작은 모델의 장면 선택 실패·형식 오류 제거), 같은 질문은 늘 같은 장면이라 다시 봐도 화면이 바뀌지 않음
-#   crc32를 쓰는 이유: 내장 hash()는 서버를 다시 띄울 때마다 값이 바뀜
+# - 미리 짠 장면(CURATED_SCENES)이 있는 개념은 모델 장면 선택을 건너뛰고 그 개념의 장면을 물을 때마다 차례로 돌려 씀
+#   모델 호출 1회를 아끼고(작은 모델의 장면 선택 실패·형식 오류 제거), 같은 질문을 다시 해도 다른 예시가 나오게 함
+#   차례는 서버 메모리에만 두어(_SCENE_TURNS) 서버를 다시 띄우면 처음부터 다시 돎
 # - 장면 단계는 시뮬레이터가 계산하므로 근거 검사 없이 보여 줘도 됨(spec 7절: 애니메이션은 코드가 내용을 정함)
 # - 학생 질문을 막힌 위치(excerpt)로 넘겨 장면 값이 질문의 예시를 따르게 함
 # - 장면 선택·실행 실패는 부가 자료 실패라 답을 멈추지 않음(막힘 흐름 _animation과 같은 처리)
@@ -76,7 +81,7 @@ def _animation_event(question: str, concepts: list[str], gw, concept_map) -> dic
     try:
         curated = CURATED_SCENES.get(concept_id)
         if curated:
-            request = curated[zlib.crc32(question.encode('utf-8')) % len(curated)]
+            request = curated[next(_SCENE_TURNS[concept_id]) % len(curated)]
         else:
             concept = next(c for c in concept_map.concepts if c.id == concept_id)
             entry = Entry(kind='excerpt', excerpt=question[:2000], return_to='chat')

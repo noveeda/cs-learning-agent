@@ -16,7 +16,7 @@ from openai import APIConnectionError
 from rag.search import Passage
 from serving.api import BUSY, app
 from serving.concept_map import load_concept_map
-from serving.harness import FAILED_TEXT, NEEDS_CHECK_MARK, NO_SOURCE_TEXT
+from serving.harness import FAILED_TEXT, NO_SOURCE_TEXT
 from serving.harness_stuck import SCENE_FAILED_TEXT, HarnessStuckGateway, with_particle
 from serving.item_bank import Item
 from serving.stuck import Entry, Fix, LLMUnavailable, StuckState
@@ -114,7 +114,7 @@ class ExplainTests(unittest.TestCase):
         self.assertIn('근거 p1의 설명이다.[^p1]', text)
         self.assertIn('[^p1]: > Passage 1 says', text)
         self.assertIn('**출처**', text)
-        self.assertNotIn(NEEDS_CHECK_MARK, text)
+        self.assertNotIn('확인 필요', text)
 
     # 검증 목적: 2차 보충에 장면이 있으면 문단 검색 없이 코드가 계산한 장면 단계(steps)를 근거 a1..aN으로 쓰는지 확인
     # - 각주 정의는 애니메이션 단계 문장 그대로이고, 교재 출처 블록은 붙지 않음(근거가 교재가 아니므로)
@@ -209,8 +209,8 @@ class ExplainTests(unittest.TestCase):
             gateway(lock=lock).explain(STACK, 1, ENTRY)
 
     # 검증 목적(잠금 판단): 생성 뒤 판정 사이에 다른 요청이 끼어들어 판정 호출이 잠금을 못 잡으면,
-    # 그 문장은 예외로 멈추지 않고 "확인 필요"로 표시됨(Task 6 규칙: 판정 실패는 needs_check)
-    def test_interleaved_request_marks_sentence_needs_check(self):
+    # 그 문장은 예외로 멈추지 않고 화면에서 빠짐(Task 6 규칙: 판정 실패는 needs_check, needs_check는 보여 주지 않음)
+    def test_interleaved_request_hides_sentence(self):
         class InterleavedLock:
             """시작 확인·생성 다음의 첫 판정에서만 다른 요청이 잠금을 잡고 있는 상황을 흉내 냄."""
 
@@ -225,9 +225,8 @@ class ExplainTests(unittest.TestCase):
                 pass
 
         text = gateway(lock=InterleavedLock()).explain(STACK, 1, ENTRY)
-        self.assertIn(f'근거 p1의 설명이다.[^p1]{NEEDS_CHECK_MARK}', text)
+        self.assertNotIn('근거 p1의 설명이다.', text)
         self.assertIn('근거 p2의 설명이다.[^p2]', text)
-        self.assertNotIn(f'[^p2]{NEEDS_CHECK_MARK}', text)
 
 
 RUBRIC_ITEM = Item.model_validate({'id': 'stack-e1', 'concept': 'stack', 'purpose': 'explanation', 'objective': 0,

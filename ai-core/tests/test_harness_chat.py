@@ -20,7 +20,7 @@ from serving.animation.model import AnimationRequestModel
 from serving.api import BUSY, app
 from serving.concept_map import load_concept_map
 from serving.context import history_messages
-from serving.harness import BLOCKED_TEXT, NEEDS_CHECK_MARK, Grounding
+from serving.harness import BLOCKED_TEXT, Grounding
 from serving.harness_chat import DEFAULT_MIN_SCORE, build_retriever, chat_events, harness_enabled, previous_grounding
 from serving.harness_log import HarnessLog
 from serving.stuck_llm import PROMPTS
@@ -166,7 +166,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(held, [True] * 4)
         final = next(e for e in events if e['type'] == 'answer')['text']
         self.assertTrue(final.startswith('스택은 마지막에 넣은 값을 먼저 꺼낸다.[^p1] 꺼낼 때는 맨 위 값만 뺀다.[^p1]'))
-        self.assertNotIn(NEEDS_CHECK_MARK, final)
+        self.assertNotIn('확인 필요', final)
         self.assertFalse(BUSY.locked())
 
     # 검증 목적(잠금 b): 하네스 채팅이 진행 중일 때 들어온 두 번째 채팅은 기다리지 않고 기존 '다른 질문을 처리 중' 오류로 거절됨
